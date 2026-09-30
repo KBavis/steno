@@ -406,8 +406,8 @@ erDiagram
 | `job_commit` | Every commit (and its PR) that a job covered. It enables "introduced in PR #123" in citations, and it's the bridge Contextualized will use for PR → Project. |
 
 **What `fact_change` records.** The graph itself always reflects **every** change in full; this table is only the **history log**:
-- **Architecture layer:** every change to flows, steps, interfaces, effects, entities, and tables, including LLM text that was regenerated.
-- **Code layer:** one row per function **added, removed, or modified** (signature or body, detected by a body hash). Individual `INVOKES` edges aren't logged one by one; a function whose calls changed shows up as "modified," and any effect of that change on flows and steps is logged in full on the architecture side.
+- **Architecture nodes:** every change to flows, steps, interfaces, effects, entities, and tables, including LLM text that was regenerated.
+- **Code nodes:** one row per function **added, removed, or modified** (signature or body, detected by a body hash). Individual `INVOKES` edges aren't logged one by one; a function whose calls changed shows up as "modified," and any effect of that change on flows and steps is logged in full on the architecture side.
 
 ### Audit, cost, and caching
 

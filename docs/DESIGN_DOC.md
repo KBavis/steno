@@ -73,7 +73,7 @@ Agents are strong within one repository and blind beyond it. In a large enterpri
 | **Space** | A generic name for however an org divides itself. It can nest, or an org can have only one. Owns data stores and topics. |
 | **Application** | An independently deployable unit. One repository can contain several (e.g. our microservices repo). |
 
-The graph has two layers: the **architecture layer** (Organization → Space → Application → Flow → Step) and the **code layer** (Repository → Module → File → Function), joined by `BUILT_FROM`, `ENTRY`, and `RUNS`. See [Knowledge Graph §2](./knowledge-graph.md#2-two-layers-architecture-and-code). Project is **not** a layer. Projects attach to facts as attribution, later, through Contextualized.
+These three layers are the levels of zoom. Beneath them, the graph holds two kinds of nodes in **one database**: **architecture nodes** (Application → Flow → Step, interfaces, tables, …: what the software does) and **code nodes** (Repository → Module → File → Function: how it's built), joined by `BUILT_FROM`, `ENTRY`, and `RUNS`. Search runs only on architecture nodes. See [Knowledge Graph §2](./knowledge-graph.md#2-one-graph-layers-architecture-nodes-and-code-nodes). Project is **not** a layer. Projects attach to facts as attribution, later, through Contextualized.
 
 ### 5.2 Built bottom-up, searched top-down
 
@@ -460,7 +460,7 @@ Correctness comes first, so it has to be measured:
 | D5 | Phase 1 is static only | Decided |
 | D6 | Neo4j for the graph, Postgres for app state | Decided (Neo4j leaning) |
 | D7 | Flows: triggers instead of Jobs, no Subflows, ordered steps, flows linked across interfaces and never nested | Decided |
-| D8 | Two layers in one Neo4j database, both persisted: an **architecture layer** (where routing and search run) and a **code layer** (every first-party reachable function, `INVOKES`). The code layer is partitioned per space at very large scale. Significance is a tag. | Decided |
+| D8 | One Neo4j database holding two kinds of nodes, both persisted: **architecture nodes** (where routing and search run) and **code nodes** (every first-party reachable function, `INVOKES`). Code nodes can be partitioned per space at very large scale. Significance is a tag. | Decided |
 | D9 | One repository → many Applications, detected via Service/Library modules | Decided |
 | D10 | Incremental updates by commit range on merge to main. PRs are used for attribution. | Decided |
 | D11 | Steno owns re-ingestion. Contextualized adds attribution and the why. | Decided |
@@ -470,7 +470,7 @@ Correctness comes first, so it has to be measured:
 | D15 | Data store schemas in V2. V1 records entity → table mappings and table-level access. | Decided |
 | D16 | Labels for abstraction, no `IS_A` edges | Decided |
 | D17 | No stored file contents: code tools read from the git host at the ingested commit | Decided |
-| D18 | `fact_change` keeps the before/after of every changed fact (architecture layer in full; code layer per function) | Decided |
+| D18 | `fact_change` keeps the before/after of every changed fact (architecture nodes in full; code nodes per function) | Decided |
 | D19 | MCP tool set ([list](./retrieval-and-mcp.md#5-mcp-tools-decided)) | Decided |
 | D20 | Edge names: `INVOKES` (code → code), `CALLS` (network), `STARTS` (what kicks off a flow), `LEADS_TO` (flow → flow, derived) | Decided |
 | D21 | Jev is the navigator at query time: Q0 intent, Q1/Q2 routing, **Q4 candidate verification**, Q3 ranking, using bounded digests | Decided |
@@ -482,7 +482,7 @@ Correctness comes first, so it has to be measured:
 | D28 | Glossary is human-declared in V1. Deriving it from docs and product knowledge comes with the Contextualized integration. | Decided |
 | D29 | Citations in every MCP result (V1) | Decided |
 | D30 | A connector is a source system + scope. Repositories: explicit include list in Phase 1, discovery later. | Decided |
-| D31 | Flow levels: L0 headline, L1 signature (deterministic) + narrative (LLM), L2 `Step` nodes (`FIRST_STEP` / `NEXT` / `SUBSTEP`, each `RUNS` a function), L3 code layer. One rendered flow card per flow. | Decided |
+| D31 | Flow levels: L0 headline, L1 signature (deterministic) + narrative (LLM), L2 `Step` nodes (`FIRST_STEP` / `NEXT` / `SUBSTEP`, each `RUNS` a function), L3 code nodes. One rendered flow card per flow. | Decided |
 | D32 | Business context comes from Contextualized, attached to exactly what each Project changed (`Project -CHANGED-> element`) | Decided (later) |
 | D33 | Postgres holds what Steno is told and did; Neo4j holds what it knows. Declared spaces and glossary live in Postgres and are projected into Neo4j. | Decided |
 | D34 | One Steno deployment per organization | Decided |

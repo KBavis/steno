@@ -32,34 +32,46 @@ Part of the [Design Doc](./DESIGN_DOC.md). Status markers: **Decided** · **Prop
 
 ---
 
-## 2. Two layers: architecture and code
+## 2. One graph: layers, architecture nodes, and code nodes
 
-The graph is two trees joined by three bridge edges:
+Steno uses **one graph in one Neo4j database**. Two ideas describe its shape, and they're different things:
+
+- **The three layers** (Organization → Space → Application) are the **levels of zoom**. They're the backbone of the containment tree.
+- **Architecture nodes vs. code nodes** is a split by **kind of node**: what the software *does* vs. how its code is *built*. Both hang off the same tree.
 
 ```
-ARCHITECTURE LAYER (what it does)             CODE LAYER (how it's built)
-Organization                                  Repository   (belongs to a Space)
- └ Space  (can nest)                           └ Module (:Service / :Library / …)
-    ├ DataStore → Schema → Table                  └ File
-    ├ KafkaTopic / Queue                             └ Function ──INVOKES──▶ Function
-    └ Application ──────────BUILT_FROM──────────────▶ Module
-       ├ Interface, Entity, Schedule
-       └ Flow ──────────────ENTRY───────────────────▶ Function
-          └ Step ───────────RUNS────────────────────▶ Function
+Organization                              ← layer 1
+ └ Space  (can nest)                      ← layer 2
+    ├ DataStore → Schema → Table, KafkaTopic / Queue
+    ├ Application                         ← layer 3
+    │   ├ Interface, Entity, Schedule
+    │   └ Flow ──ENTRY──┐                      architecture nodes: what it DOES
+    │      └ Step ──RUNS─┤
+    │                    ▼
+    └ Repository ─────── Module (:Service ◀──BUILT_FROM── Application)
+                          └ File
+                             └ Function ──INVOKES──▶ Function     code nodes: how it's BUILT
 ```
 
-| | Architecture layer | Code layer |
+| | Architecture nodes | Code nodes |
 |---|---|---|
+| **Kinds** | Organization, Space, Application, Interface, Flow, Step, Entity, DataStore, Table, ExternalSystem, … | Repository, Module, File, Function |
 | **Answers** | What exists, what it does, what it touches, flows step by step | Exactly what code runs at each step |
-| **Tree** | Organization → Space → Application → Flow → Step | Repository → Module → File → Function |
-| **Queried** | Always: routing and search run **only** here | Only after narrowing to one app or flow |
+| **Queried** | Always: routing, cards, and search run **only** on these | Only after narrowing to one app or flow, by following `ENTRY` / `RUNS` |
 | **Effects** | Lifted onto Steps and Flows (`Step -WRITES_TO-> Table`) | Where they're extracted (`Function -WRITES_TO-> Table`) |
+| **Change history** | Every change logged | Logged per function (added, removed, modified) |
 
-**Bridges:** `Application -BUILT_FROM-> Module` (the service module that builds the deployable), `Flow -ENTRY-> Function`, and `Step -RUNS-> Function`.
+**Bridges** between the two kinds: `Application -BUILT_FROM-> Module`, `Flow -ENTRY-> Function`, and `Step -RUNS-> Function`.
 
+**Why make the distinction at all?**
+- **Speed.** Search never wanders into millions of functions; it's enforced with labels and edge types, not separate databases.
+- **Meaningful change tracking.** Architecture nodes change rarely and meaningfully; code nodes change on every edit.
+- **A path to very large scale.** Code nodes can later be split into separate databases per space without touching the architecture nodes (see [Depth and storage](#depth-and-storage-decided-one-database-code-nodes-persisted)).
+
+Other points:
 - **An Application is not a Module.** An Application is the deployable unit (architecture); a Module is the build unit (code). A `:Service` module builds an Application. Packages aren't nodes.
-- **The architecture layer describes behavior down to each step without touching the code layer.** Agents drop into the code layer only for fine detail.
-- Every node has exactly one `BELONGS_TO` owner. A Repository belongs to a Space, so both trees are anchored in the org.
+- **Architecture nodes describe behavior down to each step without touching code nodes.** Agents drop into code nodes only for fine detail.
+- Every node has exactly one `BELONGS_TO` owner. A Repository belongs to a Space, so code nodes are anchored in the same tree.
 
 ## 3. Node types
 
@@ -177,7 +189,7 @@ Every relationship is either **extracted** (read directly from code or config by
 | `FIRST_STEP` | Flow → Step | | **L2**: the flow's first step | Derived |
 | `NEXT` | Step → Step | | **L2**: the step that follows, at the same nesting level | Derived |
 | `SUBSTEP` | Step → Step | | **L2**: the first step nested inside this one (step 1 → step 1.1) | Derived |
-| `RUNS` | Step → Function | `line` (call site) | **Bridge** into the code layer: the function this step runs | Derived |
+| `RUNS` | Step → Function | `line` (call site) | **Bridge** to code nodes: the function this step runs | Derived |
 | `WRITES_TO` / `READS_FROM` / `CALLS` / `PRODUCES` (on a Step) | Step → Table / ExternalSystem / Interface / Topic | | The effects that happen at this step, lifted from its function | Derived |
 | `WRITES_TO` / `READS_FROM` / `CALLS` / `PRODUCES` (on a Flow) | Flow → Table / ExternalSystem / Interface / Topic | `conditional` | **L1 rollups**: everything the flow's functions touch, lifted onto the flow | Derived |
 | `ENTRY` | Flow → Function | | The flow's entry function | Extracted |
@@ -262,7 +274,7 @@ A flow is described at four levels, from a one-line headline down to every funct
 | **L1 Signature** | "What goes in, what comes out, what does it touch?" | `Flow` properties **and rollup edges** (`Flow -WRITES_TO-> Table`, `Flow -CALLS-> ExternalSystem`, …) | **Deterministic** (facts) |
 | **L1 Narrative** | "What does it do, step by step, in plain words, and when does it branch?" | `Flow.narrative` | **LLM** |
 | **L2 Steps** | "What happens, in what order, and where exactly?" | `Step` nodes: `Flow -FIRST_STEP-> Step -NEXT-> Step`, nested with `SUBSTEP`; each `RUNS` a function | **Deterministic** structure (the significance rule); step labels phrased by the LLM |
-| **L3 Trace** | "Every function it touches" | The **code layer**: `Function -INVOKES-> Function`, walked from `ENTRY` | **Deterministic** |
+| **L3 Trace** | "Every function it touches" | **Code nodes**: `Function -INVOKES-> Function`, walked from `ENTRY` | **Deterministic** |
 
 **L1 has two halves.** The *signature* is facts: the trigger, inputs, outputs, effects, external calls. The *narrative* (purpose, steps in plain words, branch conditions in plain words) needs an LLM. A branch's raw condition, e.g. `ds.type == DataSourceType.REPOSITORY and ds.scope_by_issues`, is extracted deterministically; "if the repository is issue-scoped" is the LLM's phrasing of it.
 
@@ -280,7 +292,7 @@ A flow is described at four levels, from a one-line headline down to every funct
 
 `POST /jobs/projects/{project_id}/data-sources/{data_source_id}` in [Contextualized](https://github.com/KBavis/contextualized) (commit `ac93a3b`, illustrative):
 
-The Flow node holds L0 and L1 as properties. Its `Step` nodes (L2) chain in order, and each `RUNS` a function in the code layer (L3):
+The Flow node holds L0 and L1 as properties. Its `Step` nodes (L2) chain in order, and each `RUNS` a function among the code nodes (L3):
 
 ```
 (HttpEndpoint) ──STARTS──▶ (Flow)                     L0 + L1 as properties; rollups: WRITES_TO jobs, CALLS Jira, …
@@ -291,7 +303,7 @@ The Flow node holds L0 and L1 as properties. Its `Step` nodes (L2) chain in orde
                               │                          │
                             RUNS                      SUBSTEP
                               ▼                          ▼
-      CODE LAYER   (Function JobService.create_job)   (Step 2.1: fetch Jira issues) ──NEXT──▶ (Step 2.2: resolve PRs) ──▶ …
+      CODE NODES   (Function JobService.create_job)   (Step 2.1: fetch Jira issues) ──NEXT──▶ (Step 2.2: resolve PRs) ──▶ …
                               │                          │
                            INVOKES                     RUNS ──▶ (Function JiraDataProvider.get_issues)
                               ▼
@@ -366,18 +378,18 @@ SOURCE   run_data_source_job  apps/backend/app/api/routers/job.py:43 @ ac93a3b
 - **An existing flow changed by a Project:** the context is scoped to the change, e.g. "Project B added the audit write at step 1.2." The card's CONTEXT line says exactly that.
 - **Flows no Project has touched** keep their code-derived purpose (`purpose_source: llm`).
 
-### Depth and storage (Decided: two layers, both persisted)
+### Depth and storage (Decided: one database, code nodes persisted)
 
-The graph has two layers **in one Neo4j database**:
+Architecture nodes and code nodes live **in one Neo4j database**, and both are persisted:
 
 | Layer | Contains | Queried when |
 |---|---|---|
-| **Architecture layer** | Orgs, spaces, apps, interfaces, flows (L0, L1), **steps (L2)**, entities, tables, external systems | Always: routing and search run **only** here |
-| **Code layer** | **Every first-party function reachable from an entry point**, with `INVOKES` edges (L3) | Only after narrowing to one app or flow: full traces, stack-trace lookups, incremental updates |
+| **Architecture nodes** | Orgs, spaces, apps, interfaces, flows (L0, L1), **steps (L2)**, entities, tables, external systems | Always: routing and search run **only** here |
+| **Code nodes** | **Every first-party function reachable from an entry point**, with `INVOKES` edges (L3) | Only after narrowing to one app or flow: full traces, stack-trace lookups, incremental updates |
 
-- **Why persist the code layer:** rebuilding a call graph means re-parsing and re-resolving the whole application. With it persisted, an incremental update re-parses only the changed files, patches their `INVOKES` edges, and finds the affected flows by traversal.
+- **Why persist code nodes:** rebuilding a call graph means re-parsing and re-resolving the whole application. With it persisted, an incremental update re-parses only the changed files, patches their `INVOKES` edges, and finds the affected flows by traversal.
 - **Space:** roughly 1–2 KB per function including its edges and properties, so ~40M functions (2,000 apps × 20k functions) is on the order of **40–80 GB**, which a single Neo4j server handles.
-- **At Google scale** (billions of functions), the code layer is **partitioned into separate databases per space** (Neo4j composite databases). Architecture nodes refer to code-layer functions **by ID**, since relationships can't cross databases. The architecture layer stays in one database.
+- **At Google scale** (billions of functions), code nodes are **partitioned into separate databases per space** (Neo4j composite databases). Architecture nodes refer to code nodes **by ID**, since relationships can't cross databases. Architecture nodes stay in one database.
 - **Excluded:** third-party library code, generated code, tests, and dead code.
 - **Nothing is dropped for being "insignificant."** Pure business logic (a tax calculation) does no I/O, and an I/O-based filter would lose it.
 
