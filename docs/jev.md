@@ -2,7 +2,7 @@
 
 How Steno uses [Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) (TypeSafe's "System One" decision model) to make typed, calibrated decisions during ingestion and retrieval.
 
-Part of the [Design Doc](./DESIGN_DOC.md). Status: **Decided** to use Jev. The individual decisions below are **Proposed**.
+Part of the [Design Doc](./DESIGN_DOC.md). Status: **Decided** to use Jev. The individual decisions below are **Decided** unless marked deferred.
 
 ---
 
@@ -38,6 +38,10 @@ That's what makes Steno's routing and verification affordable on every query, an
 
 **Rule: deterministic first.** Jev decides only what rules can't. Where they meet: the LLM generates, Jev checks.
 
+## 3a. Jev never decides alone
+
+**Semantic and keyword search propose; Jev verifies and ranks.** A global search runs in parallel with Jev routing, routing is soft when confidences are close (at least 2 branches kept), Jev only prunes when highly confident, and **every Jev decision can be switched off**, falling back to ranking by embedding score. See [Retrieval §2](./retrieval-and-mcp.md#2-search-top-down-over-data-built-bottom-up).
+
 ## 4. What Jev sees: state design
 
 Jev performs best on **small, relevant state**, and a flow can be huge (hundreds of functions). So Steno **never sends raw flows or code to Jev**. It sends **digests**, built from the graph and bounded by construction:
@@ -68,7 +72,7 @@ Starting point, to be tuned against logged decisions:
 | **0.5 – 0.9** | Act, and mark the result low-confidence |
 | **< 0.5** | Don't decide: mark it `ambiguous`, return several options, or ask a human |
 
-Every decision stores its confidence **on the resulting fact or result** and is logged in `jev_decision` (see [Ingestion §8](./ingestion.md#8-relational-database-postgres)).
+Every decision stores its confidence **on the resulting fact or result** and is logged in `jev_decision` (see [Ingestion §8](./ingestion.md#8-relational-database-postgres)), linked to its ingestion stage or to the query's request.
 
 ## 6. Decisions at query time
 
@@ -79,11 +83,25 @@ These run inside the `search` tool (see [Retrieval](./retrieval-and-mcp.md#2-sea
 | **Q0** | **What kind of question is this?** | Choice: find a flow / what depends on X / what is X / how do I call X / how are A and B connected | The question | Narrows which node labels and retrieval signals are used |
 | **Q1** | **Which spaces does it involve?** | **One Noul per space, in one call** | The question + a summary line per space | One space: search it. Several: fan out in parallel. None: search at the org layer. |
 | **Q2** | **Which application within the space?** | Choice (apps in the space) | The question + a summary line per app | Jump straight to the app when confident |
-| **Q2b** | **Which entity is the question about?** | Choice (candidate entities from keyword search) | The question + entity names and cards | Drives entity-anchor retrieval |
+| *Q2b (deferred)* | **Which entity is the question about?** | Choice (candidate entities from keyword search) | The question + entity names and cards | Drives entity-anchor retrieval |
 | **Q4** | **Does this candidate do what was asked?** | **One Noul per candidate**, batched | The question + each candidate's digest | A confidence for every candidate flow. This is how Steno "knows which one it is," or honestly says it isn't sure. |
 | **Q3** | **How relevant is each result?** | Score | The question + each result's digest | Rank and trim to the `max_tokens` budget |
 
-**Latency of one `search`:** Q0 and Q1 can run together, then Q2 / Q2b, then retrieval, then Q4 and Q3 together. That's **three rounds of Jev calls, ~0.2–1.5 s total**, compared with several seconds per step if an LLM made these decisions.
+### Jev-guided graph navigation (Decided)
+
+A fully ingested organization is a **massive graph** (millions of nodes). The expensive part isn't a single query; it's deciding **where to go next** when a traversal fans out. Jev acts as the **heuristic** that decides which branches are worth following:
+
+| # | Technique | How Jev is used | What it saves |
+|---|---|---|---|
+| **N1** | **Routing down the tree** | At each level of the containment tree (org → space → nested space → app), one Noul per child **in a single call**, keeping the top k branches (a **beam search**) | Never searches the whole graph. The cost grows with tree depth, not graph size. |
+| **N2** | **Guided expansion** | When a traversal fans out (a topic with 40 consumers, a `find_paths` search, `LEADS_TO` chains), Score each frontier node's relevance to the question and expand the best first (**best-first search**) | Prunes irrelevant branches instead of returning all of them |
+| **N3** | **When to stop** | Noul: "does the current result set answer the question?" If not, the server expands one more level **itself**. | Round trips: the server deepens the search instead of the agent calling again |
+| **N4** | **Disambiguation** | Choice among nodes with similar names ("the user service": `users-svc`, `user-profile-svc`, `user-admin-svc`) | A wrong entry point, and the follow-up calls to fix it |
+| **N5** | **How much detail** | Score: how much detail the question needs (a summary, or the code of the steps) | Tokens: code is included only when it's needed |
+
+### Latency of one `search`
+
+ Q0 and Q1 can run together, then Q2, then retrieval, then Q4 and Q3 together. That's **three rounds of Jev calls, ~0.2–1.5 s total**, compared with several seconds per step if an LLM made these decisions.
 
 Routing layer by layer (Q1, then Q2) keeps every Choice under the 255-option limit at enterprise scale.
 
@@ -96,8 +114,10 @@ Routing layer by layer (Q1, then Q2) keeps every Choice under the 255-option lim
 | **I3** | Is this function an entry point? | Noul | Method, class, unrecognized annotations | An unrecognized framework looks like a trigger | A new `Flow`, or none |
 | **I4** | Is this host inside the org or a vendor? | Noul | The host + known org domains | The host isn't on the known-domains list | A stub `Interface` or an `ExternalSystem` |
 | **I5** | Does this change alter what the card says? | Noul | Old card + fact diff | Facts under an existing card changed | Regenerate the card or keep it. **Controls LLM spend.** |
-| **I6** | Which space does this repository belong to? | Choice (spaces + "new") | Repo name, owners, communication clusters, space summaries | Onboarding (Phase 2+) | A proposal. **A human always confirms.** |
-| **I7** | Which node does this glossary term refer to? | Choice (candidate nodes) | The term, where it appeared, candidate node summaries | A candidate term was found in docs, names, or queries | A proposed term → node mapping. **A human confirms.** |
+| *I9 (deferred)* | **What does this flow do, and to what?** | Choice (primary entity, from the app's entities) + Choice (operation: create / read / update / delete / process / sync / notify / report) | Flow digest | Every flow, at ingestion | Tags `primary_entity` and `operation` on the flow. At query time, Q2b + Q0 pick the same entity and operation, and the matching flows come from an index lookup. **This is what makes entity anchors reliable.** |
+| **I10** | **Is this a business flow or technical plumbing?** | Noul | Flow digest | Every flow | Health checks, actuator, and admin endpoints are marked `technical` and ranked down in search |
+| *I6* | *Which space does this repository belong to?* | | | | **Not planned:** admins define spaces |
+| *I7* | *Which node does this glossary term refer to?* | | | | **Later:** the glossary is human-declared in V1 |
 | **I8** | Does this unexplained call look like I/O or an entry point? | Noul | Call site digest | A call site matched no rule | Whether it goes on the **coverage report** (see [Ingestion §4](./ingestion.md#4-extractors-rules-for-being-agnostic)) |
 
 **Not a Jev decision:** "did this PR change structure?" Re-running the extractors and comparing facts answers it exactly.

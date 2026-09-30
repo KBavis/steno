@@ -58,7 +58,7 @@ Agents are strong within one repository and blind beyond it. In a large enterpri
 ## 4. Scope and target
 
 - **Target scale:** a large enterprise, with thousands of repositories and many spaces.
-- **Phase 1 target:** one application in our own org (Spring Boot, Kafka, Bitbucket, XLDeploy), with an agnostic design underneath.
+- **Phase 1 target:** one application in our own org (Spring Boot, Kafka, Bitbucket), with an agnostic design underneath.
 - **Languages: multi-language by design, Java first.** Our org is primarily Java, so Java rules and resolution come first. Nothing in the graph model, pipeline, or MCP tools is Java-specific: each additional language needs extractor rule packs (ast-grep / Semgrep support many languages) and its own symbol resolver.
 
 ---
@@ -73,7 +73,7 @@ Agents are strong within one repository and blind beyond it. In a large enterpri
 | **Space** | A generic name for however an org divides itself. It can nest, or an org can have only one. Owns data stores and topics. |
 | **Application** | An independently deployable unit. One repository can contain several (e.g. our microservices repo). |
 
-Under each application, the code structure is `Repository → Module → File → Function`. Project is **not** a layer. Projects attach to facts as attribution, later, through Contextualized.
+The graph has two layers: the **architecture layer** (Organization → Space → Application → Flow → Step) and the **code layer** (Repository → Module → File → Function), joined by `BUILT_FROM`, `ENTRY`, and `RUNS`. See [Knowledge Graph §2](./knowledge-graph.md#2-two-layers-architecture-and-code). Project is **not** a layer. Projects attach to facts as attribution, later, through Contextualized.
 
 ### 5.2 Built bottom-up, searched top-down
 
@@ -153,18 +153,18 @@ The UI (later) talks to an Admin API for connectors and runs, and uses the same 
 
 | Area | Choice | Why | Status |
 |---|---|---|---|
-| Knowledge graph | **Neo4j** | Paths of variable length (a flow chain across 10+ services), graph algorithms (community detection for proposing spaces), built-in vector index | Decided (leaning); **Open**: edition/licensing |
+| Knowledge graph | **Neo4j** | An organization's architecture **is** a graph: entities (applications, interfaces, flows, data stores) as nodes, and dependencies and interactions as edges. A graph database stores it the way it's naturally modeled and queried, handles paths of variable length (a flow chain across 10+ services), and has a built-in vector index. | Decided (leaning); **Open**: edition/licensing |
 | Application state | **Postgres** | Relational data: connectors, runs, deltas, logs | Decided |
 | Code-pattern rules | **ast-grep / Semgrep** YAML rules (tree-sitter based) | Declarative, many languages, orgs can write their own | Decided |
 | Config rules | YAML / properties path rules | Kafka topics, URLs, and placeholders are in config | Decided |
 | Symbol resolution | **Our own**: JavaParser symbol solver + dependency JARs, run as a JVM helper | Resolves calls, including through library types, without a full build | Decided (**SCIP not planned**) |
-| DI resolution | Per-framework rule plugins (Spring first) + Jev I1 | The compiler can't know which bean gets injected | Proposed |
-| Source access | **git clone** into temporary workspaces | Full source for resolution, rate limits, exact diffs | Proposed |
-| File store | Postgres (`repo_file` / `file_blob`), object storage later | The MCP server reads files without calling the git host; code search across the org | Proposed (option A) |
+| DI resolution | Per-framework rule plugins (Spring first) + Jev I1 | The compiler can't know which bean gets injected | Decided |
+| Source access | **git clone** into temporary workspaces | Full source for resolution, rate limits, exact diffs | Decided |
+| Code access | Git host API at the ingested commit, with an in-memory cache. **No stored file contents.** | Simplest; code always matches the graph | Decided |
 | Decisions | **Jev** (TypeSafe) | Typed, calibrated, fast, cheap decisions | Decided |
-| Writing | **Flow / app / space cards:** a stronger model (e.g. Sonnet-class), given everything retrieved for the node. **Other cards:** a small model (e.g. Haiku-class). Batch API. | Flow cards decide whether flows can be found | Proposed; **Open**: confirm by comparing on a sample |
+| Writing | **LLM purpose + narrative for every flow**; LLM cards for apps, spaces, org; deterministic cards for the rest. Small model by default, Batch API, prompt caching. Model picked after the dry run. | Flow cards decide whether flows can be found | Proposed; **Open**: model, after the dry run |
 | Embeddings | **Stored in Neo4j's vector index** (no separate vector DB); model TBD | One store: vector search and graph traversal in the same query | Decided (storage); **Open**: model |
-| Keyword search | Neo4j full-text index | Exact names: paths, topics, symbols | Proposed |
+| Keyword search | Neo4j full-text index | Exact names: paths, topics, symbols | Decided |
 | Agent interface | **MCP** over Streamable HTTP | Works with Claude Code, Copilot, and custom agents | Decided |
 | Schema replay (V2) | Testcontainers | Replay migrations into a temporary DB, then read its catalog | Proposed (V2) |
 | Steno's implementation language | **Python** (leaning) | Official MCP SDK, Neo4j driver, tree-sitter / ast-grep bindings, Anthropic SDK, LiteLLM; familiar from Contextualized. JavaParser runs as a small JVM helper. | Leaning |
@@ -181,7 +181,7 @@ Full model: [knowledge-graph.md](./knowledge-graph.md).
   - **One `BELONGS_TO` edge**: where it lives.
   - **Interaction edges**: what it does.
 - **No `IS_A` edges.** Neo4j labels handle abstraction.
-- **Nodes:** `Organization`, `Space`, `Repository`, `Application`, `Module` (roles: `:Service`, `:Library`, `:Contract`, `:Migrations`, `:Test`, `:Build`), `File`, `Function`, `Interface` (`:HttpEndpoint`, `:GrpcMethod`, `:KafkaTopic`, `:Queue`, plugin-defined), `Schedule`, `Flow`, `DataStore → Schema → Table → Column`, `Entity`, `ExternalSystem`, `KafkaCluster`.
+- **Nodes:** `Organization`, `Space`, `Repository`, `Application`, `Module` (roles: `:Service`, `:Library`, `:Contract`, `:Migrations`, `:Test`, `:Build`), `File`, `Function`, `Interface` (`:HttpEndpoint`, `:GrpcMethod`, `:KafkaTopic`, `:Queue`, plugin-defined), `Schedule`, `Flow`, `DataStore` (category labels: `:Relational`, `:Document`, …; vendor as a property), `Schema`, `Table`, `Column`, `Entity`, `ExternalSystem`, `KafkaCluster`.
 - **Key edges:** `INVOKES {seq}` (code calls code), `CALLS` (code calls over the network), `PRODUCES`, `CONSUMES`, `READS_FROM`, `WRITES_TO`, `STARTS` (what kicks off a flow), `LEADS_TO` (one flow causes another; **derived**), `EXPOSES`, `BUILT_FROM`, `DEPENDS_ON` (build dependency), `MAPS_TO` (entity → table). Every edge is either extracted from code/config or derived from other edges; see [Relationship types](./knowledge-graph.md#4-relationship-types).
 - **Flows:**
   - A flow is a **unit of work** started by a trigger (an interface or a schedule). There is no Job type and no Subflow type.
@@ -219,15 +219,15 @@ Full design: [ingestion.md](./ingestion.md).
 flowchart LR
     C[Connector] --> W[Temporary clone] --> X[Extractors<br/>rules] --> CG[Call graph<br/>+ flows]
     W --> SR[Symbol resolution<br/>JavaParser + JARs] --> CG
-    W --> FS[File store]
     CG --> R[Resolver] --> GW[Graph writer<br/>MERGE by stable ID] --> D[Delta] --> CARD[Cards<br/>Jev-gated LLM]
 ```
 
-- **Connectors** reach sources. Credentials are references into a secret manager.
+- **Connectors** are a source system plus a scope (a Bitbucket workspace or project, a GitHub org), with credentials stored as references into a secret manager. Repositories are selected separately: an explicit include list in Phase 1, discovery later.
 - **Extractors** are rules ("when you see X, emit Y") in ast-grep / Semgrep YAML, config path rules, or code plugins. They match **file types and patterns, not connectors**. Orgs add their own.
   - Published as versioned **rule packs** (~40–60 rules for a Spring/Kafka stack), auto-enabled from build dependencies.
-  - A **coverage report** after every ingestion ranks what no rule explained, which points straight at the internal frameworks worth a rule. Optionally, an LLM drafts the rule from the report's examples, and Steno validates it.
-- **Cloning** into a temporary workspace gives resolution the full source, avoids rate limits, and makes `git diff` exact. Text files go into the **file store**.
+  - A **coverage report** after every ingestion ranks what no rule explained, which points straight at the internal frameworks worth a rule.
+  - **Phase 1 is fully deterministic:** rules are written by hand. Rule templates and LLM-drafted rules are future enhancements.
+- **Cloning** into a temporary workspace gives resolution the full source, avoids rate limits, and makes `git diff` exact. 
 - **Config files** become facts (topics, clusters, base URLs, datasources, schedules), plus a property map for placeholders.
 - **Resolution:**
   - Symbols: Steno's own (JavaParser symbol solver + dependency JARs). SCIP is not planned.
@@ -248,7 +248,7 @@ flowchart LR
 
 ### Relational database
 
-Postgres tables: `connector`, `repository` (holding `last_ingested_sha`), `extractor`, `connector_extractor`, `space_assignment`, `ingestion_run`, `run_delta` (**before/after** of changed facts), `run_pr`, `jev_decision`, `llm_generation`, `repo_file` / `file_blob` (file store), `config_property`, `glossary_term`. See the [ER diagram](./ingestion.md#8-relational-database-postgres).
+Postgres holds what Steno is told and what it did; Neo4j holds what it knows. Tables: configuration (`connector`, `repository`, `space`, `glossary_term`, `rule_pack`, `repository_rule_pack`), operations (`ingestion_job`, which is also the work queue, `ingestion_stage`, `coverage_item`), change history (`fact_change`, `job_commit`), and audit/cost (`llm_call`, `llm_output`, `jev_decision`, `tool_call`). See the [ER diagram](./ingestion.md#8-relational-database-postgres).
 
 ---
 
@@ -257,7 +257,7 @@ Postgres tables: `connector`, `repository` (holding `last_ingested_sha`), `extra
 Full design: [retrieval-and-mcp.md](./retrieval-and-mcp.md).
 
 - **Round trips dominate latency**, so the design minimizes calls:
-  - precomputed **cards** for every node
+  - precomputed **cards** (flows, apps, spaces, the org, interfaces, entities, tables)
   - **Jev routing** to the right layer
   - **parallel fan-out on the server** across spaces
   - progressive disclosure
@@ -268,14 +268,16 @@ Full design: [retrieval-and-mcp.md](./retrieval-and-mcp.md).
   2. **Candidates from four signals**, in parallel per scope:
      - vector search over **flow cards**
      - **keyword** (full-text index)
-     - **entity anchors**: the question's nouns → `Entity` / `Table` nodes, and its verb → an operation (create → insert / POST / `*.created`)
+     - *(deferred)* **entity anchors**: the question's nouns → `Entity` / `Table` nodes, and its verb → an operation
      - **glossary** expansion
   3. **Jev Q4 verifies each candidate** ("does this flow do what was asked?"), and Q3 ranks and trims.
   4. The winners are expanded along `LEADS_TO`.
 
   The client's LLM synthesizes the answer. Steno runs no LLM at query time. Recall over precision: 5–10 verified candidates with confidence.
-- **Code access:** `view_file`, `list_directory`, `view_flow_code`, and `search_code` read from Steno's **file store** (Proposed, option A), so the MCP server never calls the git host.
-- **Proposed tools:** `search`, `get_node` (its Space view is the "Bloomberg" ins/outs), `glossary`, `get_flow`, `view_flow_code`, `view_file`, `list_directory`, `search_code`, `find_symbols`, `find_dependents`, `find_paths`, `analyze_change` (takes PRs, collects related PRs, and runs a dry-run ingestion into a temporary overlay), `get_interface`, `get_changes`.
+- **Code access:** Steno stores **no file contents**. `view_flow_code` fetches a whole flow's code in one call, and `view_file` / `list_directory` cover everything else, all from the git host at the ingested commit.
+- **Citations (V1):** every result cites where each claim comes from (space, app, repo, module, file, lines, commit, plus a link), and lists the scopes that were searched.
+- **Jev never decides alone:** a global vector and keyword search runs in parallel with Jev routing as a safety net. Routing is soft when confidences are close, and every Jev decision can be switched off.
+- **Tools:** `search`, `get_node` (its Space view is the "Bloomberg" ins/outs), `glossary`, `get_flow`, `view_flow_code`, `view_file`, `list_directory`, `find_symbols`, `find_dependents`, `find_paths`, `analyze_change` (takes PRs, collects related PRs, and runs a dry-run ingestion into a temporary overlay), `get_interface`, `get_changes`.
 - **Latency targets (Proposed):** graph tools p95 < 300 ms; `search` p95 < 1.5 s; ≤ 3 calls per typical question.
 
 ```mermaid
@@ -288,9 +290,11 @@ sequenceDiagram
     M->>J: Q0 intent + Q1 one Noul per space (one call)
     J-->>M: find-a-flow · Onboarding 0.95, Identity 0.62, Billing 0.08
     par fan out
-      M->>N: cards (vector) + keyword + entity anchors (Onboarding)
+      M->>N: cards (vector) + keyword (Onboarding)
     and
-      M->>N: cards (vector) + keyword + entity anchors (Identity)
+      M->>N: cards (vector) + keyword (Identity)
+    and
+      M->>N: global cards + keyword search (safety net)
     end
     M->>J: Q4 verify each candidate + Q3 rank (one call)
     J-->>M: POST /v1/clients 0.94, ImportClientsJob 0.71, ...
@@ -304,23 +308,25 @@ sequenceDiagram
 
 ## 11. Jev
 
-Full design: [jev.md](./jev.md). **Decided:** Jev makes every decision that deterministic rules can't. **Proposed:** the specific decisions below.
+Full design: [jev.md](./jev.md). **Decided:** Jev makes every decision that deterministic rules can't. The specific decisions below are Decided unless marked deferred.
 
 - **Ingestion:**
   - I1: DI candidate
   - I2: transport of an unrecognized call
   - I3: unrecognized entry point
   - I4: org host vs. vendor
-  - I5: does the card need regenerating (controls LLM cost)
-  - I6: space proposal, always confirmed by a human
-  - I7: glossary term → node, confirmed by a human
+  - I5: is a flow's purpose and narrative still accurate after a change (controls LLM cost)
   - I8: is an unexplained call worth the coverage report
+  - I10: business flow or technical plumbing (health checks rank lower)
+  - *Deferred / not planned:* I6 space proposals (admins define spaces), I7 glossary mapping (the glossary is human-declared), I9 entity + operation tags (entity anchors)
 - **Query:**
   - Q0: what kind of question
   - Q1: which spaces (one Noul per space, in one call)
-  - Q2 / Q2b: which app / which entity
+  - Q2: which app
   - **Q4: does each candidate flow do what was asked** (verification)
   - Q3: relevance score
+- **Guided navigation of the large graph (N1–N5):** routing down the tree as a beam search, best-first expansion when a traversal fans out, deciding when the server should stop or go one level deeper, disambiguating similar names, and choosing how much detail to return.
+- **Never alone:** a global vector and keyword search runs in parallel with routing, routing is soft when confidences are close, and every Jev decision can be switched off.
 - **What Jev sees:** bounded **digests** built from the graph (a flow digest is its trigger, card, and interactions, ~300–600 tokens however big the flow is), never raw code. That keeps every call within Jev's ~64k input budget.
 - **Why it matters:** each of these would otherwise be a slow LLM call. With Jev, one `search` costs three rounds of Jev calls, ~0.2–1.5 s.
 - **Confidence bands:** > 0.9 act · 0.5–0.9 act and mark low-confidence · < 0.5 mark ambiguous or ask a human.
@@ -331,11 +337,12 @@ Full design: [jev.md](./jev.md). **Decided:** Jev makes every decision that dete
 ## 12. LLM usage and cost
 
 - The LLM **writes** cards, flow summaries, and glossary definitions. It also drafts rules on request (optional, rare). Nothing else.
-- **Flow, app, and space cards** get a stronger model and **everything retrieved for the node** (trigger, entities, ordered significant steps, data access, downstream flows' cards, bounded code of significant steps), because flow cards decide whether flows can be found. Other cards use a small model and the node's facts.
-- Only some nodes get cards: roughly **700–1,000 per large app** (flows, interfaces, entities, and a few key functions), not millions.
-- Output is cached by the hash of its inputs, and regenerated only when Jev I5 says the meaning changed. Generated with the Batch API (50% cheaper).
-- Rough one-time cost: **~$3–7 per app**, so **~$7k–14k for 2,000 apps** (see [Retrieval](./retrieval-and-mcp.md#summary-cards)).
-- Every generation is logged (`llm_generation`), so the cost per app is measured, not guessed.
+- **Every flow gets an LLM-written purpose and narrative** at initial ingestion, on top of its deterministic signature. Apps, spaces, and the org get LLM cards. Interfaces, entities, and tables get deterministic cards. Functions get none.
+- **Levers for scale:** a small model by default, the Batch API, and prompt caching (flows in one app share a cached prefix). On re-ingestion, Jev I5 decides whether a flow's purpose and narrative are still accurate before anything is regenerated.
+- Cards are properties on their node, with one vector index across all of them (`:Searchable`).
+- Output is cached by the hash of its inputs, and regenerated only when Jev I5 says the meaning changed. Batch API where possible (50% cheaper).
+- **Cost and time are measured before any LLM spend:** Phase 1 begins with a dry run (deterministic ingestion only) that reports time per stage, graph size, and the **projected** LLM cost per strategy. Whether LLM cards are worth it at org scale is decided from those numbers (see [Retrieval](./retrieval-and-mcp.md#cost-and-time-measure-before-generating-decided)).
+- Every call is logged (`llm_call`) and its text cached (`llm_output`), so the cost per app is measured, not guessed, and unchanged inputs are never paid for twice.
 
 ---
 
@@ -345,14 +352,13 @@ Full design: [jev.md](./jev.md). **Decided:** Jev makes every decision that dete
 
 | Level | What the org does | What Steno gets |
 |---|---|---|
-| **Passive** (default) | Grants read access | Repos, config, deployment definitions (XLDeploy) |
+| **Passive** (default) | Grants read access | Repos, config, and later deployment / infrastructure definitions |
 | **Annotate** (optional) | Adds a small `steno.yaml` where extractors get something wrong | Overrides and names |
 | **Instrument** (optional, later) | Adopts OpenTelemetry, or exposes Splunk | Runtime-observed edges |
 
 **Defining spaces:**
 1. **Declare** (Phase 1–2): a space is a list of repositories.
-2. **Propose** (Phase 3+): Jev I6, community detection over the communication graph, ownership, and XLDeploy groupings suggest spaces.
-3. **Confirm:** a human accepts or corrects the proposal, and it's saved as `space_assignment`.
+2. **Admin-defined:** spaces are always defined by an admin. Automatic proposals (Jev I6, graph clustering) are a possible later addition, not planned.
 
 **Extending to a new org:** add connectors for its tools, and add extractor rules or plugins for its frameworks. The core model doesn't change.
 
@@ -365,11 +371,11 @@ MCP is the primary interface. A UI comes later, for the tasks where people need 
 | Area | What it does |
 |---|---|
 | **Onboarding and connectors** | Add connectors, pick extractors, declare spaces, watch ingestion runs |
-| **Space confirmation** | Review proposed spaces (Jev I6 + clustering) and accept or correct them |
+| **Space management** | Admins define spaces and assign repositories to them |
 | **Low-confidence review queue** | Humans resolve decisions Jev marked `ambiguous` |
 | **Flow tracer** | Visually follow a flow step by step, stitched across services, with its code |
 | **"Bloomberg terminal" view** | Navigate the org → space → app, and see each space's ins and outs by transport, live. It renders the same layer views `get_node` returns to agents, so the data is built once. |
-| **Change timeline** | What each merge changed (from `run_delta`), later tied to Projects |
+| **Change timeline** | What each merge changed (from `fact_change`), later tied to Projects |
 
 ---
 
@@ -382,7 +388,7 @@ sequenceDiagram
     participant Ctx as Contextualized
     participant St as Steno
     Note over St: Merge to main → Steno re-extracts and computes the delta (already in place)
-    St->>St: run_pr: commits → PR #123
+    St->>St: job_commit: commits → PR #123
     St->>Ctx: which Project is PR #123 part of? what's its summary?
     Ctx-->>St: Project X + the why
     St->>St: fill introduced_by / modified_by on the changed facts
@@ -400,7 +406,7 @@ sequenceDiagram
 
 | Phase | Scope | Exit criteria (Proposed) |
 |---|---|---|
-| **1: Application** | Ingest one application fully: endpoints, outbound calls, transports, flows, entities, structure. Static only. MCP tools over it. | Against a hand-labeled gold set for that app: ≥ 90% of endpoints/topics/outbound calls found, flows match the gold set for the top entry points, and typical questions answered in ≤ 3 calls |
+| **1: Application** | **Start with a dry run** (deterministic only, no LLM cards) that reports time per stage, graph size, and projected LLM cost. Then ingest one application fully: endpoints, outbound calls, transports, flows, entities, structure. Static only. MCP tools over it. | Against a hand-labeled gold set for that app: ≥ 90% of endpoints/topics/outbound calls found, flows match the gold set for the top entry points, and typical questions answered in ≤ 3 calls |
 | **2: Space** | Onboard one space (declared). Rollups within the space, ins/outs, purpose, glossary. | Communication within the space matches what the team says it is |
 | **3: Organization** | Several spaces, cross-space edges, space proposals, the org view | Cross-space edges confirmed by the space owners |
 | **Incremental** | Merge-to-main updates. Can start during Phase 1. | Graph after incremental updates = graph after a full re-ingest |
@@ -421,7 +427,7 @@ Correctness comes first, so it has to be measured:
 
 ## 18. Security and privacy
 
-- **Stored source code is sensitive.** The file store (option A) holds a full copy of every ingested repository's text files, so Steno needs the same access controls as the repositories themselves.
+- **Source code:** Steno stores no file contents, but its facts, citations, and cards describe the code, and the MCP server holds git credentials to read it. Both need the same access controls as the repositories themselves.
 - **Secret values are never ingested.** Credentials live in a secret manager.
 - **Data leaving the org:** Jev receives digests (names, summaries, interactions; rarely code). The LLM receives flow context, including code snippets, when writing cards. **Confirm the org's policy before Phase 1**, and send only the minimum.
 - **MCP access control (Open):** authentication (OAuth over Streamable HTTP) and scoping results by space or role (a contractor sees less than an employee).
@@ -454,7 +460,7 @@ Correctness comes first, so it has to be measured:
 | D5 | Phase 1 is static only | Decided |
 | D6 | Neo4j for the graph, Postgres for app state | Decided (Neo4j leaning) |
 | D7 | Flows: triggers instead of Jobs, no Subflows, ordered steps, flows linked across interfaces and never nested | Decided |
-| D8 | Store all first-party reachable functions. Significance is a tag. | Decided |
+| D8 | Two layers in one Neo4j database, both persisted: an **architecture layer** (where routing and search run) and a **code layer** (every first-party reachable function, `INVOKES`). The code layer is partitioned per space at very large scale. Significance is a tag. | Decided |
 | D9 | One repository → many Applications, detected via Service/Library modules | Decided |
 | D10 | Incremental updates by commit range on merge to main. PRs are used for attribution. | Decided |
 | D11 | Steno owns re-ingestion. Contextualized adds attribution and the why. | Decided |
@@ -462,34 +468,42 @@ Correctness comes first, so it has to be measured:
 | D13 | Steno's own symbol resolution (JavaParser + dependency JARs), with cloning into temporary workspaces. SCIP not planned. | Decided |
 | D14 | Routing: classify with Jev, then search one scope or fan out in parallel | Decided |
 | D15 | Data store schemas in V2. V1 records entity → table mappings and table-level access. | Decided |
-| D16 | Labels for abstraction, no `IS_A` edges | Proposed |
-| D17 | File store (option A): all text files at the ingested commit; the MCP server never calls the git host | Proposed |
-| D18 | `run_delta` keeps the before/after of changed facts | Proposed |
-| D19 | MCP tool set ([list](./retrieval-and-mcp.md#5-mcp-tools-proposed-pending-review)) | Proposed |
+| D16 | Labels for abstraction, no `IS_A` edges | Decided |
+| D17 | No stored file contents: code tools read from the git host at the ingested commit | Decided |
+| D18 | `fact_change` keeps the before/after of every changed fact (architecture layer in full; code layer per function) | Decided |
+| D19 | MCP tool set ([list](./retrieval-and-mcp.md#5-mcp-tools-decided)) | Decided |
 | D20 | Edge names: `INVOKES` (code → code), `CALLS` (network), `STARTS` (what kicks off a flow), `LEADS_TO` (flow → flow, derived) | Decided |
 | D21 | Jev is the navigator at query time: Q0 intent, Q1/Q2 routing, **Q4 candidate verification**, Q3 ranking, using bounded digests | Decided |
-| D22 | Find flows with four signals: flow cards, keyword, entity anchors, glossary | Proposed |
+| D22 | Find flows with cards (vector), keyword, and glossary, plus a global search in parallel with routing. Entity anchors are deferred. | Decided |
 | D23 | Embeddings live in Neo4j's vector index; no separate vector DB | Decided |
-| D24 | Flow / app / space cards use a stronger model with the node's full retrieved context | Decided (model to be confirmed) |
-| D25 | Rule packs, auto-enabled from dependencies, plus a coverage report after every ingestion | Proposed |
+| D24 | Every flow gets an LLM purpose and narrative at initial ingestion; Jev I5 gates regeneration | Decided |
+| D26 | Measure first: Phase 1 opens with a no-LLM dry run and a cost/time projection | Decided |
+| D27 | Spaces are defined by admins; no automatic space proposals | Decided |
+| D28 | Glossary is human-declared in V1. Deriving it from docs and product knowledge comes with the Contextualized integration. | Decided |
+| D29 | Citations in every MCP result (V1) | Decided |
+| D30 | A connector is a source system + scope. Repositories: explicit include list in Phase 1, discovery later. | Decided |
+| D31 | Flow levels: L0 headline, L1 signature (deterministic) + narrative (LLM), L2 `Step` nodes (`FIRST_STEP` / `NEXT` / `SUBSTEP`, each `RUNS` a function), L3 code layer. One rendered flow card per flow. | Decided |
+| D32 | Business context comes from Contextualized, attached to exactly what each Project changed (`Project -CHANGED-> element`) | Decided (later) |
+| D33 | Postgres holds what Steno is told and did; Neo4j holds what it knows. Declared spaces and glossary live in Postgres and are projected into Neo4j. | Decided |
+| D34 | One Steno deployment per organization | Decided |
+| D35 | The work queue is `ingestion_job` in Postgres (`SKIP LOCKED`), no broker | Decided |
+| D36 | Neo4j is rebuildable from Postgres + git without re-spending on the LLM (`llm_output` cache). Nothing is stored only in Neo4j. | Decided |
+| D25 | Rule packs, auto-enabled from dependencies, plus a coverage report after every ingestion. Phase 1 rules are hand-written; templates and LLM-drafted rules are deferred. | Decided |
 
 ## 21. Open questions
 
 **Carried over**
-- [ ] File store (option A) vs. mixed vs. git host for `view_file`
-- [ ] How the glossary is populated (code, docs, declared `glossary.yaml`, usage), and who confirms mappings
-- [ ] LLM-drafted rules: include, or rely on hand-written rules only?
-- [ ] Which model writes flow cards: compare Haiku-class vs. Sonnet-class on a sample
+- [ ] The format for declaring glossary terms (a `glossary.yaml` per space, or the UI later)
+- [ ] Which model writes flow purposes and narratives: decided from the dry run's numbers
 - [ ] The signals that mark a Service module in our microservices repo, and how `plugins/` modules are detected as Libraries
-- [ ] The fan-in threshold for `utility`, and when shared logic gets its own card
+- [ ] The fan-in threshold for tagging a function `utility`
 - [ ] Neo4j edition and licensing (Community vs. Enterprise, Graph Data Science library)
 - [ ] Jev: calibration on our data, and our org's data policy
-- [ ] Final MCP tool names and scope
 
 **Not yet discussed**
-- [ ] Deployment: where Steno runs, and whether it's single-tenant per org (recommended) or multi-tenant
+- [ ] Deployment: where Steno runs
 - [ ] MCP authentication and access scoping
-- [ ] Embeddings model, and the exact card format and size
+- [ ] Embeddings model
 - [ ] How confidence is shown to agents and people, so a Jev-resolved edge never looks deterministic
 - [ ] Cost budget for the initial ingestion of a large org
 - [ ] How the gold set for Phase 1 evaluation gets built, and by whom
@@ -515,4 +529,5 @@ Correctness comes first, so it has to be measured:
 | **Digest** | A small, bounded summary of a node built from the graph (trigger, card, interactions), used as Jev's input |
 | **Rule pack** | A versioned bundle of extractor rules for one framework or org |
 | **Coverage report** | A per-ingestion list of what no rule explained, ranked by frequency |
-| **Entity anchor** | Retrieval that maps a question's nouns to Entity/Table nodes and its verb to an operation, then finds flows performing it |
+| **Entity anchor** | (Deferred) Retrieval that maps a question's nouns to Entity/Table nodes and its verb to an operation, then finds flows performing it |
+| **Citation** | The exact place a claim comes from: space, app, repo, module, file, lines, commit, and a link |

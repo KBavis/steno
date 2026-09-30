@@ -36,11 +36,9 @@ flowchart LR
     GW --> NEO[(Neo4j)]
     CARD --> NEO
     D --> PG[(Postgres)]
-    W --> FS[File store<br/><i>text files at this commit</i>]
-    FS --> PG
 ```
 
-### Passes per application (Proposed)
+### Passes per application (Decided)
 
 Flows are **derived**, not extracted one by one:
 
@@ -55,17 +53,24 @@ Flows are **derived**, not extracted one by one:
 
 A connector says **where a source is and how to reach it**. It fetches; it doesn't interpret.
 
+**A connector is a source system plus a scope, not a single repository** (Decided): e.g. a Bitbucket workspace or project, a GitHub organization, or a GitLab group, with its credentials. **Which repositories to ingest is chosen separately:**
+
+| Phase | Repository selection |
+|---|---|
+| **Phase 1** | An **explicit include list**: one application's repository, or a few |
+| **Later** | **Discovery**: Steno lists every repository in the connector's scope through the host's API, filtered by include/exclude patterns, archived status, and recent activity. An admin assigns the discovered repositories to spaces. |
+
 | Kind | Examples | Phase |
 |---|---|---|
 | Git host | Bitbucket, GitHub, GitLab | 1 |
-| Deployment / infra config | XLDeploy (Kafka topics, ACLs, deployables), Terraform / Helm | Later |
+| Deployment / infra config | Deployment tooling and infrastructure definitions (Kafka topics, ACLs, deployables), e.g. Terraform, Helm | Later |
 | DataStore catalog (read-only) | Postgres, Oracle, Mongo | V2 |
 | Logs / traces | Splunk (transaction IDs), OpenTelemetry | Later (runtime) |
 | Cloud | AWS, GCP, OpenShift | Later |
 
 Credentials are stored as a **reference to a secret manager**, never in Steno's database.
 
-### Cloning (Proposed)
+### Cloning (Decided)
 
 Ingestion workers **clone into a temporary workspace** and delete it after the run. Why clone instead of fetching files through the API:
 
@@ -74,11 +79,11 @@ Ingestion workers **clone into a temporary workspace** and delete it after the r
 - `git diff` between SHAs is local, exact, and detects renames.
 - **Optional:** a cache of bare clones turns the next run into a `git fetch`. It's only an optimization; if lost, Steno clones again. Very large repos can use a partial clone (`--filter=blob:none`).
 
-Queries never need a clone. Ingestion saves the repo's text files to Steno's **file store** (Proposed, option A in [Retrieval §4](./retrieval-and-mcp.md#4-code-access)), and MCP tools read from there.
+Queries never need a clone. Steno stores **no file contents**: code tools read from the git host API at the ingested commit (see [Retrieval §4](./retrieval-and-mcp.md#4-code-access-decided-no-stored-file-contents)).
 
 ### What a config file produces
 
-Config files become **facts** in the graph, plus a raw property map for the resolver. The file itself also goes into the file store.
+Config files become **facts** in the graph, plus a raw property map for the resolver.
 
 | Config value | Becomes |
 |---|---|
@@ -87,7 +92,7 @@ Config files become **facts** in the graph, plus a raw property map for the reso
 | Downstream base URLs (`services.billing.url`) | Resolve `CALLS` targets to a host, then an application or `ExternalSystem` |
 | Datasource URLs | `DataStore` node identity: host, database, vendor |
 | Cron expressions, scheduling config | `Schedule` properties |
-| Every property, per profile | A `config_property` table in Postgres, used to resolve placeholders during incremental updates |
+| Every property, per profile | Re-read from the clone in every job to resolve placeholders (nothing stored) |
 | Secrets | **Never stored.** Recorded as an unresolved reference. |
 
 ---
@@ -125,7 +130,7 @@ emit:
 - **Scheduling differences between orgs** are handled the same way: each mechanism is an extractor that emits a `Schedule` node.
 - **Data definitions:** JPA / Spring Data rules produce entities and stub tables. **Org plugins** cover internal mechanisms for defining tables and relationships.
 
-### Rule packs (Proposed)
+### Rule packs (Decided)
 
 Rules are published as **versioned packs**, like ESLint shareable configs or the Semgrep registry: `steno-pack-spring-web`, `steno-pack-spring-kafka`, `steno-pack-jpa`, plus an org pack such as `yourorg-internal`.
 
@@ -146,7 +151,7 @@ Rules are published as **versioned packs**, like ESLint shareable configs or the
 
 Org-specific packs are usually a handful of rules for internal frameworks.
 
-### Coverage report (Proposed)
+### Coverage report (Decided)
 
 After every ingestion, Steno reports **what no rule explained**: call sites that look like I/O and methods that look like entry points (pre-filtered by Jev I8), **ranked by frequency**:
 
@@ -163,14 +168,32 @@ The most frequent items are exactly the internal frameworks worth covering. Each
 
 Until then, Jev I2/I3 cover them at low confidence.
 
-### LLM-drafted rules (Optional)
+### Turning a coverage item into a rule (Deferred: future enhancement)
 
-Instead of writing a rule by hand, a person picks an item from the coverage report and says what it means, e.g. "this is `PRODUCES`; the topic is argument 0." Then:
-1. An LLM drafts the rule from that intent plus the concrete examples in the report.
-2. Steno **validates it automatically**: it must match every example, and the number of other matches in the repo is shown, to catch false positives.
-3. A human approves it, and it joins the org pack.
+**Phase 1 is fully deterministic.** Rules are written by hand, and the coverage report tells you which rules to write next. Everything below is a **future enhancement**, useful once many organizations are writing their own rules.
 
-The LLM knows what's wanted because the person states the intent and the examples come from the report. Cost is negligible: it runs once per new pattern (tens per org, ever), a few thousand tokens each, never during ingestion. Writing rules by hand remains fully supported.
+There's **no LLM scanning the repository.** It works like this:
+
+1. **Deterministic ingestion runs** with the enabled rule packs.
+2. **The coverage report is computed deterministically**, then filtered by Jev I8:
+   - call sites whose target is an external or unresolved method **and** that look like I/O (the target's package, method names like `send` / `publish` / `invoke` / `execute`, networking or messaging imports)
+   - public methods with annotations no rule recognizes
+
+   Items are grouped by target and ranked by how often they occur.
+3. **A person reviews the report** and says what an item means, using a form, not a prompt.
+4. **Most org rules fit a few templates**, so the rule is generated **without an LLM**:
+
+| Template | The person fills in | Example |
+|---|---|---|
+| **Call → interaction** | Method, fact type (`PRODUCES` / `CALLS` / `READS_FROM` / `WRITES_TO`), which argument holds the topic, URL, or table | `Publisher#send`, `PRODUCES`, topic = arg 0 |
+| **Annotation → entry point** | Annotation, trigger kind, which attribute holds the topic or path | `@PxMessageHandler`, consumes topic, topic = `value` |
+| **Annotation → entity / table** | Annotation, which attribute holds the table name | `@PxTable`, table = `name` |
+| **Config key → fact** | Key pattern, fact type | `px.messaging.topics.*` → `KafkaTopic` |
+
+5. **Steno validates the rule automatically:** it must match every example from the report, and it shows how many other places it matches, to catch false positives.
+6. A person approves it, and it's added to the org pack.
+
+**An LLM is only a fallback** for patterns no template fits. Even then it translates the person's stated intent plus the concrete examples into rule syntax, once per pattern, for a negligible cost. Hand-written rules are always supported.
 
 ---
 
@@ -190,20 +213,58 @@ Flows depend on knowing that `passSvc.callToFunction()` refers to a specific met
 
 Each additional language needs its own resolver, a cost of skipping SCIP's shared format.
 
+### 5.1a The call resolution plan (Java)
+
+**Goal:** every call site in a flow points to **one exact function** (or an explicitly marked set of candidates), never to "some function called `callToFunction`." Resolving what an interface call actually runs (DI) is one step of the same pipeline, not a separate problem.
+
+```mermaid
+flowchart TD
+    CS["Call site: passSvc.callToFunction(req)"] --> T1[1. Receiver type<br/>field PassService passSvc]
+    T1 --> T2["2. Method declaration<br/>PassService#callToFunction(ClientRequest)<br/>overload chosen by argument types"]
+    T2 --> T3{"3. Interface or<br/>abstract?"}
+    T3 -- "no (concrete class)" --> T5
+    T3 -- yes --> T4a{"Interface with<br/>no implementation?"}
+    T4a -- "yes: Spring Data repo, Feign client, ..." --> R[Extractor rule decides<br/>READS_FROM / WRITES_TO / CALLS]
+    T4a -- "no" --> T4[4. DI resolution<br/>beans · @Primary · @Qualifier · @Profile]
+    T4 -- one --> T5["5. Target identity<br/>fn:repo:com.x.PassServiceImpl#callToFunction(ClientRequest)"]
+    T4 -- several --> J[Jev I1, or link all, marked ambiguous]
+    T5 --> W{Where does it live?}
+    W -- "this repo" --> N1[INVOKES → Function node]
+    W -- "ingested library repo" --> N2[INVOKES → that repo's Function node]
+    W -- "not ingested" --> N3[INVOKES → external symbol stub<br/>coverage report, or a rule matches it]
+```
+
+1. **Receiver type.** `passSvc` is declared as `private final PassService passSvc;` (or a constructor parameter), so its type is `com.x.PassService`. The JavaParser symbol solver finds this from the repo's source, the **dependency JARs**, and the JDK.
+2. **Method declaration.** It finds `PassService#callToFunction(ClientRequest)`, choosing between overloads by argument types, and following inherited methods up the class hierarchy.
+3. **Interface or abstract?** If the declared type is a concrete class, go to step 5.
+4. **DI resolution:** which implementation does the framework inject?
+   1. Candidates: classes implementing the interface, found in the repo and the dependency JARs.
+   2. Keep only registered beans: `@Service` / `@Component` / `@Repository`, or `@Bean` methods returning the type.
+   3. `@Qualifier` at the injection point matching a bean name, otherwise `@Primary`.
+   4. `@Profile` / `@ConditionalOnProperty` evaluated against the app's config.
+   5. One left: resolved. Several: Jev I1 chooses; below the threshold, link to all of them, marked `ambiguous`.
+   - **Interfaces with no implementation in the code** are generated by the framework at runtime: Spring Data repositories, Feign clients, gRPC stubs. **Extractor rules** handle them: a `JpaRepository<User, …>` method becomes `READS_FROM` / `WRITES_TO` the `users` table; a `@FeignClient` method becomes `CALLS` an endpoint. This is where DI resolution and extractor rules meet.
+5. **Target identity.** Every function has a stable ID built from its fully qualified name **and parameter types**: `fn:{repo}:com.x.PassServiceImpl#callToFunction(com.x.ClientRequest)`. So a call always points to **one specific, already-known function**, and two calls to it point to the same node.
+6. **Where the target lives:**
+   - this repo: `INVOKES` to its `Function` node
+   - an ingested library: `INVOKES` to that repo's node, matched by the same identity
+   - not ingested: `INVOKES` to an **external symbol stub**, unless a rule recognizes it (e.g. `KafkaTemplate#send` → `PRODUCES`); frequent stubs show up in the coverage report
+
+**Known gaps**, marked instead of guessed:
+- reflection
+- dynamic proxies beyond the ones rules cover
+- event dispatch (`ApplicationEventPublisher` → `@EventListener`), which needs a rule to link publisher and listener
+- lambdas passed through generic code, when their target can't be determined
+
+
+
 **Internal libraries:**
 - **Library repository ingested:** calls resolve into its functions, keyed by fully qualified name, and its facts (e.g. publishing to Kafka) carry through into the flows that call it.
 - **Not ingested:** the call ends at a stub for the external symbol, which shows up in the coverage report.
 
-### 5.2 DI resolution: `PassService` is an interface, so which implementation runs?
+### 5.2 DI rules are per-framework plugins
 
-The compiler can't answer this, because the framework decides at runtime. Rules are applied in order:
-
-1. Exactly one implementing bean (`@Service` / `@Component` / `@Bean`): resolved.
-2. `@Primary`, or a `@Qualifier` matching a bean name: resolved.
-3. `@Profile` / `@ConditionalOnProperty` evaluated against config: resolved.
-4. Still ambiguous: **Jev I1** chooses (see [Jev](./jev.md)). Below the threshold, the call links to **all** candidates, marked `ambiguous`.
-
-These DI rules are **per-framework plugins** (Spring, Guice, Dagger, .NET DI).
+Step 4 above is Spring's set of rules. Other frameworks (Guice, Dagger, .NET DI) are separate plugins with their own rules for registration and selection, so the pipeline stays agnostic.
 
 ---
 
@@ -214,26 +275,28 @@ These DI rules are **per-framework plugins** (Spring, Guice, Dagger, .NET DI).
 - **Identity:** outbound calls and topics resolve to stable IDs, and stubs are created for targets not yet ingested.
 - **Internal vs. vendor hosts:** a list of known org domains, with Jev I4 for anything not on it.
 
-### Glossary (Open: how it's populated)
+### Glossary (Decided: human-declared in V1)
 
-Mapping org vocabulary to graph nodes ("Swing" → a specific application) is hard, because a nickname may appear nowhere in the code. Candidate sources, from most to least automatic:
+Org vocabulary often appears nowhere in the code ("Swing" is a nickname for a specific application), so in V1 **people declare it**:
 
-1. **Code and structure:** repo names, module and package names (`com.yourorg.swing.*`), application names. Jev I7 maps a term to its node when the evidence exists.
-2. **Docs:** READMEs and ADRs in the repos (Confluence through a later connector). Acronyms and capitalized terms become candidates, which Jev I7 maps.
-3. **Declared:** a `glossary.yaml` per space, seeded by the team, e.g. `Swing: app/pay-adjustment-svc`.
-4. **Learned from usage:** unknown terms in agents' questions are logged to a review queue.
-5. **Confirmation:** a human confirms every proposed mapping (in the UI, later).
+```yaml
+# glossary.yaml, one per space (or entered in the UI later)
+Swing: app/pay-adjustment-svc
+PEO: "Professional Employer Organization"; entity/PeoClient
+```
 
-The LLM writes each term's definition. The `glossary` tool and the search pipeline use the mappings to expand questions into graph nodes.
+- A declared term that points at a node is used by search to **expand questions** into graph nodes.
+- Code-derived **suggestions** (repo, module, and package names without a declared term) can be shown to admins as prompts, but they're never added automatically.
+- **Later:** deriving terms from documentation and the product side comes with the **Contextualized integration**, which already has access to docs and the why behind changes.
 
 ---
 
 ## 7. Idempotency and updates
 
-### Stable IDs and replacement by scope (Proposed)
+### Stable IDs and replacement by scope (Decided)
 
 - Every node and edge has a **stable ID derived from natural keys**, so re-ingesting finds the same nodes.
-- Every fact records the `ingestion_run` that wrote it. Re-ingesting a scope (a repo, or a set of files):
+- Every fact records the `ingestion_job` that wrote it. Re-ingesting a scope (a repo, or a set of files):
   1. `MERGE` all current facts.
   2. Delete that scope's facts from older runs.
   3. Remove shared nodes (topics, tables) only when nothing references them anymore.
@@ -266,7 +329,6 @@ sequenceDiagram
   - direct pushes and reverts are caught
   - squashes and rebases don't matter
 - **PRs are used for attribution.** Commits in the range are mapped to their PRs. The range says *what* changed; the PR says *who and why*. That's the link to Projects later.
-- Update the file store for the changed files.
 
 ### Steno owns re-ingestion (Decided)
 
@@ -276,51 +338,84 @@ Only Steno's extractors can produce facts in Steno's model. Contextualized later
 
 ## 8. Relational database (Postgres)
 
-Holds **application state**. The knowledge itself lives in Neo4j.
+**Principle: Postgres holds what Steno is *told* and what Steno *did*. Neo4j holds what Steno *knows*.**
+
+- **Declared structure** (spaces, glossary) has its **source of truth in Postgres** and is **projected into Neo4j** as nodes and edges. (Decided)
+- **Neo4j can be rebuilt** from Postgres plus the repositories, **without re-spending on the LLM**, because every generated text is cached in `llm_output`. Nothing is stored only in Neo4j. (Decided)
+- **One Steno deployment per organization**, so no tables carry an `organization_id`. (Decided)
+- **The work queue lives in Postgres:** workers claim `queued` jobs with `SELECT … FOR UPDATE SKIP LOCKED`, so no separate broker is needed. (Decided)
 
 ```mermaid
 erDiagram
-    CONNECTOR ||--o{ REPOSITORY : "points at"
-    CONNECTOR ||--o{ CONNECTOR_EXTRACTOR : uses
-    EXTRACTOR ||--o{ CONNECTOR_EXTRACTOR : "enabled for"
-    SPACE_ASSIGNMENT }o--|| REPOSITORY : declares
-    REPOSITORY ||--o{ INGESTION_RUN : has
-    INGESTION_RUN ||--o{ RUN_DELTA : produced
-    INGESTION_RUN ||--o{ RUN_PR : "attributed to"
-    INGESTION_RUN ||--o{ JEV_DECISION : made
-    INGESTION_RUN ||--o{ LLM_GENERATION : made
-    REPOSITORY ||--o{ REPO_FILE : contains
-    REPO_FILE }o--|| FILE_BLOB : "content"
-    REPOSITORY ||--o{ CONFIG_PROPERTY : defines
+    CONNECTOR ||--o{ REPOSITORY : scopes
+    SPACE ||--o{ SPACE : nests
+    SPACE ||--o{ REPOSITORY : owns
+    SPACE ||--o{ GLOSSARY_TERM : defines
+    REPOSITORY ||--o{ REPOSITORY_RULE_PACK : uses
+    RULE_PACK ||--o{ REPOSITORY_RULE_PACK : "enabled for"
+    REPOSITORY ||--o{ INGESTION_JOB : has
+    INGESTION_JOB ||--o{ INGESTION_STAGE : "timed by"
+    INGESTION_JOB ||--o{ COVERAGE_ITEM : found
+    INGESTION_JOB ||--o{ FACT_CHANGE : produced
+    INGESTION_JOB ||--o{ JOB_COMMIT : covers
+    INGESTION_STAGE ||--o{ LLM_CALL : spent
+    INGESTION_STAGE ||--o{ JEV_DECISION : made
+    LLM_CALL ||--|| LLM_OUTPUT : produced
+    TOOL_CALL ||--o{ JEV_DECISION : "made (query time)"
 
-    CONNECTOR { uuid id string kind string base_url string credentials_ref string main_branch }
-    REPOSITORY { uuid id uuid connector_id string url string last_ingested_sha timestamp last_ingested_at }
-    EXTRACTOR { uuid id string name string version string kind "rule|plugin" string language text definition }
-    CONNECTOR_EXTRACTOR { uuid connector_id uuid extractor_id bool enabled }
-    SPACE_ASSIGNMENT { uuid repository_id string space_path string source "declared|proposed|confirmed" }
-    INGESTION_RUN { uuid id uuid repository_id string trigger "initial|merge|manual" string from_sha string to_sha string status timestamp started_at timestamp finished_at json stats }
-    RUN_DELTA { uuid run_id string fact_id string fact_type string change "added|removed|changed" json before json after }
-    RUN_PR { uuid run_id int pr_number string commit_sha string project_id }
-    JEV_DECISION { uuid id uuid run_id string decision "I1..I6|Q1..Q3" json input json output float confidence timestamp at }
-    LLM_GENERATION { uuid id uuid run_id string node_id string model int input_tokens int output_tokens string card_hash }
-    REPO_FILE { uuid repository_id string path string commit_sha string blob_sha }
-    FILE_BLOB { string blob_sha text content int size }
-    CONFIG_PROPERTY { uuid repository_id string profile string key string value string source_file }
-    GLOSSARY_TERM { uuid id string term string space string node_id string definition string source "code|docs|declared|usage" string status "proposed|confirmed" }
+    CONNECTOR { uuid id string kind string base_url json scope string credentials_ref }
+    REPOSITORY { uuid id uuid connector_id uuid space_id string name string clone_url string default_branch string selection string last_ingested_sha string status }
+    SPACE { uuid id uuid parent_id string name string description }
+    GLOSSARY_TERM { uuid id uuid space_id string term string target_node_id string definition }
+    RULE_PACK { uuid id string name string version string source }
+    REPOSITORY_RULE_PACK { uuid repository_id uuid rule_pack_id bool enabled string reason }
+    INGESTION_JOB { uuid id uuid repository_id string trigger string mode string from_sha string to_sha string status timestamp queued_at timestamp started_at timestamp finished_at string error json stats }
+    INGESTION_STAGE { uuid id uuid job_id string stage timestamp started_at timestamp finished_at string status json metrics float llm_cost float jev_cost }
+    COVERAGE_ITEM { uuid id uuid job_id uuid repository_id string kind string target_symbol int occurrences json samples string status }
+    FACT_CHANGE { uuid id uuid job_id string fact_id string fact_type string change json before json after string commit_sha }
+    JOB_COMMIT { uuid job_id string commit_sha int pr_number string pr_url timestamp merged_at }
+    LLM_CALL { uuid id uuid job_id uuid stage_id string node_id string purpose string model int input_tokens int output_tokens int cached_tokens float cost int latency_ms }
+    LLM_OUTPUT { uuid id uuid llm_call_id string node_id string kind string input_hash text text bool is_current }
+    JEV_DECISION { uuid id uuid stage_id uuid request_id string decision json input json output float confidence int latency_ms }
+    TOOL_CALL { uuid id string session_id uuid request_id string tool json params int latency_ms int result_count timestamp at }
 ```
+
+### Configuration: what Steno is told
 
 | Table | Why |
 |---|---|
-| `connector`, `repository` | What to ingest and how to reach it. `last_ingested_sha` drives incremental updates. |
-| `extractor`, `connector_extractor` | The registry of rules and plugins, and which ones run where |
-| `space_assignment` | The declared or confirmed space structure, the source of truth for onboarding (proposals come from Jev I6) |
-| `ingestion_run` | What's running, what has run, status, and stats |
-| `run_delta` | What each run changed. **`before` / `after` hold the previous and new state of changed facts** (Proposed; this is what makes delta-driven testing possible without full version history). |
-| `run_pr` | Commit → PR → (later) Project attribution |
-| `jev_decision` | Every Jev input and output, for checking calibration and auditing |
-| `llm_generation` | Cost tracking for card generation |
-| `repo_file`, `file_blob` | **The file store** (Proposed, option A): every text file at the ingested commit. Contents keyed by git blob SHA, so unchanged files are stored once. |
-| `config_property` | Every config property, per profile, for resolving placeholders |
-| `glossary_term` | Term → node mappings, with their source and confirmation status |
+| `connector` | A source system plus a scope (a Bitbucket workspace or project, a GitHub org). `credentials_ref` points into a secret manager; secrets are never stored. |
+| `repository` | The include list now, discovery later (`selection`: included / discovered / excluded). `space_id` places it in the org. `last_ingested_sha` drives incremental updates. |
+| `space` | Admin-declared spaces, which can nest. Projected into Neo4j. |
+| `glossary_term` | Human-declared vocabulary: a term, its definition, and the node it refers to. Projected into Neo4j. |
+| `rule_pack`, `repository_rule_pack` | Which rule packs (and versions) apply to which repository, and whether each was auto-enabled from dependencies or added manually. |
 
-In the POC, the connector and space configuration can start as config files and move into these tables later.
+### Operations: what Steno did
+
+| Table | Why |
+|---|---|
+| `ingestion_job` | Every job (`trigger`: initial / merge / manual; `mode`: full / incremental / **dry_run**) and its status (**queued** / running / succeeded / failed). **It's also the work queue.** |
+| `ingestion_stage` | Per stage (clone, deps, parse, resolve, flows, write, cards): timings, metrics (files, functions, flows), and **cost** (`llm_cost`, `jev_cost`, summed from the calls made in that stage). This is the dry-run report. |
+| `coverage_item` | What **no rule explained** but looks like it matters: unexplained call sites and unrecognized annotations, with occurrence counts and sample locations. `status` is open / ignored / covered, so it's tracked across jobs, noise stays hidden once ignored, and open items measure how complete an app's graph is. |
+
+### Change history
+
+| Table | Why |
+|---|---|
+| `fact_change` | One row per fact a job **added, removed, or modified**, with `before` and `after`. It backs "what changed in this merge?" (`get_changes`), delta-driven testing, and debugging. Re-ingesting the same commit must produce **zero rows**, which makes it an automated idempotency test. `commit_sha` is set when exactly one commit in the range touched the change's file, which attributes it to one PR. |
+| `job_commit` | Every commit (and its PR) that a job covered. It enables "introduced in PR #123" in citations, and it's the bridge Contextualized will use for PR → Project. |
+
+**What `fact_change` records.** The graph itself always reflects **every** change in full; this table is only the **history log**:
+- **Architecture layer:** every change to flows, steps, interfaces, effects, entities, and tables, including LLM text that was regenerated.
+- **Code layer:** one row per function **added, removed, or modified** (signature or body, detected by a body hash). Individual `INVOKES` edges aren't logged one by one; a function whose calls changed shows up as "modified," and any effect of that change on flows and steps is logged in full on the architecture side.
+
+### Audit, cost, and caching
+
+| Table | Why |
+|---|---|
+| `llm_call` | Every LLM call: purpose (flow purpose, flow narrative, app card, …), model, tokens (including cached), cost, latency, and the stage it ran in |
+| `llm_output` | The text each call produced, tied to its `llm_call` and its node. Looked up by `(node_id, kind, input_hash)` before calling the LLM, so unchanged inputs are never paid for twice. `is_current` keeps earlier versions. |
+| `jev_decision` | Every Jev input, output, confidence, and latency. From ingestion, it's linked to the stage; at query time, to the request. |
+| `tool_call` | Every MCP tool call from agents: tool, parameters, latency, result count, grouped by `session_id`. It measures round trips per question and the latency targets, shows chatty patterns worth a batch tool, and joins with `jev_decision` to debug a bad answer. |
+
+In the POC, connectors, repositories, spaces, and the glossary can start as a config file that's loaded into these tables.

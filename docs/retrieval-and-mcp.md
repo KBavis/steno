@@ -23,9 +23,9 @@ Rough costs:
 | **Precomputed summary cards** | The expensive understanding happens at ingestion. At query time it's a lookup. | Decided |
 | **Route to the right layer** | Jev sends a clear question straight to the space or application, skipping the top-down walk | Decided |
 | **Server-side parallel fan-out** | Several spaces are searched in **one call** | Decided |
-| **Progressive disclosure** | Every result includes children and edge counts, so the next step is obvious | Proposed |
-| **Batch tools** | A whole flow, its code, or a blast radius in one call | Proposed |
-| **Token budgets** | Every tool takes `max_tokens`, and Jev Q3 trims the results by relevance | Proposed |
+| **Progressive disclosure** | Every result includes children and edge counts, so the next step is obvious | Decided |
+| **Batch tools** | A whole flow, its code, or a blast radius in one call | Decided |
+| **Token budgets** | Every tool takes `max_tokens`, and Jev Q3 trims the results by relevance | Decided |
 
 ## 2. Search top-down, over data built bottom-up
 
@@ -40,7 +40,7 @@ flowchart TD
     Q1 -- one space --> Q2[Jev Q2: which app?]
     Q1 -- several spaces --> RET
     Q1 -- none / unclear --> RET
-    Q2 --> RET[Candidate retrieval, in parallel per scope<br/>vector · keyword · entity anchors · glossary]
+    Q2 --> RET[Candidate retrieval, in parallel per scope<br/>vector · keyword · glossary]
     RET --> Q4[Jev Q4: verify each candidate<br/>'does this flow do what was asked?']
     Q4 --> Q3[Jev Q3: rank + trim to budget]
     Q3 --> EXP[Expand the winners: downstream flows via LEADS_TO]
@@ -48,17 +48,22 @@ flowchart TD
 ```
 
 - **The client's LLM does the final synthesis.** Steno runs no LLM at query time.
+- **Semantic search proposes; Jev verifies and ranks.** Jev never decides alone what's excluded:
+  - **A global search runs in parallel with routing.** Vector and keyword search across the whole architecture graph run alongside the routed search, and the results are merged. If routing picks the wrong space, the global search still finds the flow.
+  - **Soft routing:** when Q1's confidences are close together, fan out wider instead of trusting the top pick. The beam always keeps at least 2 branches.
+  - **Jev ranks, and only prunes when highly confident.** Lower-confidence candidates stay in the results, lower down and marked.
+  - **Every Jev decision can be switched off**, falling back to ranking by embedding score. Logs and the question → flow set show whether each decision helps.
 - **Aim for recall over precision.** Returning 5–10 verified candidates with confidence is cheap, and the client's LLM picks among them.
 
-### Finding flows: combining retrieval signals (Proposed)
+### Finding flows: combining retrieval signals (Decided)
 
 A question is asked in business language ("how does a client get created?"), while flows are named after code (`POST /v1/clients → ClientController#create`). No single signal bridges that gap, so candidates come from several signals combined, then Jev verifies them:
 
 | Signal | How it works | Catches |
 |---|---|---|
-| **Flow cards (vector)** | Embeddings of flow cards written in business language | Paraphrased, conceptual questions |
+| **Flow cards (vector)** | Embeddings of flow cards: the deterministic signature plus the LLM-written purpose and narrative | Paraphrased, conceptual questions |
 | **Keyword** | A Neo4j **full-text index** over endpoint paths, topic names, symbols, entity and table names | Exact terms: `client.created`, `/v1/clients` |
-| **Entity anchors (graph)** | Nouns in the question map to `Entity` / `Table` nodes. The verb maps to an operation (create → `WRITES_TO` insert, a POST, a produced `*.created` event). Candidates = flows that perform that operation on those nodes. | Questions about domain objects, even when card wording differs |
+| **Entity anchors (graph)** *(deferred, later optimization)* | Nouns in the question map to `Entity` / `Table` nodes. The verb maps to an operation (create → `WRITES_TO` insert, a POST, a produced `*.created` event). Candidates = flows that perform that operation on those nodes. | Questions about domain objects, even when card wording differs |
 | **Glossary** | Expands org nicknames to graph nodes before searching ("Swing" → its application) | Org-specific vocabulary |
 
 Then:
@@ -67,30 +72,49 @@ Then:
 3. **The winners are expanded** along `LEADS_TO`, because the answer is often a chain: an API flow that leads to an async onboarding consumer.
 
 **Entity anchors in more detail.** "How does a client get created?":
-1. Jev picks the matching `Entity` among candidates from keyword search (`Client`, `ClientDTO`, `ClientContact`), as a Choice.
-2. Graph: `Client` `MAPS_TO` table `clients`. Which flows have a step that `WRITES_TO` `clients` with an insert, or produce `client.created`?
-3. Those flows become candidates, **even if their cards never use the word "create."**
+1. **At ingestion**, Jev I9 tags every flow with a primary entity and an operation (create / read / update / delete / process / sync / notify / report).
+2. **At query time**, Jev picks the entity (Q2b: `Client` among `Client`, `ClientDTO`, `ClientContact`) and the operation (Q0: *create*).
+3. An index lookup returns the flows tagged (`Client`, create), cross-checked against the graph (`WRITES_TO clients` with an insert, or producing `client.created`).
+4. Those flows become candidates, **even if their cards never use the word "create."**
+
+It's one signal among four. Q0 decides when it applies (questions about domain objects), and it's not used otherwise.
+
+**Status: deferred.** Phase 1 uses routing plus cards (vector), keyword, and glossary. Entity anchors are a later optimization, once measurements show where plain retrieval falls short.
 
 This is structural retrieval, which embeddings alone can't do. Combined with Jev making every choice and verification cheaply, it's the part of Steno that's genuinely new.
 
 **It gets measured:** a set of questions, each paired with the flows that correctly answer it. Track how often the right flows appear in the top k. It's part of Phase 1's exit criteria.
 
-### Summary cards
+### Summary cards (Decided)
 
-**Which nodes get cards:** Organization, Space, Application, Module, **Flow**, Interface, Entity, DataStore / Table, and only the **important** Functions (entry points and shared logic). Most functions get no card, which keeps the count bounded.
+**Where cards live:** as **properties on the node they describe** (`card`, `card_hash`, `card_embedding`), not as separate nodes. Every node with a card also gets a shared `:Searchable` label, so **one** vector index and one full-text index cover all of them.
 
-| Card | Writer | Input |
+| Node | Card contents | Written by |
 |---|---|---|
-| **Flow, Application, Space, Org** | A stronger model (e.g. Sonnet-class); to be confirmed by comparing against Haiku on a sample | **Everything retrieved for that node.** For a flow: its trigger, request/response entities, the ordered significant steps, data access, topics, downstream flows' cards, and the code of its significant steps (bounded) |
-| **Interface, Entity, Table, Function, Module** | A small model (e.g. Haiku-class) | The node's facts and neighbors |
+| **Flow** | Trigger, purpose, narrative steps, what it touches, what it leads to, business context (later), source. See the [flow card](./knowledge-graph.md#flow-levels-and-the-flow-card-decided). | Deterministic signature + **LLM purpose and narrative for every flow** at initial ingestion |
+| **Application, Space, Organization** | Purpose, key flows and interfaces, ins and outs | LLM (few nodes, high value, and routing depends on them) |
+| **Interface, Entity, Table, Module** | Facts and neighbors | Deterministic template |
+| **Function** | None | — |
 
-- **Flow cards determine whether flows can be found**, so they're written in business language and given the full context.
-- **Cards are written for two readers:** embeddings and Jev (short, precise, fixed size), and agents (anchors and next steps). Their fixed size is also what keeps **Jev's input bounded** for huge flows (see [Jev §4](./jev.md#4-what-jev-sees-state-design)).
-- Cached by the hash of their inputs, and regenerated only when Jev I5 says the meaning changed.
-- Written with the **Batch API** (ingestion isn't latency-sensitive, and batch costs 50% less).
-- Embedded and stored in Neo4j's **vector index**. No separate vector database.
+- **Why every flow gets an LLM purpose:** declared summaries are often missing or vague, and without a real purpose semantic search has nothing meaningful to match.
+- **Keeping it affordable at scale:** a small model by default, the Batch API, and **prompt caching** (flows in one app share a cached prefix: the app card, entities, conventions).
+- **On re-ingestion:** deterministic parts are rebuilt for free. **Jev I5** decides from the old purpose and narrative plus the fact diff whether they're still accurate; the LLM regenerates them only if not.
+- **Cards are written for two readers:** embeddings and Jev (short, precise, bounded in size), and agents (sources and next steps). Their bounded size keeps **Jev's input bounded** for huge flows (see [Jev §4](./jev.md#4-what-jev-sees-state-design)).
 
-**Rough cost (to be measured on the first app).** A large application with ~300 entry points has roughly 300 flows, 300 interfaces, and 100 entities, so about **700–1,000 cards**. At ~5k input and ~400 output tokens per card, with the Batch API: about **$3–4 per app with a small model and $7 with a stronger model**, so **~$7k–14k one time for 2,000 applications**. After that, updates only regenerate the cards Jev I5 flags.
+### Cost and time: measure before generating (Decided)
+
+Phase 1 starts with a **dry run that writes no LLM cards**, to see the real numbers before spending:
+
+1. **Deterministic ingestion only** for one application: clone, dependencies, parsing, resolution, flow derivation, graph write, signature-only flow cards.
+2. **Ingestion report:**
+   - **time per stage** (clone, dependency fetch, parse, resolve, derive flows, write)
+   - **graph size**: nodes and edges by label, number of flows, and business vs. technical flows
+   - **projected LLM cost**: the input tokens every flow's purpose and narrative *would* need (token counting, not generation), times each model's price, with and without prompt caching
+3. **A sample:** purposes and narratives for ~50 flows with a small and a stronger model. Compare retrieval quality on the question → flow set, and against signature-only cards.
+4. **Extrapolate to the org:** per-app numbers × the org's app count, scaled by app size (endpoint count, lines of code).
+5. **Ongoing cost:** merges per day × flows touched per merge × the share I5 flags for regeneration.
+
+The dry run gives the real cost of writing every flow's purpose and narrative, before any spend, and the levers to lower it (model, batch, caching) are compared on real numbers.
 
 ## 3. Parallelism
 
@@ -101,29 +125,40 @@ This is structural retrieval, which embeddings alone can't do. Combined with Jev
 
 An MCP server can't create subagents in the client, and doesn't need to. Most of "send a subagent into each space" is retrieval, and the server does that itself.
 
-## 4. Code access
+## 4. Code access (Decided: no stored file contents)
 
-Code usually **isn't local** to the agent. Facts and flow code cover most needs, but agents still need some raw files: build files (dependencies, versions), config values, READMEs and ADRs, tests (as examples when writing new tests), SQL migrations, Dockerfiles and Helm charts, and anything extraction missed.
+Code usually **isn't local** to the agent. Steno **stores no file contents**. Every code tool reads from the **git host API at the ingested commit**, so what the agent sees always matches the graph.
 
-**`view_file` and `list_directory` stay as tools.** The question is only **where they read from**:
+| Tool | What it does |
+|---|---|
+| `view_flow_code(flow_id, detail?)` | The source of a flow's functions **in order, across all its files, in one call**. It uses the flow's stored function list and line ranges to fetch only the files it needs (in parallel) and slices each function out, with a citation on each. `detail`: the significant steps only (default), or every touched function. |
+| `view_file` / `list_directory` | Files **not covered by any flow**: `build.gradle`, `application.yml`, READMEs, tests. Rarely needed. |
 
-| Option | Where files come from | Tradeoff |
-|---|---|---|
-| **A. File store (recommended)** | At ingestion, workers save **every text file of the repo at the ingested commit** into Steno's own storage | **The MCP server never calls the git host.** No git credentials in the MCP server, no rate limits, always consistent with the graph, and **code search across every ingested repo** becomes possible. Costs storage, and Steno holds a full copy of the source (a security consideration). |
-| B. Mixed | Store flow code, config, build files, and docs; the git host for everything else | More moving parts |
-| C. Git host | Every call goes through the git host API, pinned to the ingested SHA | Rate limits, credentials in the MCP server, latency |
+- An in-memory cache in the MCP server absorbs repeated reads.
+- The cost: git credentials live in the MCP server, and there's some latency and rate-limit risk. Revisit only if measurements show a problem.
 
-**What "storing" means in option A:**
-- **`file_blob`**: file contents keyed by the **git blob SHA** (git's hash of the content). A file that doesn't change between commits has the same blob SHA, so it's stored only once.
-- **`repo_file`**: `(repository, path, commit) → blob SHA`. This is what `list_directory` reads.
-- Where: Postgres to start (text compresses well), moving to object storage (S3 / MinIO) if volume demands.
-- A full-text or trigram index on `file_blob` enables a `search_code` tool across the whole org.
+## 5. MCP tools (Decided)
 
-Binary files aren't stored. `view_flow_code` reads the same store, sliced to each step's function.
+Transport: **MCP over Streamable HTTP**. Every tool accepts `max_tokens`. Every result carries **confidence**, **citations** (below), and hints for the next call.
 
-## 5. MCP tools (Proposed, pending review)
+### Citations (Decided: part of V1)
 
-Transport: **MCP over Streamable HTTP**. Every tool accepts `max_tokens`. Every result carries **confidence** and **anchors** (symbol + commit), plus hints for the next call.
+Every fact already records its source (repo, symbol, commit) and every call site its line, so each result **cites where its claims come from**, with a clickable link:
+
+```json
+"citations": [{
+  "claim": "writes clients (insert)",
+  "space": "Onboarding", "app": "users-svc", "repo": "microservices",
+  "module": "services/users", "file": "src/main/java/.../ClientService.java",
+  "lines": "57", "commit": "a1b2c3d",
+  "url": "https://<git host>/.../ClientService.java?at=a1b2c3d#lines-57"
+}],
+"searched": ["space:Onboarding", "space:Identity"]
+```
+
+- **Cite each claim** (an effect, a step, a contract), not every file touched. For a flow, that's its entry function plus one citation per effect.
+- **`searched`** lists the scopes the answer came from, so the consumer knows what was and wasn't looked at.
+- The consumer (agent or person) can always go and check the exact place the claim came from.
 
 ### Search and navigation
 
@@ -151,8 +186,7 @@ These views are rollups computed from application-level facts. The future UI ren
 |---|---|---|
 | `get_flow(flow_id \| trigger, expand: none\|sync\|all, detail: significant\|all)` | The ordered step tree, stitched across services when expanded | Ordered steps, interactions, sync/async markers |
 | `view_flow_code(flow_id, steps?)` | The code for every step of a flow in **one round trip** | Source snippets by step |
-| `view_file(repo, path, sha?)` / `list_directory(repo, path, sha?)` | Any file or directory at the ingested commit, from the file store (option A) | File contents / listing |
-| `search_code(query, scope?)` | Keyword or regex search across every ingested repository (needs option A) | Matching files and lines, with the owning app and flows |
+| `view_file(repo, path, sha?)` / `list_directory(repo, path, sha?)` | Files not covered by any flow, from the git host at the ingested commit | File contents / listing |
 | `find_symbols(symbols[] \| stack_trace)` | Map stack frames or symbols to functions → flows → triggers → upstream callers | Matching functions and their flows |
 
 ### Dependencies and impact
@@ -174,7 +208,7 @@ These views are rollups computed from application-level facts. The future UI ren
 
 `find_dependents` answers "what's around X?" in one direction. `find_paths` answers "how does X get to Y?"
 
-### `analyze_change`: analyzing the whole change, not just a diff (Proposed)
+### `analyze_change`: analyzing the whole change, not just a diff (Decided)
 
 A raw diff is too narrow. It misses the PR's context, and the other PRs this change depends on or completes. So the main input is **one or more PR references**, with `branch` or `diff` as fallbacks (e.g. an agent checking its local work before opening a PR).
 
@@ -211,4 +245,4 @@ This reuses the ingestion machinery, so there's no separate analysis engine. It 
 | `search` with Jev routing and fan-out | p95 < 1.5 s |
 | Typical question answered in | ≤ 3 tool calls |
 
-To be validated against real usage. Tool calls and latencies are logged so round trips can be measured, not guessed.
+To be validated against real usage. Every tool call is logged in `tool_call` (grouped by session), so round trips per question and latencies are measured, not guessed.

@@ -13,7 +13,7 @@ Part of the [Design Doc](./DESIGN_DOC.md). Status markers: **Decided** · **Prop
 | **Facts are stored at the lowest level, and higher layers are rollups.** Communication within and between spaces is derived from application-level facts, never stored separately. | Decided |
 | **Interfaces are nodes.** Endpoints, topics, and data stores are nodes of their own. Apps connect to them, and edges between apps appear automatically when two apps reference the same interface node. | Decided |
 | **Every node has exactly one owner in the tree.** A node's layer is where it sits, not a property of its type. | Decided |
-| **Abstraction uses labels, not `IS_A` edges.** Neo4j is a property graph: a node can have several labels. | Proposed |
+| **Abstraction uses labels, not `IS_A` edges.** Neo4j is a property graph: a node can have several labels. | Decided |
 | **Every fact records where it came from** (repo, symbol, ingested commit), what produced it (extractor, Jev decision), and its **confidence**. | Decided |
 | **Every fact has room for its origin Project** (`introduced_by`, `modified_by`), filled in once Contextualized supplies project deltas. | Decided |
 
@@ -32,29 +32,34 @@ Part of the [Design Doc](./DESIGN_DOC.md). Status markers: **Decided** · **Prop
 
 ---
 
-## 2. Layers and ownership
+## 2. Two layers: architecture and code
 
-```mermaid
-flowchart TD
-    Org[Organization] --> S1[Space: Payments]
-    Org --> S2[Space: Identity]
-    S1 --> S1a[Space: Payroll Tax<br/><i>spaces can nest</i>]
-    S1 --> R1[Repository: microservices]
-    S1 --> DS1[(DataStore: payments-db)]
-    S1 --> T1{{KafkaTopic: payment.created}}
-    S1 --> A1[Application: users-svc]
-    R1 --> M1[Module:Service<br/>services/users]
-    R1 --> M2[Module:Library<br/>plugins/logging]
-    M1 --> F1[File: UserController.java]
-    F1 --> FN1[Function: UserController#getUser]
-    A1 --> E1[/HttpEndpoint: GET /users/]
-    A1 --> FL1[Flow: GET /users]
-    A1 -. BUILT_FROM .-> M1
+The graph is two trees joined by three bridge edges:
+
+```
+ARCHITECTURE LAYER (what it does)             CODE LAYER (how it's built)
+Organization                                  Repository   (belongs to a Space)
+ └ Space  (can nest)                           └ Module (:Service / :Library / …)
+    ├ DataStore → Schema → Table                  └ File
+    ├ KafkaTopic / Queue                             └ Function ──INVOKES──▶ Function
+    └ Application ──────────BUILT_FROM──────────────▶ Module
+       ├ Interface, Entity, Schedule
+       └ Flow ──────────────ENTRY───────────────────▶ Function
+          └ Step ───────────RUNS────────────────────▶ Function
 ```
 
-Solid arrows are `BELONGS_TO`, drawn from parent to child for readability. Steno uses three layers: **Organization → Space → Application**. Repositories, modules, files, and functions sit under them as the code structure.
+| | Architecture layer | Code layer |
+|---|---|---|
+| **Answers** | What exists, what it does, what it touches, flows step by step | Exactly what code runs at each step |
+| **Tree** | Organization → Space → Application → Flow → Step | Repository → Module → File → Function |
+| **Queried** | Always: routing and search run **only** here | Only after narrowing to one app or flow |
+| **Effects** | Lifted onto Steps and Flows (`Step -WRITES_TO-> Table`) | Where they're extracted (`Function -WRITES_TO-> Table`) |
 
----
+**Bridges:** `Application -BUILT_FROM-> Module` (the service module that builds the deployable), `Flow -ENTRY-> Function`, and `Step -RUNS-> Function`.
+
+- **An Application is not a Module.** An Application is the deployable unit (architecture); a Module is the build unit (code). A `:Service` module builds an Application. Packages aren't nodes.
+- **The architecture layer describes behavior down to each step without touching the code layer.** Agents drop into the code layer only for fine detail.
+- Every node has exactly one `BELONGS_TO` owner. A Repository belongs to a Space, so both trees are anchored in the org.
 
 ## 3. Node types
 
@@ -66,20 +71,42 @@ Solid arrows are `BELONGS_TO`, drawn from parent to child for readability. Steno
 | `Application` | Space | `name`, `purpose` | An **independently deployable unit**. `(:Application)-[:BUILT_FROM]->(:Module)` |
 | `Module` (+ role label) | Repository | `path`, `build_tool` | A build unit (Maven/Gradle module). **Not a package**: packages are paths. See [Module roles](#module-roles). |
 | `File` | Module | `path`, `language`, `content_hash` | |
-| `Function` | File | `symbol`, `signature`, tags `significant`, `utility` | Every first-party function reachable from an entry point. See [Flows](#6-flows). |
+| `Function` | File | See [Function properties](#function-properties) | Every first-party function reachable from an entry point. See [Flows](#6-flows). |
 | `Interface` + `HttpEndpoint` | exposing Application | `method`, `path` | |
 | `Interface` + `GrpcMethod` | exposing Application | `service`, `method` | |
 | `Interface` + `KafkaTopic` / `Queue` | **a Space**, never an Application | `name` | See [Topic ownership](#topic-ownership) |
 | `Interface` + plugin-defined label | depends on the plugin | | e.g. the named messages of an internal communication framework |
 | `Schedule` | Application | `kind` (cron / fixed-rate / fixed-delay), `expression` | A trigger that isn't an interface |
-| `Flow` | Application | `name`, `entry_symbol`, `steps` | See [Flows](#6-flows) |
-| `DataStore` | Space | `type` (SQL, NoSQL, …), `vendor` | |
-| `Schema` → `Table` → `Column` | DataStore → Schema → Table | `name`, `kind` | V1 creates `Table` stubs. V2 fills them in. See [Data stores](#7-data-stores). |
-| `Entity` | Application | `name`, `fields` | Domain models, request/response payloads |
+| `Flow` | Application | `name`, `entry_symbol`, `steps`, `primary_entity`, `operation`, `technical` (from Jev I9 / I10) | See [Flows](#6-flows) |
+| `Step` | Flow | `path` (e.g. `1.1.3`), `label` (LLM phrasing), `branch_raw`, `branch` (LLM phrasing), `effects` | One significant step of a flow (L2). `RUNS` the function it corresponds to. |
+| `DataStore` + `Relational` / `Document` / `KeyValue` / `Search` / `Graph` | Space | `vendor` (Postgres, Oracle, Mongo, Redis, …), `version`, `host`, `database` | The **category is a label**, because it changes the model (relational stores have schemas and tables; document stores have collections). The **vendor is a property**, because it's an open-ended list that doesn't change the model. |
+| `Schema` | DataStore | `name` | V1: only when the code names one |
+| `Table` | Schema, or DataStore when there's no schema | `name`, `kind` (table / collection / index), `stub` | V1: stubs. V2: filled in. See [Data stores](#7-data-stores). |
+| `Column` | Table | `name`, `type`, `nullable`, `purpose` | V2 |
+| `Entity` | Application | `name`, `symbol`, `fields` [{name, type}] | Domain models, request/response payloads |
 | `ExternalSystem` | Organization | `host`, `name` | Vendor and third-party APIs |
 | `KafkaCluster` (and other brokers) | Organization | `name` | Infrastructure, attached with `HOSTED_ON` |
 
 Candidates for later: `Team`/owner, deployment `Environment`.
+
+### Function properties
+
+**How much to store:** only what's needed to (1) **identify** a function uniquely, (2) **resolve and traverse** calls, and (3) **display and summarize** it. Everything else is read from the source when needed.
+
+| Property | Example | Why |
+|---|---|---|
+| `id` | `fn:microservices:com.x.PassServiceImpl#callToFunction(com.x.ClientRequest)` | Identity. **Parameter types are included**, so overloads are distinct. |
+| `name` | `callToFunction` | Display, keyword search |
+| `class` | `com.x.PassServiceImpl` | Display, grouping |
+| `params` | `[{name: "req", type: "com.x.ClientRequest"}]` | Overload resolution. Names say which argument holds a topic or URL. |
+| `return_type` | `com.x.ClientResponse` | Resolving chained calls, and payloads |
+| `annotations` | `["@Transactional"]` | Rules, entry-point detection, display |
+| `visibility`, `is_static` | `public`, `false` | Entry-point rules |
+| `javadoc` | First sentence only | Cards |
+| `start_line`, `end_line` | `42`, `87` (at the ingested commit) | Slicing the function's source for `view_flow_code` |
+| `significant`, `utility` | tags | Presentation (see [Flows](#6-flows)) |
+
+**Not stored:** method bodies (the source is fetched or stored separately), local variables, and individual statements. The call sites inside a body are stored only as `INVOKES` / `CALLS` / `PRODUCES` / … edges with their `seq` order.
 
 ### Properties every fact carries
 
@@ -89,10 +116,10 @@ Candidates for later: `Team`/owner, deployment `Environment`.
 | `source` | `{repo, symbol, commit}`: where the fact came from |
 | `extracted_by` | Extractor ID and version, or Jev decision ID |
 | `confidence` | 0–1. Deterministic rules produce 1.0. Jev-produced facts carry Jev's confidence. |
-| `ingestion_run` | ID of the run that last wrote the fact (used for idempotent replacement) |
+| `ingestion_job` | ID of the job that last wrote the fact (used for idempotent replacement) |
 | `first_seen`, `last_seen`, `ingested_commit` | Cheap insurance toward version history later |
 | `introduced_by`, `modified_by` | Project IDs from Contextualized. Empty until that integration exists. |
-| `card`, `card_hash`, `card_embedding` | LLM summary card, the hash of the facts it was written from, and its vector (see [Retrieval](./retrieval-and-mcp.md#summary-cards)). Only some node types get cards. |
+| `card`, `card_hash`, `card_embedding` | The node's summary card (rendered from its deterministic facts plus, for flows, apps, spaces, and the org, LLM-written text), the hash of its inputs, and its vector. Cards are properties, not separate nodes. Nodes with a card also carry the `:Searchable` label, so one vector index covers them all (see [Retrieval](./retrieval-and-mcp.md#summary-cards-decided)). |
 
 ### Module roles
 
@@ -100,7 +127,7 @@ A role is an **optional label**. A module with no role is still an ordinary `Mod
 
 | Role | Detected by (deterministic) | Treatment |
 |---|---|---|
-| `:Service` | Produces a deployable: Spring Boot main class / boot packaging plugin, its own Dockerfile, its own XLDeploy deployable | Gets an `Application` |
+| `:Service` | Produces a deployable: Spring Boot main class / boot packaging plugin, its own Dockerfile, its own deployment descriptor | Gets an `Application` |
 | `:Library` | Other modules depend on it; produces no deployable | Stored once, shared by the services that depend on it |
 | `:Contract` | Holds `.proto`, OpenAPI, or Avro definitions | Extractors read it for `Interface` definitions |
 | `:Migrations` | Flyway / Liquibase scripts | Recognized in V1, parsed in V2 |
@@ -124,7 +151,7 @@ Example, our microservices repository:
 
 A topic is shared infrastructure, so no Application owns it. It `BELONGS_TO` exactly one of these, whichever is found first:
 
-1. The **Space that declares it**, e.g. XLDeploy topic / ACL definitions.
+1. The **Space that declares it**, e.g. in deployment or infrastructure definitions of topics and ACLs.
 2. The **producer's Space**, by convention.
 3. The **Organization**, if neither is known.
 
@@ -147,6 +174,12 @@ Every relationship is either **extracted** (read directly from code or config by
 | `PRODUCES` / `CONSUMES` | Function → KafkaTopic / Queue | `consumer_group` | Async messaging | Extracted |
 | `READS_FROM` / `WRITES_TO` | Function → Table / DataStore | `operation` | Data access. Table-level when known. | Extracted |
 | `STARTS` | Interface / Schedule → Flow | | **What starts a flow**: this endpoint, topic, or schedule kicks it off | Extracted |
+| `FIRST_STEP` | Flow → Step | | **L2**: the flow's first step | Derived |
+| `NEXT` | Step → Step | | **L2**: the step that follows, at the same nesting level | Derived |
+| `SUBSTEP` | Step → Step | | **L2**: the first step nested inside this one (step 1 → step 1.1) | Derived |
+| `RUNS` | Step → Function | `line` (call site) | **Bridge** into the code layer: the function this step runs | Derived |
+| `WRITES_TO` / `READS_FROM` / `CALLS` / `PRODUCES` (on a Step) | Step → Table / ExternalSystem / Interface / Topic | | The effects that happen at this step, lifted from its function | Derived |
+| `WRITES_TO` / `READS_FROM` / `CALLS` / `PRODUCES` (on a Flow) | Flow → Table / ExternalSystem / Interface / Topic | `conditional` | **L1 rollups**: everything the flow's functions touch, lifted onto the flow | Derived |
 | `ENTRY` | Flow → Function | | The flow's entry function | Extracted |
 | `LEADS_TO` | Flow → Flow | `mode: sync\|async`, `via` | **This flow leads to that one.** Exists exactly when a function in Flow A `CALLS` or `PRODUCES` to an interface that `STARTS` Flow B. | **Derived** |
 | `USES_ENTITY` | Interface / Function → Entity | `role: request\|response\|message` | Payload contracts | Extracted |
@@ -217,14 +250,136 @@ RETURN s1.name, s2.name, count(*) AS calls
   - `(:Schedule)-[:STARTS]->(:Flow)`: cron, Spring `@Scheduled`, Quartz, a Kubernetes CronJob
 
   Sync vs. async isn't the dividing line (a Kafka consumer is async). Each org's scheduling mechanism is an extractor that emits the same `Schedule` node.
-- **There is no `Subflow` type.** Shared logic ("identify client") is a `Function` that several flows reach. It can get its own card if it's important.
+- **There is no `Subflow` type.** Shared logic ("identify client") is a `Function` that several flows reach.
 
-### Depth and storage (Decided)
+### Flow levels and the flow card (Decided)
 
-- **Stored:** every **first-party** function reachable from an entry point.
+A flow is described at four levels, from a one-line headline down to every function it touches. Each level lives in a specific place in the graph:
+
+| Level | What it answers | Where it lives | Produced by |
+|---|---|---|---|
+| **L0 Headline** | "What is this, in one line?" | `Flow` properties: `trigger`, `purpose` | Trigger: deterministic. Purpose: **LLM** (declared docs are an input, not a substitute) |
+| **L1 Signature** | "What goes in, what comes out, what does it touch?" | `Flow` properties **and rollup edges** (`Flow -WRITES_TO-> Table`, `Flow -CALLS-> ExternalSystem`, …) | **Deterministic** (facts) |
+| **L1 Narrative** | "What does it do, step by step, in plain words, and when does it branch?" | `Flow.narrative` | **LLM** |
+| **L2 Steps** | "What happens, in what order, and where exactly?" | `Step` nodes: `Flow -FIRST_STEP-> Step -NEXT-> Step`, nested with `SUBSTEP`; each `RUNS` a function | **Deterministic** structure (the significance rule); step labels phrased by the LLM |
+| **L3 Trace** | "Every function it touches" | The **code layer**: `Function -INVOKES-> Function`, walked from `ENTRY` | **Deterministic** |
+
+**L1 has two halves.** The *signature* is facts: the trigger, inputs, outputs, effects, external calls. The *narrative* (purpose, steps in plain words, branch conditions in plain words) needs an LLM. A branch's raw condition, e.g. `ds.type == DataSourceType.REPOSITORY and ds.scope_by_issues`, is extracted deterministically; "if the repository is issue-scoped" is the LLM's phrasing of it.
+
+**Inputs and outputs depend on the trigger:**
+
+| Trigger | IN | OUT |
+|---|---|---|
+| HTTP / gRPC | Request entity, path/query params | Response entity, status codes |
+| Kafka / queue consumer | Topic, **message entity**, consumer group | None. Results are its effects (produces, writes); may produce to a retry or dead-letter topic. |
+| Schedule | Schedule expression, config it reads | None. Results are its effects. |
+
+**Branch** = a point where the flow takes different paths that lead to **different effects**: an `if` / `switch`, or runtime dispatch to one of several implementations. Branches that don't change effects aren't listed.
+
+#### Worked example: Contextualized's "run a Job for one source"
+
+`POST /jobs/projects/{project_id}/data-sources/{data_source_id}` in [Contextualized](https://github.com/KBavis/contextualized) (commit `ac93a3b`, illustrative):
+
+The Flow node holds L0 and L1 as properties. Its `Step` nodes (L2) chain in order, and each `RUNS` a function in the code layer (L3):
+
+```
+(HttpEndpoint) ──STARTS──▶ (Flow)                     L0 + L1 as properties; rollups: WRITES_TO jobs, CALLS Jira, …
+                              │
+                          FIRST_STEP
+                              ▼
+                   (Step 1: create job) ──NEXT──▶ (Step 2: sync linked PRs) ──NEXT──▶ (Step 3: re-embed files) ──NEXT──▶ …
+                              │                          │
+                            RUNS                      SUBSTEP
+                              ▼                          ▼
+      CODE LAYER   (Function JobService.create_job)   (Step 2.1: fetch Jira issues) ──NEXT──▶ (Step 2.2: resolve PRs) ──▶ …
+                              │                          │
+                           INVOKES                     RUNS ──▶ (Function JiraDataProvider.get_issues)
+                              ▼
+                             …
+```
+
+What's stored **on the `Flow` node**:
+
+```yaml
+(:Flow:Searchable)
+  id:           flow:contextualized-backend:POST /jobs/projects/{project_id}/data-sources/{data_source_id}
+  # L0
+  trigger:      "POST /jobs/projects/{project_id}/data-sources/{data_source_id} (HTTP; 202, then background task)"
+  purpose:      "Syncs one data source for a project: pulls the Jira-linked PRs and their file diffs for
+                 issue-scoped repos, then downloads, chunks, and re-embeds the source's files."   # LLM
+  purpose_source: llm            # llm | declared | contextualized
+  # L1 signature (deterministic)
+  in:           {path: [project_id, data_source_id]}
+  out:          {status: 202, body: [message, project_id, data_source_id]}
+  mode:         sync-response, async-work
+  branches_raw: ["ds.type == REPOSITORY and ds.scope_by_issues", "from_provider(data_source) → Bitbucket|GitHub|Confluence"]
+  # L1 narrative (LLM)
+  narrative:    "1. Create a Job. 2. If the repository is issue-scoped: find the project's Jira issues, resolve
+                 their merged PRs in Bitbucket, and store each new PR and its file diffs. 3. Download the
+                 source's files, chunk docs and code, embed them into Chroma and the docstore.
+                 4. Roll up the task statuses into the Job's status."
+  # card (rendered from the above) + retrieval
+  card:         <text below>
+  card_hash:    sha256(inputs)
+  card_embedding: [ … ]
+```
+
+Its **rollup edges** (L1): `WRITES_TO` jobs, diff_tasks, embed_tasks, record_locks, pull_requests, project_file_diffs, docstore_chunks, and the Chroma collection. `READS_FROM` data_sources, projects. `CALLS` Jira, Bitbucket, the embedding model, and ⟨GitHub | Confluence⟩ (conditional).
+
+Its **`Step` nodes** (L2) chain with `NEXT` and nest with `SUBSTEP`. Each has its path (`1.1.3`), a label, its branch, its effects, and a citation, and `RUNS` its function (file:line at the commit).
+
+**The rendered flow card** (one text, used for embeddings, for Jev digests, and for agents):
+
+```
+POST /jobs/projects/{project_id}/data-sources/{data_source_id}   · contextualized-backend · HTTP 202 + background
+PURPOSE  Syncs one data source for a project: pulls Jira-linked PRs and their file diffs (issue-scoped
+         repos), then downloads, chunks, and re-embeds the source's files.
+STEPS    create job → [issue-scoped] Jira issues → linked PRs → store PRs + diffs → download files
+         → chunk docs/code → embed to Chroma + docstore → roll up status
+TOUCHES  writes jobs, pull_requests, project_file_diffs, docstore_chunks, Chroma · calls Jira, Bitbucket, embedding model
+LEADS TO —
+CONTEXT  (from Contextualized, later) Created by: … · Modified by: …
+SOURCE   run_data_source_job  apps/backend/app/api/routers/job.py:43 @ ac93a3b
+```
+
+- **Calls to another app** show the endpoint plus the **downstream flow's L0 purpose**, e.g. `auth-svc POST /verify → "verify caller token"`, and nothing more. Deeper detail comes from following `LEADS_TO`.
+- The card is **bounded by construction**, however large the flow is. Detail lives in L2 and L3, one call away.
+
+#### How the purpose and narrative are generated
+
+- **At initial ingestion, every flow gets an LLM purpose and narrative** (Decided). Without them, semantic search has nothing meaningful to match, and declared summaries are often missing or vague.
+- **LLM input:** the L1 signature, the L2 skeleton with raw branch conditions, declared docs (route summaries, docstrings, Javadoc, OpenAPI), the code of the significant steps (bounded), and the downstream flows' L0 purposes.
+- **Keeping cost down at scale:** a small model by default, the Batch API, and **prompt caching**: flows in the same application share a cached prefix (the app's card, its entities, its conventions), so each flow pays only for its own facts. The dry run measures the real cost before any spend.
+- **On re-ingestion:** when a change touches functions in a flow's trace, the deterministic parts are rebuilt for free. **Jev I5** is given the old purpose and narrative plus the fact diff and the changed step names, and decides whether they're still accurate. The LLM regenerates them only if not.
+
+#### Business context from Contextualized (later)
+
+**Contextualized is where business purpose comes from.** Projects are attached **at the granularity of what they changed**, never assumed to explain a whole flow:
+
+```
+(:Project {id, name, summary})-[:CHANGED {kind: added|modified|removed, pr, commit}]->(element)
+```
+
+`element` is whatever the Project's delta touched: a `Flow` (when it created the whole flow), a `Function`, a rollup edge's target (a new `WRITES_TO audit_log`), an `Interface`, or a `Table`.
+
+- **A new flow created by a Project:** that Project's context explains the whole flow.
+- **An existing flow changed by a Project:** the context is scoped to the change, e.g. "Project B added the audit write at step 1.2." The card's CONTEXT line says exactly that.
+- **Flows no Project has touched** keep their code-derived purpose (`purpose_source: llm`).
+
+### Depth and storage (Decided: two layers, both persisted)
+
+The graph has two layers **in one Neo4j database**:
+
+| Layer | Contains | Queried when |
+|---|---|---|
+| **Architecture layer** | Orgs, spaces, apps, interfaces, flows (L0, L1), **steps (L2)**, entities, tables, external systems | Always: routing and search run **only** here |
+| **Code layer** | **Every first-party function reachable from an entry point**, with `INVOKES` edges (L3) | Only after narrowing to one app or flow: full traces, stack-trace lookups, incremental updates |
+
+- **Why persist the code layer:** rebuilding a call graph means re-parsing and re-resolving the whole application. With it persisted, an incremental update re-parses only the changed files, patches their `INVOKES` edges, and finds the affected flows by traversal.
+- **Space:** roughly 1–2 KB per function including its edges and properties, so ~40M functions (2,000 apps × 20k functions) is on the order of **40–80 GB**, which a single Neo4j server handles.
+- **At Google scale** (billions of functions), the code layer is **partitioned into separate databases per space** (Neo4j composite databases). Architecture nodes refer to code-layer functions **by ID**, since relationships can't cross databases. The architecture layer stays in one database.
 - **Excluded:** third-party library code, generated code, tests, and dead code.
 - **Nothing is dropped for being "insignificant."** Pure business logic (a tax calculation) does no I/O, and an I/O-based filter would lose it.
-- Size at enterprise scale: millions of function nodes, within Neo4j's range.
 
 ### Significance is a derived tag (Decided)
 

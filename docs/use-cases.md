@@ -81,7 +81,7 @@ What each one needs:
 | # | Use case | Needs | What it enables |
 |---|---|---|---|
 | 21 | **Reachability for CVEs** | V1+ | A vulnerable library matters only if a flow reaches the vulnerable function. Cuts false positives. Needs calls to third-party symbols recorded as references. |
-| 22 | **ACL drift** | V1 + XLDeploy | Grants compared with actual produce/consume in code: unused grants to remove, and usage nobody declared. |
+| 22 | **ACL drift** | V1 + deployment-config connector | Grants compared with actual produce/consume in code: unused grants to remove, and usage nobody declared. |
 | 23 | **Third-party inventory** | V1 | Every `ExternalSystem` call and the flows that make it, for vendor risk reviews. |
 | 24 | **PII and data lineage** | V2 | Which flows read a sensitive column, and where the data goes next. |
 
