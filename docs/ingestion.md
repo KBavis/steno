@@ -345,6 +345,8 @@ Only Steno's extractors can produce facts in Steno's model. Contextualized later
 - **One Steno deployment per organization**, so no tables carry an `organization_id`. (Decided)
 - **The work queue lives in Postgres:** workers claim `queued` jobs with `SELECT … FOR UPDATE SKIP LOCKED`, so no separate broker is needed. (Decided)
 
+**Configuration and jobs:**
+
 ```mermaid
 erDiagram
     CONNECTOR ||--o{ REPOSITORY : scopes
@@ -352,33 +354,43 @@ erDiagram
     SPACE ||--o{ REPOSITORY : owns
     SPACE ||--o{ GLOSSARY_TERM : defines
     REPOSITORY ||--o{ REPOSITORY_RULE_PACK : uses
-    RULE_PACK ||--o{ REPOSITORY_RULE_PACK : "enabled for"
+    RULE_PACK ||--o{ REPOSITORY_RULE_PACK : enabled_for
     REPOSITORY ||--o{ INGESTION_JOB : has
-    INGESTION_JOB ||--o{ INGESTION_STAGE : "timed by"
+```
+
+**What each job records:**
+
+```mermaid
+erDiagram
+    INGESTION_JOB ||--o{ INGESTION_STAGE : timed_by
     INGESTION_JOB ||--o{ COVERAGE_ITEM : found
     INGESTION_JOB ||--o{ FACT_CHANGE : produced
     INGESTION_JOB ||--o{ JOB_COMMIT : covers
     INGESTION_STAGE ||--o{ LLM_CALL : spent
     INGESTION_STAGE ||--o{ JEV_DECISION : made
     LLM_CALL ||--|| LLM_OUTPUT : produced
-    TOOL_CALL ||--o{ JEV_DECISION : "made (query time)"
-
-    CONNECTOR { uuid id string kind string base_url json scope string credentials_ref }
-    REPOSITORY { uuid id uuid connector_id uuid space_id string name string clone_url string default_branch string selection string last_ingested_sha string status }
-    SPACE { uuid id uuid parent_id string name string description }
-    GLOSSARY_TERM { uuid id uuid space_id string term string target_node_id string definition }
-    RULE_PACK { uuid id string name string version string source }
-    REPOSITORY_RULE_PACK { uuid repository_id uuid rule_pack_id bool enabled string reason }
-    INGESTION_JOB { uuid id uuid repository_id string trigger string mode string from_sha string to_sha string status timestamp queued_at timestamp started_at timestamp finished_at string error json stats }
-    INGESTION_STAGE { uuid id uuid job_id string stage timestamp started_at timestamp finished_at string status json metrics float llm_cost float jev_cost }
-    COVERAGE_ITEM { uuid id uuid job_id uuid repository_id string kind string target_symbol int occurrences json samples string status }
-    FACT_CHANGE { uuid id uuid job_id string fact_id string fact_type string change json before json after string commit_sha }
-    JOB_COMMIT { uuid job_id string commit_sha int pr_number string pr_url timestamp merged_at }
-    LLM_CALL { uuid id uuid job_id uuid stage_id string node_id string purpose string model int input_tokens int output_tokens int cached_tokens float cost int latency_ms }
-    LLM_OUTPUT { uuid id uuid llm_call_id string node_id string kind string input_hash text text bool is_current }
-    JEV_DECISION { uuid id uuid stage_id uuid request_id string decision json input json output float confidence int latency_ms }
-    TOOL_CALL { uuid id string session_id uuid request_id string tool json params int latency_ms int result_count timestamp at }
+    TOOL_CALL ||--o{ JEV_DECISION : made_at_query_time
 ```
+
+### Columns
+
+| Table | Columns |
+|---|---|
+| `connector` | `id`, `kind` (bitbucket / github / gitlab), `base_url`, `scope` (json: workspace, project, org), `credentials_ref` |
+| `repository` | `id`, `connector_id`, `space_id`, `name`, `clone_url`, `default_branch`, `selection` (included / discovered / excluded), `last_ingested_sha`, `status` |
+| `space` | `id`, `parent_id`, `name`, `description` |
+| `glossary_term` | `id`, `space_id`, `term`, `target_node_id`, `definition` |
+| `rule_pack` | `id`, `name`, `version`, `source` (core / org) |
+| `repository_rule_pack` | `repository_id`, `rule_pack_id`, `enabled`, `reason` (auto / manual) |
+| `ingestion_job` | `id`, `repository_id`, `trigger` (initial / merge / manual), `mode` (full / incremental / dry_run), `from_sha`, `to_sha`, `status` (queued / running / succeeded / failed), `queued_at`, `started_at`, `finished_at`, `error`, `stats` (json) |
+| `ingestion_stage` | `id`, `job_id`, `stage` (clone / deps / parse / resolve / flows / write / cards), `started_at`, `finished_at`, `status`, `metrics` (json), `llm_cost`, `jev_cost` |
+| `coverage_item` | `id`, `job_id`, `repository_id`, `kind` (call site / annotation), `target_symbol`, `occurrences`, `samples` (json), `status` (open / ignored / covered) |
+| `fact_change` | `id`, `job_id`, `fact_id`, `fact_type`, `change` (added / removed / modified), `before` (json), `after` (json), `commit_sha` |
+| `job_commit` | `job_id`, `commit_sha`, `pr_number`, `pr_url`, `merged_at` |
+| `llm_call` | `id`, `job_id`, `stage_id`, `node_id`, `purpose`, `model`, `input_tokens`, `output_tokens`, `cached_tokens`, `cost`, `latency_ms` |
+| `llm_output` | `id`, `llm_call_id`, `node_id`, `kind`, `input_hash`, `text`, `is_current` |
+| `jev_decision` | `id`, `stage_id` (ingestion) or `request_id` (query), `decision`, `input` (json), `output` (json), `confidence`, `latency_ms` |
+| `tool_call` | `id`, `session_id`, `request_id`, `tool`, `params` (json), `latency_ms`, `result_count`, `at` |
 
 ### Configuration: what Steno is told
 
