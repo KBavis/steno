@@ -195,19 +195,29 @@ Full model: [knowledge-graph.md](./knowledge-graph.md).
 
 ```mermaid
 flowchart LR
+    APP[Application] -- EXPOSES --> EP[/HttpEndpoint/]
     SCH[Schedule] -- STARTS --> FL
-    EP[/HttpEndpoint/] -- STARTS --> FL[Flow]
-    FL -- ENTRY --> FN1[Function]
-    FN1 -- "INVOKES {seq}" --> FN2[Function]
-    FN2 -- CALLS --> EP2[/HttpEndpoint<br/>other app/]
-    FN2 -- PRODUCES --> T{{KafkaTopic}}
-    FN2 -- READS_FROM --> TB[(Table)]
-    T -- STARTS --> FL2[Flow<br/>consumer]
+    EP -- STARTS --> FL[Flow]
+    FL -- FIRST_STEP --> S1[Step 1]
+    S1 -- NEXT --> S2[Step 2]
+    S2 -- NEXT --> S3[Step 3]
+    S1 -- CALLS --> EP2[/HttpEndpoint<br/>other app/]
     EP2 -- STARTS --> FL3[Flow<br/>other app]
-    APP[Application] -- EXPOSES --> EP
-    TB -- BELONGS_TO --> DS[(DataStore)] -- BELONGS_TO --> SP[Space]
+    S2 -- READS_FROM --> TB[Table]
+    S3 -- PRODUCES --> T{{KafkaTopic}}
+    T -- STARTS --> FL2[Flow<br/>consumer]
+    TB -- BELONGS_TO --> DS[DataStore]
+    DS -- BELONGS_TO --> SP[Space]
     T -- BELONGS_TO --> SP
+    subgraph code [code nodes]
+      FN1[Function] -- INVOKES --> FN2[Function]
+    end
+    FL -. ENTRY .-> FN1
+    S1 -. RUNS .-> FN1
+    S2 -. RUNS .-> FN2
 ```
+
+Solid edges connect **architecture nodes**: the Flow, its Steps in order, and what each step touches. Dashed edges lead into the **code nodes** (the boxed group), which are only visited for fine detail.
 
 ---
 
