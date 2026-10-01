@@ -54,6 +54,7 @@ Connect an agent: `claude mcp add --transport http steno http://localhost:8000/m
 | [Design Doc](docs/DESIGN_DOC.md) | The overview: architecture, technology choices, roadmap, decision log, open questions |
 | [Knowledge Graph](docs/knowledge-graph.md) | Neo4j labels, relationships, ownership, flows, data stores |
 | [Ingestion](docs/ingestion.md) | Connectors, extractor rules, symbol resolution, idempotency, incremental updates, Postgres schema |
+| [Extractor Rules](docs/extractor-rules.md) | The rule format: patterns, emits, clues, tests, and rule packs |
 | [Retrieval & MCP](docs/retrieval-and-mcp.md) | Routing, summary cards, MCP tools, latency |
 | [Jev](docs/jev.md) | Every decision Jev makes, and its confidence thresholds |
 | [Use Cases](docs/use-cases.md) | What Steno enables: agentic development, planning, testing, operations |

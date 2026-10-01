@@ -2,5 +2,6 @@ name: steno-pack-jpa
 version: 0.1.0
 source: core
 language: java
+description: JPA entities, tables, and Spring Data repositories
 enabled_when:
   dependencies: [org.springframework.boot:spring-boot-starter-data-jpa, jakarta.persistence:jakarta.persistence-api]

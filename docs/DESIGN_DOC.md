@@ -5,7 +5,7 @@
 | **Status** | Draft v0.1 |
 | **Author** | Kellen Bavis |
 | **Last updated** | 2026-09-27 |
-| **Detailed docs** | [Knowledge Graph](./knowledge-graph.md) · [Ingestion](./ingestion.md) · [Retrieval & MCP](./retrieval-and-mcp.md) · [Jev](./jev.md) · [Use Cases](./use-cases.md) |
+| **Detailed docs** | [Knowledge Graph](./knowledge-graph.md) · [Ingestion](./ingestion.md) · [Extractor Rules](./extractor-rules.md) · [Retrieval & MCP](./retrieval-and-mcp.md) · [Jev](./jev.md) · [Use Cases](./use-cases.md) |
 
 Status markers used throughout: **Decided** · **Proposed** (suggested, not yet confirmed) · **Open** (not yet decided).
 
@@ -58,8 +58,8 @@ Agents are strong within one repository and blind beyond it. In a large enterpri
 ## 4. Scope and target
 
 - **Target scale:** a large enterprise, with thousands of repositories and many spaces.
-- **Phase 1 target:** one application in our own org (Spring Boot, Kafka, Bitbucket), with an agnostic design underneath.
-- **Languages: multi-language by design, Java first.** Our org is primarily Java, so Java rules and resolution come first. Nothing in the graph model, pipeline, or MCP tools is Java-specific: each additional language needs extractor rule packs (ast-grep / Semgrep support many languages) and its own symbol resolver.
+- **Phase 1 targets:** first **[Contextualized](https://github.com/KBavis/contextualized)** (public; Python, FastAPI, SQLAlchemy), which the author knows well enough to judge the graph by eye and which proves the design isn't tied to one language. Then one application in our own org (Spring Boot, Kafka, Bitbucket).
+- **Languages: multi-language by design.** Python comes first (Contextualized), then Java, which most of our org uses. Nothing in the graph model, pipeline, or MCP tools is Java-specific: each additional language needs extractor rule packs (ast-grep / Semgrep support many languages) and its own symbol resolver.
 
 ---
 
@@ -233,10 +233,10 @@ flowchart LR
 ```
 
 - **Connectors** are a source system plus a scope (a Bitbucket workspace or project, a GitHub org), with credentials stored as references into a secret manager. Repositories are selected separately: an explicit include list in Phase 1, discovery later.
-- **Extractors** are rules ("when you see X, emit Y") in ast-grep / Semgrep YAML, config path rules, or code plugins. They match **file types and patterns, not connectors**. Orgs add their own.
+- **Extractors** are rules ("when you see X, emit Y"): an ast-grep pattern plus what it means in Steno's vocabulary (nodes, edges, clues, entry points), config path rules, or code plugins. They match **file types and patterns, not connectors**. Orgs add their own. Full format: [Extractor Rules](./extractor-rules.md).
   - Published as versioned **rule packs** (~40–60 rules for a Spring/Kafka stack), auto-enabled from build dependencies.
   - A **coverage report** after every ingestion ranks what no rule explained, which points straight at the internal frameworks worth a rule.
-  - **Phase 1 is fully deterministic:** rules are written by hand. Rule templates and LLM-drafted rules are future enhancements.
+  - **Phase 1 is fully deterministic:** a person writes each rule, by hand or with the `rule-pack-author` skill, and every rule ships with test cases. Steno generating rules itself (templates, LLM drafting) is a future enhancement.
 - **Cloning** into a temporary workspace gives resolution the full source, avoids rate limits, and makes `git diff` exact. 
 - **Config files** become facts (topics, clusters, base URLs, datasources, schedules), plus a property map for placeholders.
 - **Resolution:**
@@ -424,7 +424,7 @@ sequenceDiagram
 
 | Phase | Scope | Exit criteria (Proposed) |
 |---|---|---|
-| **1: Application** | **Start with a dry run** (deterministic only, no LLM cards) that reports time per stage, graph size, and projected LLM cost. Then ingest one application fully: endpoints, outbound calls, transports, flows, entities, structure. Static only. MCP tools over it. | Against a hand-labeled gold set for that app: ≥ 90% of endpoints/topics/outbound calls found, flows match the gold set for the top entry points, and typical questions answered in ≤ 3 calls |
+| **1: Application** | **Start with a dry run** (deterministic only, no LLM cards) that reports time per stage, graph size, and projected LLM cost. Contextualized first, then one app in our org. Ingest each fully: endpoints, outbound calls, transports, flows, entities, structure. Static only. MCP tools over it. | Against a hand-labeled gold set for that app: ≥ 90% of endpoints/topics/outbound calls found, flows match the gold set for the top entry points, and typical questions answered in ≤ 3 calls |
 | **2: Space** | Onboard one space (declared). Rollups within the space, ins/outs, purpose, glossary. | Communication within the space matches what the team says it is |
 | **3: Organization** | Several spaces, cross-space edges, space proposals, the org view | Cross-space edges confirmed by the space owners |
 | **Incremental** | Merge-to-main updates. Can start during Phase 1. | Graph after incremental updates = graph after a full re-ingest |
@@ -508,6 +508,11 @@ Correctness comes first, so it has to be measured:
 | D36 | Neo4j is rebuildable from Postgres + git without re-spending on the LLM (`llm_output` cache). Nothing is stored only in Neo4j. | Decided |
 | D37 | The organization is declared in Postgres as a single `organization` row (name, description), entered during onboarding and projected into Neo4j | Decided |
 | D38 | First-run onboarding: Organization → Spaces → Connectors → Repositories | Decided |
+| D40 | Extractor rule format: an ast-grep `match` plus a Steno `emit` of nodes, edges, clues, and entry points; `where` conditions on resolved types. Rules never reference each other: clues are joined by the symbol they're about, in the resolve pass. Clue types are a fixed set, each with a built-in resolver (prefix chain, config first). See [Extractor Rules](./extractor-rules.md). | Decided |
+| D41 | Every rule ships with test cases (input code + expected facts), run by `steno rules test` | Decided |
+| D42 | A person owns every rule and may write it by hand or with the `rule-pack-author` skill. Steno generating rules on its own stays deferred (refines D25). | Decided |
+| D43 | Rule packs are grouped by ecosystem: `rule-packs/java/`, `python/`, `org/` | Decided |
+| D44 | Phase 1 ingests Contextualized first, then one application in our org | Decided |
 | D39 | A connector's scope is access only. Repository selection and placement are separate; at org scale, placement rules (connector + host grouping + optional name pattern → space) place repositories, an explicit assignment wins, and unmatched repositories go to an unassigned queue. Rules are built with discovery. | Decided |
 | D25 | Rule packs, auto-enabled from dependencies, plus a coverage report after every ingestion. Phase 1 rules are hand-written; templates and LLM-drafted rules are deferred. | Decided |
 
@@ -520,6 +525,8 @@ Correctness comes first, so it has to be measured:
 - [ ] The fan-in threshold for tagging a function `utility`
 - [ ] Neo4j edition and licensing (Community vs. Enterprise, Graph Data Science library)
 - [ ] Jev: calibration on our data, and our org's data policy
+
+- [ ] The Python symbol resolver for Contextualized's call graph (e.g. a simple import-following resolver on tree-sitter, Jedi, or Pyright), including FastAPI's `Depends` injection
 
 **Not yet discussed**
 - [ ] Deployment: where Steno runs

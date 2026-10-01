@@ -127,22 +127,24 @@ An extractor is a rule: **"when you see X, emit fact Y."** Extractors match **fi
 | **Config path rules** | YAML / properties / XML | `spring.kafka.consumer.topics` → `KafkaTopic` + `CONSUMES` |
 | **Code plugins** | Anything rules can't express | An internal communication framework |
 
-Sketch of a rule:
+A rule pairs an ast-grep pattern (`match`) with what it means in Steno's vocabulary (`emit`): nodes, edges, **clues** (partial facts a resolver combines across files, such as a router's URL prefix), and **entry points**. Rules never reference each other, and every rule ships with test cases. **The full format: [Extractor Rules](./extractor-rules.md).**
 
 ```yaml
-id: spring-get-endpoint
-language: java
-rule:
-  pattern: |
-    @GetMapping($PATH)
-    $RET $METHOD($$$ARGS) { $$$ }
-  inside:
-    kind: class_declaration
-    has: { pattern: "@RestController" }
+id: fastapi-endpoint
+match:
+  rule:
+    kind: decorated_definition
+    has: { kind: decorator, has: { pattern: "$ROUTER.$METHOD($PATH, $$$)" } }
 emit:
-  node: { labels: [Interface, HttpEndpoint], method: GET, path: $PATH }
-  edge: { type: EXPOSES, from: application }
-  anchor: $METHOD
+  - node: [Interface, HttpEndpoint]
+    as: endpoint
+    method: $METHOD
+    path: $PATH
+    prefixed_by: $ROUTER        # a clue resolver adds the router's prefix chain
+  - edge: EXPOSES
+    from: "@app"
+    to: endpoint
+  - entry_point: { trigger: endpoint, function: "@function" }
 ```
 
 - The core ships **common extractors**. Organizations **add plugins** over time without changing the core.
@@ -152,7 +154,7 @@ emit:
 
 ### Rule packs (Decided)
 
-Rules are published as **versioned packs**, like ESLint shareable configs or the Semgrep registry: `steno-pack-spring-web`, `steno-pack-spring-kafka`, `steno-pack-jpa`, plus an org pack such as `yourorg-internal`.
+Rules are published as **versioned packs**, like ESLint shareable configs or the Semgrep registry: `steno-pack-spring-web`, `steno-pack-spring-kafka`, `steno-pack-jpa`, plus an org pack such as `yourorg-internal`. Packs are grouped by ecosystem in `rule-packs/` (`java/`, `python/`, `org/`); see [Extractor Rules §6](./extractor-rules.md#6-packs-and-layout-decided).
 
 - **Packs are auto-enabled** from the build file's dependencies (`spring-kafka` present → Kafka pack on).
 - Rough size for a Spring/Kafka stack: **~40–60 rules**, written once per framework, not per repository:
@@ -190,7 +192,7 @@ Until then, Jev I2/I3 cover them at low confidence.
 
 ### Turning a coverage item into a rule (Deferred: future enhancement)
 
-**Phase 1 is fully deterministic.** Rules are written by hand, and the coverage report tells you which rules to write next. Everything below is a **future enhancement**, useful once many organizations are writing their own rules.
+**Phase 1 is fully deterministic.** A person writes each rule, by hand or with the `rule-pack-author` skill as an assistant ([Extractor Rules §8](./extractor-rules.md#8-writing-rules-by-hand-or-with-the-skill-decided)), and the coverage report tells you which rules to write next. Steno itself never generates rules in Phase 1. Everything below is a **future enhancement**, useful once many organizations are writing their own rules.
 
 There's **no LLM scanning the repository.** It works like this:
 

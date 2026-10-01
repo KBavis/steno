@@ -4,7 +4,7 @@ An organization-wide context engine for AI agents. It ingests repositories into 
 
 ## Start here
 
-- **`docs/DESIGN_DOC.md` is the source of truth.** Read it before making changes. The detailed design is in `docs/knowledge-graph.md`, `docs/ingestion.md`, `docs/retrieval-and-mcp.md`, `docs/jev.md`, and `docs/use-cases.md`.
+- **`docs/DESIGN_DOC.md` is the source of truth.** Read it before making changes. The detailed design is in `docs/knowledge-graph.md`, `docs/ingestion.md`, `docs/extractor-rules.md`, `docs/retrieval-and-mcp.md`, `docs/jev.md`, and `docs/use-cases.md`.
 - Every design point is marked **Decided**, **Proposed**, or **Open**, and the decision log is DESIGN_DOC §20. Follow Decided items; raise Proposed or Open items with the user before relying on them. Design choices belong to the user.
 
 ## Current phase
@@ -16,7 +16,7 @@ An organization-wide context engine for AI agents. It ingests repositories into 
 - `backend/src/steno/`: `api/` (Admin API), `mcp/` (MCP tools), `ingestion/` (job queue, stage pipeline, worker), `db/` (SQLAlchemy models + Alembic migrations for the Postgres tables in ingestion.md §8), `graph/` (Neo4j schema, stable IDs, projections), `decisions/` (the `Decision` interface; Jev and stand-in backends), `connectors/`, `extractors/`, `llm/`
 - `frontend/`: Vite + React + TS; `/api` is proxied to the backend on :8000
 - `resolver-jvm/`: JavaParser helper (Gradle wrapper)
-- `rule-packs/`: one folder per pack: `pack.yaml` + `rules/`
+- `rule-packs/`: packs grouped by ecosystem (`java/`, `python/`, `org/`); each has `pack.yaml`, `rules/`, `tests/`. Write rules with the `rule-pack-author` skill (`.claude/skills/rule-pack-author/`); the format is `docs/extractor-rules.md`
 
 ## Commands
 

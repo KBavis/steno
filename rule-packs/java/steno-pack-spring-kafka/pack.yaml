@@ -2,5 +2,6 @@ name: steno-pack-spring-kafka
 version: 0.1.0
 source: core
 language: java
+description: Kafka listeners, producers, and topic configuration
 enabled_when:
   dependencies: [org.springframework.kafka:spring-kafka]
