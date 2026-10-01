@@ -17,6 +17,10 @@ A rule is an ast-grep `match` (where the pattern is) plus a Steno `emit` (what i
 
 ## Workflow
 
+### 0. Confirm where the code is
+
+Rules are learned from real code, so first establish **which local folder holds the code to learn from** (for example a clone of Contextualized). If the request doesn't name one, **ask**. Don't search the disk for it, and don't assume the current repository: that's Steno itself, not the code the rule is for. If the person doesn't have a local copy, ask them to clone it.
+
 ### 1. Restate the request as a fact
 
 Turn the person's words into one sentence:
@@ -31,7 +35,7 @@ If the request is ambiguous in a way that changes the rule, such as which config
 
 ### 2. Find real examples
 
-Never write a rule from imagination. In the repository the person points to (ask if none is given):
+Never write a rule from imagination. In the folder from step 0:
 - Find **2–5 real occurrences** with `grep`/ripgrep, or a quick ast-grep run (step 6).
 - Find at least one **near miss**: code that looks similar but must *not* match (`dict.get(...)` next to `client.get(...)`, a commented-out property, a test file).
 - Note **variations**: keyword vs. positional arguments, annotated vs. plain assignments, YAML nesting vs. dotted keys, multiple decorators.

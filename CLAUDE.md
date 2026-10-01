@@ -22,6 +22,11 @@ An organization-wide context engine for AI agents. It ingests repositories into 
 
 Run from the repo root (see `Makefile`): `make up`, `make migrate`, `make graph-init`, `make dev`, `make api`, `make worker`, `make web`, `make dry-run REPO=<name>`, `make test`, `make lint`. After changing `db/models.py`, create a migration with `cd backend && uv run alembic revision --autogenerate -m "..."` and review it.
 
+## Skills
+
+- `rule-pack-author`: write extractor rules and rule packs from a plain-language request
+- `github-issue`: draft, label, and link GitHub issues (shows a draft for approval before creating anything)
+
 ## Key decisions to keep in mind
 
 - **One Neo4j graph** with **architecture nodes** (what the software does: applications, interfaces, flows, steps, tables) and **code nodes** (how it's built: repository, module, file, function), joined by `BUILT_FROM`, `ENTRY`, and `RUNS`. Search only covers architecture nodes.
