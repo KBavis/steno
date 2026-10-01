@@ -1,0 +1,35 @@
+# Local infrastructure for development: Postgres (what Steno is told and did) and
+# Neo4j (what Steno knows). Run from the repo root with `make up`.
+name: steno
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: steno
+      POSTGRES_PASSWORD: steno
+      POSTGRES_DB: steno
+    ports: ["5432:5432"]
+    volumes: [postgres-data:/var/lib/postgresql]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U steno"]
+      interval: 5s
+      retries: 10
+
+  neo4j:
+    # Community edition for the POC. Edition and licensing are still Open (DESIGN_DOC §21).
+    image: neo4j:2026.09-community
+    environment:
+      NEO4J_AUTH: neo4j/steno-dev-password
+    ports:
+      - "7474:7474"   # browser: http://localhost:7474
+      - "7687:7687"   # bolt
+    volumes: [neo4j-data:/data]
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p steno-dev-password 'RETURN 1' >/dev/null"]
+      interval: 5s
+      retries: 20
+
+volumes:
+  postgres-data:
+  neo4j-data:

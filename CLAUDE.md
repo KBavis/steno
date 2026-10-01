@@ -11,6 +11,17 @@ An organization-wide context engine for AI agents. It ingests repositories into 
 
 **Phase 1: ingest one application** in depth, starting with a dry run that writes no LLM text and reports time per stage, graph size, and projected LLM cost (DESIGN_DOC §16).
 
+## Repository layout
+
+- `backend/src/steno/`: `api/` (Admin API), `mcp/` (MCP tools), `ingestion/` (job queue, stage pipeline, worker), `db/` (SQLAlchemy models + Alembic migrations for the Postgres tables in ingestion.md §8), `graph/` (Neo4j schema, stable IDs, projections), `decisions/` (the `Decision` interface; Jev and stand-in backends), `connectors/`, `extractors/`, `llm/`, `poc/` (YAML config loader)
+- `frontend/`: Vite + React + TS; `/api` is proxied to the backend on :8000
+- `resolver-jvm/`: JavaParser helper (Gradle wrapper)
+- `rule-packs/`: one folder per pack: `pack.yaml` + `rules/`
+
+## Commands
+
+Run from the repo root (see `Makefile`): `make up`, `make migrate`, `make graph-init`, `make load-config`, `make api`, `make worker`, `make web`, `make dry-run REPO=<name>`, `make test`, `make lint`. After changing `db/models.py`, create a migration with `cd backend && uv run alembic revision --autogenerate -m "..."` and review it.
+
 ## Key decisions to keep in mind
 
 - **One Neo4j graph** with **architecture nodes** (what the software does: applications, interfaces, flows, steps, tables) and **code nodes** (how it's built: repository, module, file, function), joined by `BUILT_FROM`, `ENTRY`, and `RUNS`. Search only covers architecture nodes.

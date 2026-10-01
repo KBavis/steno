@@ -1,0 +1,7 @@
+name: steno-pack-spring-web
+version: 0.1.0
+source: core
+language: java
+# Auto-enabled when the build file depends on any of these (D25)
+enabled_when:
+  dependencies: [org.springframework.boot:spring-boot-starter-web, org.springframework:spring-webmvc]

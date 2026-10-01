@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+
+# JVM
+.gradle/
+build/
+
+# Local config and secrets
+.env
+config/steno.yaml
+
+# Editors / OS
+.idea/
+.DS_Store

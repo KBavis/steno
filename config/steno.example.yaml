@@ -1,0 +1,27 @@
+# POC declarations: copy to config/steno.yaml and edit, then run `make load-config`.
+# Phase 1 is one space and one application (DESIGN_DOC §16). Loading is an upsert,
+# so re-running after an edit is safe. config/steno.yaml is git-ignored.
+
+organization: my-org
+
+connectors:
+  # A connector is a source system plus a scope (D30). Credentials are a reference,
+  # never the secret itself.
+  - name: bitbucket
+    kind: bitbucket            # bitbucket | github | gitlab
+    base_url: https://bitbucket.example.com
+    scope: { project: PAY }
+    credentials_ref: env:STENO_BITBUCKET_TOKEN
+
+spaces:
+  - name: Payroll
+    description: Pay calculation and adjustments
+    # spaces: [{ name: Adjustments }]   # spaces can nest
+
+repositories:
+  # Phase 1: an explicit include list
+  - name: pay-adjustment-svc
+    connector: bitbucket
+    space: Payroll             # a space path, e.g. Payroll/Adjustments
+    clone_url: https://bitbucket.example.com/scm/pay/pay-adjustment-svc.git
+    default_branch: main

@@ -2,7 +2,7 @@
 
 Steno is an **organization-wide context engine for AI agents**. It ingests an organization's repositories into a layered, continuously updated **knowledge graph** (Organization → Space → Application) and exposes it over **MCP**, so agents like Claude Code and Copilot can understand how everything fits together instead of seeing only the repository they're working in.
 
-> **Status:** design phase. Start with the [Design Doc](docs/DESIGN_DOC.md).
+> **Status:** Phase 1 build (ingesting one application). Start with the [Design Doc](docs/DESIGN_DOC.md).
 
 ## Why
 
@@ -16,6 +16,35 @@ Today's coding agents are strong inside one repository and blind beyond it. Most
 - **Company-agnostic.** Connectors reach sources (Bitbucket, GitHub, GitLab, …). Extractor rule packs cover frameworks, and organizations add their own. Applications don't have to opt in to anything.
 - **Idempotent and incremental.** A one-time initial ingestion, then updates on every merge to main, driven by the commit range since the last ingested commit.
 - **Fast for agents.** Precomputed summary cards, Jev routing, parallel search across spaces, and batch tools keep agent round trips to a minimum.
+
+## Development
+
+| Path | What it is |
+|---|---|
+| `backend/` | Python 3.12 (uv). Admin API (`/api`) and MCP server (`/mcp`) in one FastAPI process, plus the ingestion worker |
+| `frontend/` | Vite + React + TypeScript UI |
+| `resolver-jvm/` | JavaParser symbol-resolution helper, called by the worker |
+| `rule-packs/` | Extractor rule packs |
+| `config/` | POC declarations (connectors, spaces, repositories) |
+| `deploy/` | docker-compose for Postgres and Neo4j |
+
+Prerequisites: Docker (on WSL, enable Docker Desktop's WSL integration), [uv](https://docs.astral.sh/uv/), Node 20+, Java 21.
+
+```sh
+make up                                         # Postgres + Neo4j
+make setup                                      # backend and frontend dependencies
+cp .env.example backend/.env
+cp config/steno.example.yaml config/steno.yaml  # then edit: your space and repository
+make migrate graph-init load-config
+
+make api       # :8000/api and :8000/mcp
+make worker    # runs queued ingestion jobs
+make web       # UI on :5173
+
+make dry-run REPO=<name>                        # or click "Dry run" in the UI
+```
+
+Connect an agent: `claude mcp add --transport http steno http://localhost:8000/mcp`.
 
 ## Relationship to Contextualized
 
