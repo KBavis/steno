@@ -101,6 +101,16 @@ This is structural retrieval, which embeddings alone can't do. Combined with Jev
 - **On re-ingestion:** deterministic parts are rebuilt for free. **Jev I5** decides from the old purpose and narrative plus the fact diff whether they're still accurate; the LLM regenerates them only if not.
 - **Cards are written for two readers:** embeddings and Jev (short, precise, bounded in size), and agents (sources and next steps). Their bounded size keeps **Jev's input bounded** for huge flows (see [Jev §4](./jev.md#4-what-jev-sees-state-design)).
 
+### How embeddings are stored and searched (Decided)
+
+**Neo4j stores and searches vectors; Steno computes them.** Embedding happens in Steno's ingestion workers (and, for questions, in the MCP server), so Steno controls the model (including a local one if data policy requires it), batching, caching, and retries.
+
+1. **Setup:** one vector index on `(:Searchable).card_embedding` (dimensions must match the model; cosine similarity) and one full-text index on `(:Searchable).card` and `.name` for keyword search. A vector index covers one label and one property, which is why every carded node also gets the `:Searchable` label.
+2. **Ingestion (cards stage):** skip cards whose `card_hash` hasn't changed, embed the rest in one batch, and write each vector onto its node with `db.create.setNodeVectorProperty` (Neo4j's compact vector storage), along with `card_embedding_model`.
+3. **Query:** embed the question with **the same model**, call `db.index.vector.queryNodes`, over-fetch, then filter by the spaces Jev routed to (the filter applies after the nearest-neighbor search unless the Neo4j version supports filtered vector search).
+
+**Changing the embedding model** means re-embedding every card and recreating the index (dimensions usually change). `card_embedding_model` on each node records which model produced its vector.
+
 ### Cost and time: measure before generating (Decided)
 
 Phase 1 starts with a **dry run that writes no LLM cards**, to see the real numbers before spending:

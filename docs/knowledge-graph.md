@@ -15,7 +15,7 @@ Part of the [Design Doc](./DESIGN_DOC.md). Status markers: **Decided** · **Prop
 | **Every node has exactly one owner in the tree.** A node's layer is where it sits, not a property of its type. | Decided |
 | **Abstraction uses labels, not `IS_A` edges.** Neo4j is a property graph: a node can have several labels. | Decided |
 | **Every fact records where it came from** (repo, symbol, ingested commit), what produced it (extractor, Jev decision), and its **confidence**. | Decided |
-| **Every fact has room for its origin Project** (`introduced_by`, `modified_by`), filled in once Contextualized supplies project deltas. | Decided |
+| **Every fact can be traced to its origin Project** through `Project -CHANGED-> element` edges, added once Contextualized supplies project deltas. | Decided |
 
 ### Three independent aspects of every node
 
@@ -52,6 +52,28 @@ Organization                              ← layer 1
                           └ File
                              └ Function ──INVOKES──▶ Function     code nodes: how it's BUILT
 ```
+
+**What decides which side a node is on.** Every node is extracted from code, so the split isn't about where a node came from. It's about **what the node describes**. The test:
+
+> **If you refactored the code without changing its behavior (split a class, moved a file, renamed a method), would this node change?**
+> **Yes → code node.** It exists because of how the code is *organized*.
+> **No → architecture node.** It exists because of what the software *does*, or what others can see and depend on.
+
+| Node | Changes on a refactor? | Side | Why |
+|---|---|---|---|
+| Repository, Module, File, Function | Yes | **Code** | Pure code organization |
+| Organization, Space | No | Architecture | How the org is divided |
+| Application | No | Architecture | The deployable unit; other teams depend on it |
+| Interface (endpoint, topic, gRPC method) | No | Architecture | A contract other apps call |
+| DataStore, Table | No | Architecture | Shared state other apps touch |
+| ExternalSystem | No | Architecture | Something outside the org that's depended on |
+| Flow | No | Architecture | Behavior: what happens when a trigger fires |
+| Step | No (only its `RUNS` edge may move to another function) | Architecture | Behavior: "write the audit record" is still a step even if the code doing it moves |
+| Entity | Borderline (renaming the class renames it) | Architecture | Describes a data contract (payloads, tables) that others see |
+
+After a refactor, only the crossing edges (`RUNS`, `ENTRY`, `BUILT_FROM`) move. Flows and steps stay the same.
+
+**What the split controls**, and nothing more: (1) search, cards, and routing only cover architecture nodes; (2) change history logs architecture nodes in full and code nodes per function; (3) code nodes are the ones that can be partitioned into separate databases at very large scale.
 
 | | Architecture nodes | Code nodes |
 |---|---|---|
@@ -138,8 +160,19 @@ Candidates for later: `Team`/owner, deployment `Environment`.
 | `confidence` | 0–1. Deterministic rules produce 1.0. Jev-produced facts carry Jev's confidence. |
 | `ingestion_job` | ID of the job that last wrote the fact (used for idempotent replacement) |
 | `first_seen`, `last_seen`, `ingested_commit` | Cheap insurance toward version history later |
-| `introduced_by`, `modified_by` | Project IDs from Contextualized. Empty until that integration exists. |
-| `card`, `card_hash`, `card_embedding` | The node's summary card (rendered from its deterministic facts plus, for flows, apps, spaces, and the org, LLM-written text), the hash of its inputs, and its vector. Cards are properties, not separate nodes. Nodes with a card also carry the `:Searchable` label, so one vector index covers them all (see [Retrieval](./retrieval-and-mcp.md#summary-cards-decided)). |
+
+Which Project introduced or changed a fact isn't a property. It's recorded later as `Project -CHANGED-> element` edges from Contextualized (see [Business context](#business-context-from-contextualized-later)).
+
+### Card properties (searchable nodes only)
+
+Cards exist **only** on node types that search covers: **Flow, Application, Space, Organization, Interface, Entity, Table**. Steps, functions, modules, files, and edges have no card. These nodes also carry the `:Searchable` label, so one vector index and one full-text index cover them all.
+
+| Property | Purpose |
+|---|---|
+| `card` | The summary text: deterministic facts plus, for flows, apps, spaces, and the org, LLM-written purpose and narrative (see [Retrieval](./retrieval-and-mcp.md#summary-cards-decided)) |
+| `card_embedding` | The card's vector, which the vector index searches to find candidates for a question |
+| `card_embedding_model` | Which model produced the vector. The question must be embedded with the same model; changing models means re-embedding. |
+| `card_hash` | A fingerprint of the inputs the card was built from. On re-ingestion, an unchanged fingerprint means the card and its embedding are still valid, so nothing is re-embedded or re-checked. |
 
 ### Module roles
 

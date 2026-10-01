@@ -73,7 +73,7 @@ Agents are strong within one repository and blind beyond it. In a large enterpri
 | **Space** | A generic name for however an org divides itself. It can nest, or an org can have only one. Owns data stores and topics. |
 | **Application** | An independently deployable unit. One repository can contain several (e.g. our microservices repo). |
 
-These three layers are the levels of zoom. Beneath them, the graph holds two kinds of nodes in **one database**: **architecture nodes** (Application → Flow → Step, interfaces, tables, …: what the software does) and **code nodes** (Repository → Module → File → Function: how it's built), joined by `BUILT_FROM`, `ENTRY`, and `RUNS`. Search runs only on architecture nodes. See [Knowledge Graph §2](./knowledge-graph.md#2-one-graph-layers-architecture-nodes-and-code-nodes). Project is **not** a layer. Projects attach to facts as attribution, later, through Contextualized.
+These three layers are the levels of zoom. Beneath them, the graph holds two kinds of nodes in **one database**: **architecture nodes** (Application → Flow → Step, interfaces, tables, …: what the software does) and **code nodes** (Repository → Module → File → Function: how it's built), joined by `BUILT_FROM`, `ENTRY`, and `RUNS`. The test for which is which: if a behavior-preserving refactor would change the node, it's a code node. Search runs only on architecture nodes. See [Knowledge Graph §2](./knowledge-graph.md#2-one-graph-layers-architecture-nodes-and-code-nodes). Project is **not** a layer. Projects attach to facts as attribution, later, through Contextualized.
 
 ### 5.2 Built bottom-up, searched top-down
 
@@ -401,7 +401,7 @@ sequenceDiagram
     St->>St: job_commit: commits → PR #123
     St->>Ctx: which Project is PR #123 part of? what's its summary?
     Ctx-->>St: Project X + the why
-    St->>St: fill introduced_by / modified_by on the changed facts
+    St->>St: add Project -CHANGED-> edges to the changed facts
 ```
 
 - **Division of work:**
