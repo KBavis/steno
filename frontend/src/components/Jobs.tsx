@@ -1,50 +1,106 @@
+import { Activity, Check, ChevronRight, Loader2, X } from 'lucide-react'
 import { useCallback, useState } from 'react'
-import { api, type Job } from '../api/client'
+import { api, type Job, type JobStatus, type Stage, type StageName } from '../api/client'
 import { usePoll } from '../hooks/usePoll'
+import { duration, timeAgo } from '../lib/time'
+import { EmptyState, ErrorAlert } from './ui'
 
-export function Jobs({ jobs, error }: { jobs?: Job[]; error?: string }) {
-  const [selected, setSelected] = useState<number>()
+const STAGES: StageName[] = ['clone', 'deps', 'parse', 'resolve', 'flows', 'write', 'cards']
+
+const STATUS_BADGE: Record<JobStatus, string> = {
+  queued: 'badge',
+  running: 'badge badge-warn',
+  succeeded: 'badge badge-ok',
+  failed: 'badge badge-fail',
+}
+
+const MODE_LABEL = { dry_run: 'Dry run', full: 'Full', incremental: 'Incremental' }
+
+export function Jobs({ jobs, error, repoName }: { jobs?: Job[]; error?: string; repoName: (id: number) => string }) {
+  const [open, setOpen] = useState<number>()
 
   return (
-    <section className="panel">
-      <h2>Ingestion jobs</h2>
-      {error && <p className="error">{error}</p>}
-      {jobs?.length === 0 && <p className="muted">No jobs yet.</p>}
-      <table>
-        <tbody>
-          {jobs?.map((j) => (
-            <tr key={j.id} className={selected === j.id ? 'selected' : ''} onClick={() => setSelected(j.id)}>
-              <td className="mono">#{j.id}</td>
-              <td>{j.mode}</td>
-              <td>
-                <span className={`badge badge-${j.status}`}>{j.status}</span>
-              </td>
-              <td className="muted">{new Date(j.queued_at).toLocaleString()}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {selected !== undefined && <JobStages id={selected} />}
-    </section>
+    <>
+      <div className="section-title">
+        <h2>Recent jobs</h2>
+      </div>
+      <ErrorAlert message={error} />
+      <div className="card">
+        {jobs?.length === 0 ? (
+          <EmptyState icon={Activity} title="No jobs yet">
+            Start a dry run on a repository to see each ingestion stage here.
+          </EmptyState>
+        ) : (
+          <ul className="list">
+            {jobs?.map((j) => (
+              <li key={j.id}>
+                <div
+                  className={`list-row clickable ${open === j.id ? 'selected' : ''}`}
+                  onClick={() => setOpen(open === j.id ? undefined : j.id)}
+                >
+                  <ChevronRight
+                    size={16}
+                    className="muted"
+                    style={{ transform: open === j.id ? 'rotate(90deg)' : undefined, transition: 'transform .15s' }}
+                  />
+                  <span className={`${STATUS_BADGE[j.status]} badge-dot`}>{j.status}</span>
+                  <div className="list-main">
+                    <div className="list-title">
+                      {repoName(j.repository_id)}
+                      <span className="badge badge-accent">{MODE_LABEL[j.mode]}</span>
+                    </div>
+                    <div className="list-sub">
+                      #{j.id} · {j.trigger} · queued {timeAgo(j.queued_at)}
+                    </div>
+                  </div>
+                  <span className="muted small">{duration(j.started_at, j.finished_at) ?? ''}</span>
+                </div>
+                {open === j.id && <JobDetail id={j.id} />}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </>
   )
 }
 
-function JobStages({ id }: { id: number }) {
+function JobDetail({ id }: { id: number }) {
   const load = useCallback(() => api.job(id), [id])
   const { data } = usePoll(load)
-  if (!data) return null
+  const byName = new Map(data?.stages.map((s) => [s.stage, s]))
 
   return (
-    <div className="stages">
-      {data.error && <p className="error">{data.error}</p>}
+    <div className="job-detail">
       <ol className="pipeline">
-        {data.stages.map((s) => (
-          <li key={s.id} className={`stage stage-${s.status}`}>
-            <span>{s.stage}</span>
-            <span className="muted">{typeof s.metrics.seconds === 'number' ? `${s.metrics.seconds}s` : ''}</span>
-          </li>
-        ))}
+        {STAGES.map((name) => {
+          const stage = byName.get(name)
+          return (
+            <li key={name} className={stage?.status ?? 'pending'}>
+              <StageIcon stage={stage} />
+              <span className="stage-name">{name}</span>
+              <span className="muted small">{stage ? (duration(stage.started_at, stage.finished_at) ?? '…') : ''}</span>
+            </li>
+          )
+        })}
       </ol>
+      {data?.error && (
+        <div className="alert" style={{ marginTop: 16 }}>
+          {data.error}
+        </div>
+      )}
     </div>
   )
+}
+
+function StageIcon({ stage }: { stage?: Stage }) {
+  const icon =
+    stage?.status === 'succeeded' ? (
+      <Check size={13} strokeWidth={3} />
+    ) : stage?.status === 'failed' ? (
+      <X size={13} strokeWidth={3} />
+    ) : stage?.status === 'running' ? (
+      <Loader2 size={13} className="spin" />
+    ) : null
+  return <span className="stage-icon">{icon}</span>
 }

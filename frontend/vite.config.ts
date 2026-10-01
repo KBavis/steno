@@ -6,6 +6,6 @@ export default defineConfig({
   plugins: [react()],
   server: {
     // The backend serves /api (Admin API) and /mcp on :8000 (`make api`).
-    proxy: { '/api': 'http://localhost:8000' },
+    proxy: { '/api': process.env.STENO_API_URL ?? 'http://localhost:8000' },
   },
 })

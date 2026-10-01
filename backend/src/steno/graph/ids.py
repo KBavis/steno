@@ -5,13 +5,18 @@ and a stub merges with the real node when its owner is ingested.
 """
 
 
-def organization_id(name: str) -> str:
-    return f"org:{name}"
+def organization_id(declared_id: int) -> str:
+    """Declared in Postgres (one row per deployment), so keyed by row ID, not its editable name."""
+    return f"org:{declared_id}"
 
 
-def space_id(path: list[str]) -> str:
-    """Spaces can nest, so the ID is the path from the top-level space down."""
-    return "space:" + "/".join(path)
+def space_id(declared_id: int) -> str:
+    """Spaces are declared in Postgres, so their natural key is the declared row's ID.
+
+    Not the name: an admin can rename or move a space, and everything that belongs to
+    it must keep pointing at the same node.
+    """
+    return f"space:{declared_id}"
 
 
 def repository_id(repo: str) -> str:

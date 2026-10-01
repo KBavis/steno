@@ -7,11 +7,13 @@ Splitting MCP into its own process later only needs a new entrypoint that serves
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 
 import steno
-from steno.api.routes import admin, health
+from steno.api.routes import connectors, health, jobs, organization, repositories, spaces
 from steno.config import get_settings
 from steno.mcp.server import mcp
 
@@ -33,8 +35,14 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.include_router(health.router, prefix="/api")
-    app.include_router(admin.router, prefix="/api")
+    for module in (health, organization, spaces, connectors, repositories, jobs):
+        app.include_router(module.router, prefix="/api")
+
+    @app.exception_handler(IntegrityError)
+    async def conflict(_: Request, exc: IntegrityError) -> JSONResponse:
+        # Unique names (e.g. two connectors called "github") and similar constraints
+        return JSONResponse({"detail": str(exc.orig).splitlines()[0]}, status_code=409)
+
     # Mounted last so /api routes match first; the sub-app serves /mcp.
     app.mount("/", mcp_app)
     return app

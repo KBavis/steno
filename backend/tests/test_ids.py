@@ -13,5 +13,5 @@ def test_endpoint_id_normalizes_method():
     )
 
 
-def test_nested_space_id_is_its_path():
-    assert ids.space_id(["Payroll", "Adjustments"]) == "space:Payroll/Adjustments"
+def test_space_id_survives_renames():
+    assert ids.space_id(7) == "space:7"

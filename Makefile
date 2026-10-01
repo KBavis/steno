@@ -2,7 +2,7 @@
 COMPOSE := docker compose -f deploy/docker-compose.yml
 STENO   := cd backend && uv run steno
 
-.PHONY: dev up down setup migrate graph-init load-config api worker web dry-run test lint resolver
+.PHONY: dev up down setup migrate graph-init api worker web dry-run test lint resolver
 
 dev:           ## Databases + API/MCP + worker + UI in one terminal (Ctrl+C to stop)
 	./scripts/dev.sh
@@ -22,9 +22,6 @@ migrate:       ## Apply Postgres migrations
 
 graph-init:    ## Create Neo4j constraints and indexes
 	$(STENO) graph init
-
-load-config:   ## Load config/steno.yaml into Postgres and project spaces into Neo4j
-	$(STENO) load-config
 
 api:           ## Admin API on :8000/api and MCP on :8000/mcp
 	$(STENO) api --reload

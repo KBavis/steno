@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -145,6 +146,19 @@ class ChangeKind(StrEnum):
 # ---------------------------------------------------------------------------
 # Configuration: what Steno is told
 # ---------------------------------------------------------------------------
+
+
+class Organization(Base):
+    """The organization this deployment serves: exactly one row (D34). Root of the space tree."""
+
+    __tablename__ = "organization"
+    __table_args__ = (CheckConstraint("id = 1", name="singleton"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False, default=1)
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str | None] = mapped_column(Text)
+    # Set when the admin finishes the onboarding flow; until then the UI shows it
+    onboarded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Connector(Base):

@@ -2,13 +2,36 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
-from steno.db.models import JobMode, JobStatus, JobTrigger, StageName, StageStatus
+from steno.db.models import ConnectorKind, JobMode, JobStatus, JobTrigger, StageName, StageStatus
 
 
 class _Orm(BaseModel):
     model_config = ConfigDict(from_attributes=True)
+
+
+# --- Organization -----------------------------------------------------------
+
+
+class OrganizationIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = None
+
+
+class OrganizationOut(_Orm):
+    name: str
+    description: str | None
+    onboarded_at: datetime | None
+
+
+# --- Spaces -----------------------------------------------------------------
+
+
+class SpaceIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = None
+    parent_id: int | None = None
 
 
 class SpaceOut(_Orm):
@@ -16,6 +39,39 @@ class SpaceOut(_Orm):
     parent_id: int | None
     name: str
     description: str | None
+
+
+# --- Connectors -------------------------------------------------------------
+
+
+class ConnectorIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    kind: ConnectorKind
+    base_url: str = Field(min_length=1)
+    # Which part of the host this connector covers, e.g. {"org": "KBavis"} (D30)
+    scope: dict[str, Any] = Field(default_factory=dict)
+    # A reference to a secret (e.g. "env:STENO_GITHUB_TOKEN"), never the secret itself
+    credentials_ref: str | None = None
+
+
+class ConnectorOut(_Orm):
+    id: int
+    name: str
+    kind: ConnectorKind
+    base_url: str
+    scope: dict[str, Any]
+    credentials_ref: str | None
+
+
+# --- Repositories -----------------------------------------------------------
+
+
+class RepositoryIn(BaseModel):
+    connector_id: int
+    space_id: int | None = None
+    name: str = Field(min_length=1, max_length=200)
+    clone_url: str = Field(min_length=1)
+    default_branch: str = "main"
 
 
 class RepositoryOut(_Orm):
@@ -26,6 +82,9 @@ class RepositoryOut(_Orm):
     clone_url: str
     default_branch: str
     last_ingested_sha: str | None
+
+
+# --- Jobs -------------------------------------------------------------------
 
 
 class StageOut(_Orm):

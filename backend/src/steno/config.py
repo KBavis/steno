@@ -18,9 +18,6 @@ class Settings(BaseSettings):
     neo4j_password: str = "steno-dev-password"
     neo4j_database: str = "neo4j"
 
-    # POC declarations (connectors, spaces, repositories), loaded into Postgres
-    poc_config_path: Path = Path("../config/steno.yaml")
-
     # Where ingestion workers clone repositories; deleted after each run
     workspace_dir: Path = Path("/tmp/steno-workspaces")
 

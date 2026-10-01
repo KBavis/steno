@@ -13,14 +13,14 @@ An organization-wide context engine for AI agents. It ingests repositories into 
 
 ## Repository layout
 
-- `backend/src/steno/`: `api/` (Admin API), `mcp/` (MCP tools), `ingestion/` (job queue, stage pipeline, worker), `db/` (SQLAlchemy models + Alembic migrations for the Postgres tables in ingestion.md §8), `graph/` (Neo4j schema, stable IDs, projections), `decisions/` (the `Decision` interface; Jev and stand-in backends), `connectors/`, `extractors/`, `llm/`, `poc/` (YAML config loader)
+- `backend/src/steno/`: `api/` (Admin API), `mcp/` (MCP tools), `ingestion/` (job queue, stage pipeline, worker), `db/` (SQLAlchemy models + Alembic migrations for the Postgres tables in ingestion.md §8), `graph/` (Neo4j schema, stable IDs, projections), `decisions/` (the `Decision` interface; Jev and stand-in backends), `connectors/`, `extractors/`, `llm/`
 - `frontend/`: Vite + React + TS; `/api` is proxied to the backend on :8000
 - `resolver-jvm/`: JavaParser helper (Gradle wrapper)
 - `rule-packs/`: one folder per pack: `pack.yaml` + `rules/`
 
 ## Commands
 
-Run from the repo root (see `Makefile`): `make up`, `make migrate`, `make graph-init`, `make load-config`, `make api`, `make worker`, `make web`, `make dry-run REPO=<name>`, `make test`, `make lint`. After changing `db/models.py`, create a migration with `cd backend && uv run alembic revision --autogenerate -m "..."` and review it.
+Run from the repo root (see `Makefile`): `make up`, `make migrate`, `make graph-init`, `make dev`, `make api`, `make worker`, `make web`, `make dry-run REPO=<name>`, `make test`, `make lint`. After changing `db/models.py`, create a migration with `cd backend && uv run alembic revision --autogenerate -m "..."` and review it.
 
 ## Key decisions to keep in mind
 

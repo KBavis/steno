@@ -22,6 +22,8 @@ def _setup(verbose: bool = typer.Option(False, "--verbose", "-v")) -> None:
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s %(levelname)-5s %(name)s: %(message)s",
     )
+    # Neo4j logs "index already exists" etc. at INFO on every idempotent schema call
+    logging.getLogger("neo4j.notifications").setLevel(logging.WARNING)
 
 
 @app.command()
@@ -57,30 +59,16 @@ def db_upgrade(revision: str = "head") -> None:
 
 @graph_app.command("init")
 def graph_init() -> None:
-    """Create Neo4j constraints and indexes (idempotent)."""
+    """Create Neo4j constraints and indexes, and sync the declared org and spaces (idempotent)."""
+    from steno.db.session import session_scope
     from steno.graph.driver import database, get_driver
+    from steno.graph.projection import sync_declared
     from steno.graph.schema import apply_schema
 
     stmts = apply_schema(get_driver(), database())
-    typer.echo(f"applied {len(stmts)} constraints/indexes")
-
-
-@app.command("load-config")
-def load_config(path: str = typer.Option(None, help="Defaults to STENO_POC_CONFIG_PATH.")) -> None:
-    """Load the POC declarations file into Postgres and project spaces into Neo4j."""
-    from pathlib import Path
-
-    from steno.db.session import session_scope
-    from steno.graph.driver import database, get_driver
-    from steno.graph.projection import project_spaces
-    from steno.poc.config_loader import load_config as load
-    from steno.poc.config_loader import read_config
-
-    config = read_config(Path(path) if path else get_settings().poc_config_path)
     with session_scope() as session:
-        counts = load(session, config)
-        projected = project_spaces(session, get_driver(), database(), config.organization)
-    typer.echo(f"loaded {counts}; projected {projected} spaces into Neo4j")
+        spaces = sync_declared(session, get_driver(), database())
+    typer.echo(f"applied {len(stmts)} constraints/indexes; synced {spaces} spaces")
 
 
 @job_app.command("enqueue")
@@ -98,6 +86,6 @@ def job_enqueue(
     with session_scope() as session:
         repository = session.scalar(select(Repository).where(Repository.name == repo))
         if repository is None:
-            raise typer.BadParameter(f"unknown repository {repo!r}; run `steno load-config`?")
+            raise typer.BadParameter(f"unknown repository {repo!r}")
         job = enqueue(session, repository.id, mode)
         typer.echo(f"queued job {job.id} ({mode}) for {repo}")

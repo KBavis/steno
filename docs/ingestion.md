@@ -58,7 +58,27 @@ A connector says **where a source is and how to reach it**. It fetches; it doesn
 | Phase | Repository selection |
 |---|---|
 | **Phase 1** | An **explicit include list**: one application's repository, or a few |
-| **Later** | **Discovery**: Steno lists every repository in the connector's scope through the host's API, filtered by include/exclude patterns, archived status, and recent activity. An admin assigns the discovered repositories to spaces. |
+| **Later** | **Discovery**: Steno lists every repository in the connector's scope through the host's API, filtered by include/exclude patterns, archived status, and recent activity. Placement rules assign the discovered repositories to spaces (below). |
+
+### Access, selection, and placement (Decided)
+
+Three separate questions, kept apart so that one doesn't have to answer the others:
+
+| Concern | Question | Where it lives |
+|---|---|---|
+| **Access** | What can Steno see on this host? | The connector: base URL, credentials, scope |
+| **Selection** | Which repositories get ingested? | The repository list (explicit in Phase 1, discovery later) |
+| **Placement** | Which space does a repository belong to? | The repository's space |
+
+A connector's scope never has to be narrowed to one repository: testing on one repository means selecting one repository under a broad connector.
+
+**Placement rules** (Decided; built with discovery) map the host's own structure onto spaces, so an org with thousands of repositories doesn't assign each by hand:
+
+- A rule is a connector, a host grouping (Bitbucket project, GitLab group, GitHub org), and an optional repository-name pattern, pointing at a space: "connector `bitbucket`, project `PAY` → Payroll", "`pay-*` → Payroll". Rules are evaluated in order.
+- **An explicit assignment on a repository always wins** over the rules.
+- Discovered repositories that no rule matches go to an **unassigned** queue for an admin.
+- Phase 1 needs no rules: repositories are selected and placed one at a time.
+- Automatic space proposals, if ever added (D27 lists them as not planned), would only suggest rules; an admin approves them.
 
 | Kind | Examples | Phase |
 |---|---|---|
@@ -340,15 +360,16 @@ Only Steno's extractors can produce facts in Steno's model. Contextualized later
 
 **Principle: Postgres holds what Steno is *told* and what Steno *did*. Neo4j holds what Steno *knows*.**
 
-- **Declared structure** (spaces, glossary) has its **source of truth in Postgres** and is **projected into Neo4j** as nodes and edges. (Decided)
+- **Declared structure** (the organization, spaces, glossary) has its **source of truth in Postgres** and is **projected into Neo4j** as nodes and edges. (Decided)
 - **Neo4j can be rebuilt** from Postgres plus the repositories, **without re-spending on the LLM**, because every generated text is cached in `llm_output`. Nothing is stored only in Neo4j. (Decided)
-- **One Steno deployment per organization**, so no tables carry an `organization_id`. (Decided)
+- **One Steno deployment per organization**, so no tables carry an `organization_id`. The organization itself is the single row in `organization`. (Decided)
 - **The work queue lives in Postgres:** workers claim `queued` jobs with `SELECT … FOR UPDATE SKIP LOCKED`, so no separate broker is needed. (Decided)
 
 **Configuration and jobs:**
 
 ```mermaid
 erDiagram
+    ORGANIZATION ||--o{ SPACE : contains
     CONNECTOR ||--o{ REPOSITORY : scopes
     SPACE ||--o{ SPACE : nests
     SPACE ||--o{ REPOSITORY : owns
@@ -376,7 +397,8 @@ erDiagram
 
 | Table | Columns |
 |---|---|
-| `connector` | `id`, `kind` (bitbucket / github / gitlab), `base_url`, `scope` (json: workspace, project, org), `credentials_ref` |
+| `organization` | `id` (always 1), `name`, `description`, `onboarded_at` |
+| `connector` | `id`, `name`, `kind` (bitbucket / github / gitlab), `base_url`, `scope` (json: workspace, project, org), `credentials_ref` |
 | `repository` | `id`, `connector_id`, `space_id`, `name`, `clone_url`, `default_branch`, `selection` (included / discovered / excluded), `last_ingested_sha`, `status` |
 | `space` | `id`, `parent_id`, `name`, `description` |
 | `glossary_term` | `id`, `space_id`, `term`, `target_node_id`, `definition` |
@@ -396,6 +418,7 @@ erDiagram
 
 | Table | Why |
 |---|---|
+| `organization` | The organization this deployment serves: one row, entered in onboarding. The root of the space tree. Projected into Neo4j. |
 | `connector` | A source system plus a scope (a Bitbucket workspace or project, a GitHub org). `credentials_ref` points into a secret manager; secrets are never stored. |
 | `repository` | The include list now, discovery later (`selection`: included / discovered / excluded). `space_id` places it in the org. `last_ingested_sha` drives incremental updates. |
 | `space` | Admin-declared spaces, which can nest. Projected into Neo4j. |
@@ -430,4 +453,4 @@ erDiagram
 | `jev_decision` | Every Jev input, output, confidence, and latency. From ingestion, it's linked to the stage; at query time, to the request. |
 | `tool_call` | Every MCP tool call from agents: tool, parameters, latency, result count, grouped by `session_id`. It measures round trips per question and the latency targets, shows chatty patterns worth a batch tool, and joins with `jev_decision` to debug a bad answer. |
 
-In the POC, connectors, repositories, spaces, and the glossary can start as a config file that's loaded into these tables.
+Admins declare the organization, spaces, connectors, and repositories in the UI, starting with the onboarding flow (DESIGN_DOC §13).

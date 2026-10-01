@@ -25,7 +25,6 @@ Today's coding agents are strong inside one repository and blind beyond it. Most
 | `frontend/` | Vite + React + TypeScript UI |
 | `resolver-jvm/` | JavaParser symbol-resolution helper, called by the worker |
 | `rule-packs/` | Extractor rule packs |
-| `config/` | POC declarations (connectors, spaces, repositories) |
 | `deploy/` | docker-compose for Postgres and Neo4j |
 
 Prerequisites: Docker (on WSL, enable Docker Desktop's WSL integration), [uv](https://docs.astral.sh/uv/), Node 20+, Java 21.
@@ -34,13 +33,12 @@ Prerequisites: Docker (on WSL, enable Docker Desktop's WSL integration), [uv](ht
 make up                                         # Postgres + Neo4j
 make setup                                      # backend and frontend dependencies
 cp .env.example backend/.env
-cp config/steno.example.yaml config/steno.yaml  # then edit: your space and repository
-make migrate graph-init load-config
+make migrate graph-init
 
 make dev       # databases + API/MCP (:8000) + worker + UI (:5173); Ctrl+C to stop
                # or separately: make api / make worker / make web
 
-make dry-run REPO=<name>                        # or click "Dry run" in the UI
+# Open the UI: onboarding walks you through organization → spaces → connectors → repositories.
 ```
 
 Connect an agent: `claude mcp add --transport http steno http://localhost:8000/mcp`.

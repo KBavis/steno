@@ -258,7 +258,7 @@ flowchart LR
 
 ### Relational database
 
-Postgres holds what Steno is told and what it did; Neo4j holds what it knows. Tables: configuration (`connector`, `repository`, `space`, `glossary_term`, `rule_pack`, `repository_rule_pack`), operations (`ingestion_job`, which is also the work queue, `ingestion_stage`, `coverage_item`), change history (`fact_change`, `job_commit`), and audit/cost (`llm_call`, `llm_output`, `jev_decision`, `tool_call`). See the [ER diagram](./ingestion.md#8-relational-database-postgres).
+Postgres holds what Steno is told and what it did; Neo4j holds what it knows. Tables: configuration (`organization`, `connector`, `repository`, `space`, `glossary_term`, `rule_pack`, `repository_rule_pack`), operations (`ingestion_job`, which is also the work queue, `ingestion_stage`, `coverage_item`), change history (`fact_change`, `job_commit`), and audit/cost (`llm_call`, `llm_output`, `jev_decision`, `tool_call`). See the [ER diagram](./ingestion.md#8-relational-database-postgres).
 
 ---
 
@@ -365,6 +365,14 @@ Full design: [jev.md](./jev.md). **Decided:** Jev makes every decision that dete
 | **Passive** (default) | Grants read access | Repos, config, and later deployment / infrastructure definitions |
 | **Annotate** (optional) | Adds a small `steno.yaml` where extractors get something wrong | Overrides and names |
 | **Instrument** (optional, later) | Adopts OpenTelemetry, or exposes Splunk | Runtime-observed edges |
+
+**Onboarding flow (Decided):** on first run, the admin is walked through:
+1. **Organization**: name and description, stored as the single `organization` row.
+2. **Spaces**: how the org divides itself, with descriptions.
+3. **Connectors**: the git hosts and what Steno may see on each (access).
+4. **Repositories**: which to ingest (selection) and which space each belongs to (placement). Phase 1 picks them one by one; later, discovery plus placement rules (see [Ingestion §3](./ingestion.md#access-selection-and-placement-decided)).
+
+Everything entered here can be changed or extended afterward.
 
 **Defining spaces:**
 1. **Declare** (Phase 1–2): a space is a list of repositories.
@@ -498,6 +506,9 @@ Correctness comes first, so it has to be measured:
 | D34 | One Steno deployment per organization | Decided |
 | D35 | The work queue is `ingestion_job` in Postgres (`SKIP LOCKED`), no broker | Decided |
 | D36 | Neo4j is rebuildable from Postgres + git without re-spending on the LLM (`llm_output` cache). Nothing is stored only in Neo4j. | Decided |
+| D37 | The organization is declared in Postgres as a single `organization` row (name, description), entered during onboarding and projected into Neo4j | Decided |
+| D38 | First-run onboarding: Organization → Spaces → Connectors → Repositories | Decided |
+| D39 | A connector's scope is access only. Repository selection and placement are separate; at org scale, placement rules (connector + host grouping + optional name pattern → space) place repositories, an explicit assignment wins, and unmatched repositories go to an unassigned queue. Rules are built with discovery. | Decided |
 | D25 | Rule packs, auto-enabled from dependencies, plus a coverage report after every ingestion. Phase 1 rules are hand-written; templates and LLM-drafted rules are deferred. | Decided |
 
 ## 21. Open questions

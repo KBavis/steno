@@ -11,12 +11,33 @@ export interface Health {
   checks: Record<string, string>
 }
 
+export interface Organization {
+  name: string
+  description: string | null
+  onboarded_at: string | null
+}
+export type OrganizationInput = Pick<Organization, 'name' | 'description'>
+
+export type ConnectorKind = 'bitbucket' | 'github' | 'gitlab'
+
+export interface Connector {
+  id: number
+  name: string
+  kind: ConnectorKind
+  base_url: string
+  scope: Record<string, string>
+  credentials_ref: string | null
+}
+export type ConnectorInput = Omit<Connector, 'id'>
+
 export interface Space {
   id: number
   parent_id: number | null
   name: string
   description: string | null
 }
+
+export type SpaceInput = Omit<Space, 'id'>
 
 export interface Repository {
   id: number
@@ -27,6 +48,8 @@ export interface Repository {
   default_branch: string
   last_ingested_sha: string | null
 }
+
+export type RepositoryInput = Omit<Repository, 'id' | 'last_ingested_sha'>
 
 export interface Job {
   id: number
@@ -63,16 +86,52 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: { 'content-type': 'application/json', ...init?.headers },
   })
-  if (!res.ok) {
-    throw new Error(`${init?.method ?? 'GET'} /api${path}: ${res.status} ${await res.text()}`)
+  if (!res.ok) throw new Error(await errorMessage(res))
+  return (res.status === 204 ? undefined : await res.json()) as T
+}
+
+/** FastAPI errors: {detail: string} or, for validation, {detail: [{loc, msg}]} */
+async function errorMessage(res: Response): Promise<string> {
+  const text = await res.text()
+  try {
+    const { detail } = JSON.parse(text)
+    if (typeof detail === 'string') return detail
+    if (Array.isArray(detail)) {
+      return detail.map((d) => `${d.loc?.slice(1).join('.') ?? ''}: ${d.msg}`).join('; ')
+    }
+  } catch {
+    // not JSON
   }
-  return res.json() as Promise<T>
+  return `${res.status} ${text || res.statusText}`
+}
+
+/** create / update / delete for one Admin API collection */
+function crud<T, In>(path: string) {
+  return {
+    list: () => request<T[]>(path),
+    create: (body: In) => request<T>(path, { method: 'POST', body: JSON.stringify(body) }),
+    update: (id: number, body: In) =>
+      request<T>(`${path}/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+    remove: (id: number) => request<void>(`${path}/${id}`, { method: 'DELETE' }),
+  }
 }
 
 export const api = {
   health: () => request<Health>('/health'),
-  spaces: () => request<Space[]>('/spaces'),
-  repositories: () => request<Repository[]>('/repositories'),
+  organization: {
+    /** null until onboarding creates it */
+    get: () =>
+      request<Organization>('/organization').catch((e: Error) => {
+        if (e.message.startsWith('no organization yet')) return null
+        throw e
+      }),
+    put: (body: OrganizationInput) =>
+      request<Organization>('/organization', { method: 'PUT', body: JSON.stringify(body) }),
+    completeOnboarding: () => request<Organization>('/organization/onboarding/complete', { method: 'POST' }),
+  },
+  spaces: crud<Space, SpaceInput>('/spaces'),
+  connectors: crud<Connector, ConnectorInput>('/connectors'),
+  repositories: crud<Repository, RepositoryInput>('/repositories'),
   jobs: () => request<Job[]>('/jobs'),
   job: (id: number) => request<JobDetail>(`/jobs/${id}`),
   createJob: (repository_id: number, mode: JobMode) =>

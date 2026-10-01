@@ -15,7 +15,6 @@ build/
 
 # Local config and secrets
 .env
-config/steno.yaml
 
 # Editors / OS
 .idea/
