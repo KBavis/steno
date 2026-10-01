@@ -1,0 +1,25 @@
+id: sqlalchemy-model
+description: A declarative model class with __tablename__, e.g. class Job(Base) with __tablename__ = "job"
+match:
+  rule:
+    kind: class_definition
+    has:
+      field: body
+      has:
+        kind: expression_statement
+        has:
+          any:
+            - pattern: "__tablename__ = $TABLE"          # plain assignment
+            - pattern: "__tablename__: $_ = $TABLE"      # annotated: __tablename__: str = "job"
+  constraints:
+    TABLE: { kind: string }
+emit:
+  - node: Entity
+    as: entity
+    name: "@class"
+  - node: Table
+    as: table
+    name: $TABLE             # a stub until V2 fills in columns; datastore attached when known
+  - edge: MAPS_TO
+    from: entity
+    to: table

@@ -1,0 +1,10 @@
+# Endpoint paths include the router prefix (/jobs) and the prefix of the router it's mounted in (/api).
+nodes:
+  - HttpEndpoint: { method: POST, path: "/api/jobs/projects/{project_id}" }
+  - HttpEndpoint: { method: GET, path: "/api/jobs/{job_id}" }
+edges:
+  - EXPOSES: { from: "@app", to: "POST /api/jobs/projects/{project_id}" }
+  - EXPOSES: { from: "@app", to: "GET /api/jobs/{job_id}" }
+entry_points:
+  - "POST /api/jobs/projects/{project_id}" -> app.api.routers.job.run_project_jobs
+  - "GET /api/jobs/{job_id}" -> app.api.routers.job.get_job

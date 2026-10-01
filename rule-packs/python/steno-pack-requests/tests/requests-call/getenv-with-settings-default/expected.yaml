@@ -1,0 +1,4 @@
+# OLLAMA_BASE_URL isn't set anywhere in the repository, so os.getenv falls back to the
+# settings default (a property clue from steno-pack-pydantic-settings).
+edges:
+  - CALLS: { from: llm.ollama.list_models, to: { http: { method: GET, url: "http://localhost:11434/api/tags" } } }

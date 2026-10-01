@@ -5,3 +5,4 @@ source: core
 description: FastAPI routers, endpoints, and their URL prefixes
 enabled_when:
   dependencies: [fastapi]
+  imports: [fastapi]

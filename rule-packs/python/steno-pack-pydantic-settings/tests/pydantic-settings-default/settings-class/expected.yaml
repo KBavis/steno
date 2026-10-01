@@ -1,0 +1,7 @@
+# One property clue per field with a default; model_config is configuration, not a setting.
+clues:
+  - property: { key: PROJECT_NAME, value: "Contextualized" }
+  - property: { key: VECTOR_DB_HOST, value: "localhost" }
+  - property: { key: VECTOR_DB_PORT, value: 8000 }
+  - property: { key: SYNC_REL_DB_URL, value: "" }
+  - property: { key: AZURE_CONTEXT_WINDOW_OVERRIDES, value: { "gpt-4o": 128000 } }

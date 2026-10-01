@@ -1,0 +1,22 @@
+id: pydantic-settings-default
+description: 'A field with a default on a BaseSettings class, e.g. OLLAMA_LOCAL_HOST_URL: str = "http://localhost:11434"'
+match:
+  rule:
+    kind: expression_statement
+    has:
+      pattern: "$FIELD: $TYPE = $VALUE"
+    inside:
+      kind: block
+      inside:
+        kind: class_definition
+        has:
+          field: superclasses
+          has: { regex: "BaseSettings$" }
+  constraints:
+    TYPE: { not: { regex: "^ClassVar" } }      # model_config: ClassVar[...] is configuration, not a setting
+emit:
+  # The code default. An environment variable or .env file can override it at runtime,
+  # and the config resolver prefers those when they're present in the repository.
+  - clue: property
+    key: $FIELD
+    value: $VALUE

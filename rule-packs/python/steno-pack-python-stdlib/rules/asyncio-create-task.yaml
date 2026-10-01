@@ -1,0 +1,11 @@
+id: asyncio-create-task
+description: A coroutine started as a separate task, e.g. asyncio.create_task(self._warm_bm25_cache(project_id))
+match:
+  rule:
+    pattern: asyncio.create_task($CALLEE($$$) $$$)
+emit:
+  # Marks the call the call graph already sees as async: it runs alongside the caller, not before it continues
+  - edge: INVOKES
+    from: "@function"
+    to: { Function: { symbol: $CALLEE } }
+    async: true

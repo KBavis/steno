@@ -184,7 +184,10 @@ def main() -> None:
     ap.add_argument("--json", action="store_true", help="print all matches as JSON")
     args = ap.parse_args()
 
-    rule = yaml.safe_load(args.rule.read_text())
+    try:
+        rule = yaml.safe_load(args.rule.read_text())
+    except yaml.YAMLError as exc:
+        sys.exit(f"error: {args.rule} is not valid YAML (quote values that contain ': '):\n{exc}")
     kind = rule.get("kind", "code")
     if kind == "config":
         results = run_config_rule(rule, args.paths)

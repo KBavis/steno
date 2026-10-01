@@ -1,0 +1,2 @@
+edges:
+  - INVOKES: { from: agent.AgentService.start, to: agent.AgentService.warm_cache, async: true }

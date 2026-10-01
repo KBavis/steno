@@ -1,0 +1,8 @@
+name: steno-pack-pydantic-settings
+version: 0.1.0
+language: python
+source: core
+description: Default values of pydantic-settings fields, so settings.X references resolve
+enabled_when:
+  dependencies: [pydantic-settings]
+  imports: [pydantic_settings]

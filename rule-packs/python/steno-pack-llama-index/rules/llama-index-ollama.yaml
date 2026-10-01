@@ -1,0 +1,27 @@
+id: llama-index-ollama
+description: An Ollama LLM client, e.g. Ollama(model=self.model_name, base_url=settings.OLLAMA_LOCAL_HOST_URL)
+match:
+  rule:
+    pattern: $CLS($$$)
+    has:                                    # model= is required by Ollama; it anchors the match to LLM constructors
+      stopBy: end
+      kind: keyword_argument
+      has: { field: name, regex: "^model$" }
+    any:                                    # base_url= is optional; Ollama defaults to localhost:11434
+      - has:
+          stopBy: end
+          kind: keyword_argument
+          all:
+            - has: { field: name, regex: "^base_url$" }
+            - has: { field: value, pattern: $BASE_URL }
+      - not:
+          has:
+            stopBy: end
+            kind: keyword_argument
+            has: { field: name, regex: "^base_url$" }
+where:
+  $CLS: { class: [llama_index.llms.ollama.Ollama] }
+emit:
+  - clue: client
+    type: $CLS
+    target: { ExternalSystem: { host: $BASE_URL, name: Ollama } }   # unbound $BASE_URL → host omitted, identified by name

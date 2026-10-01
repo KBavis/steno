@@ -1,0 +1,8 @@
+nodes:
+  - Entity: { name: models.job.Job }
+  - Table: { name: job }
+  - Entity: { name: models.git_commit.GitCommit }
+  - Table: { name: git_commit }
+edges:
+  - MAPS_TO: { from: models.job.Job, to: job }
+  - MAPS_TO: { from: models.git_commit.GitCommit, to: git_commit }

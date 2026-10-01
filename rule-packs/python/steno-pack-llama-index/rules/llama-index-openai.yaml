@@ -1,0 +1,13 @@
+id: llama-index-openai
+description: An OpenAI LLM client, e.g. OpenAI(model=self.model_name, api_key=settings.OPENAI_API_KEY)
+match:
+  rule:
+    pattern: $CLS($$$)
+  constraints:
+    CLS: { regex: "^OpenAI$" }   # AzureOpenAI and OpenAILike subclass OpenAI; they have their own rules
+where:
+  $CLS: { class: [llama_index.llms.openai.OpenAI] }
+emit:
+  - clue: client
+    type: $CLS
+    target: { ExternalSystem: { host: api.openai.com, name: OpenAI } }

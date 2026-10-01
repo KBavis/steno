@@ -1,0 +1,12 @@
+id: sqlalchemy-session-get
+description: Loading one row by primary key, e.g. await session.get(Job, job_id)
+match:
+  rule:
+    pattern: $SESSION.get($MODEL, $$$)
+where:
+  $SESSION: { type: [sqlalchemy.orm.Session, sqlalchemy.ext.asyncio.AsyncSession] }
+emit:
+  - edge: READS_FROM
+    from: "@function"
+    to: { table_of: $MODEL }
+    operation: select

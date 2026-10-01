@@ -1,0 +1,8 @@
+name: steno-pack-chromadb
+version: 0.1.0
+language: python
+source: core
+description: Chroma vector database clients, collections, and the reads and writes made through them
+enabled_when:
+  dependencies: [chromadb]
+  imports: [chromadb]

@@ -1,0 +1,14 @@
+id: sqlalchemy-session-add
+description: Saving new objects through a session, e.g. self.db.add(conversation) or session.add_all(chunks)
+match:
+  rule:
+    pattern: $SESSION.$METHOD($OBJ $$$)
+  constraints:
+    METHOD: { regex: "^(add|add_all|merge)$" }
+where:
+  $SESSION: { type: [sqlalchemy.orm.Session, sqlalchemy.ext.asyncio.AsyncSession] }
+emit:
+  - edge: WRITES_TO
+    from: "@function"
+    to: { table_of: $OBJ }       # $OBJ is an instance (or a list of them for add_all); its class's table
+    operation: insert

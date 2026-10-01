@@ -1,0 +1,6 @@
+nodes:
+  - HttpEndpoint: { method: DELETE, path: "/chroma/collection/{project_id}" }
+edges:
+  - EXPOSES: { from: "@app", to: "DELETE /chroma/collection/{project_id}" }
+entry_points:
+  - "DELETE /chroma/collection/{project_id}" -> routers.chroma.delete_collection

@@ -1,0 +1,2 @@
+edges:
+  - READS_FROM: { from: service.projects_for_source, to: project_data, operation: select }

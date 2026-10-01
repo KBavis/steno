@@ -113,7 +113,7 @@ Other points:
 | `Schedule` | Application | `kind` (cron / fixed-rate / fixed-delay), `expression` | A trigger that isn't an interface |
 | `Flow` | Application | `name`, `entry_symbol`, `steps`, `primary_entity`, `operation`, `technical` (from Jev I9 / I10) | See [Flows](#6-flows) |
 | `Step` | Flow | `path` (e.g. `1.1.3`), `label` (LLM phrasing), `branch_raw`, `branch` (LLM phrasing), `effects` | One significant step of a flow (L2). `RUNS` the function it corresponds to. |
-| `DataStore` + `Relational` / `Document` / `KeyValue` / `Search` / `Graph` | Space | `vendor` (Postgres, Oracle, Mongo, Redis, …), `version`, `host`, `database` | The **category is a label**, because it changes the model (relational stores have schemas and tables; document stores have collections). The **vendor is a property**, because it's an open-ended list that doesn't change the model. |
+| `DataStore` + `Relational` / `Document` / `KeyValue` / `Search` / `Graph` / `Vector` | Space | `vendor` (Postgres, Oracle, Mongo, Redis, …), `version`, `host`, `database` | The **category is a label**, because it changes the model (relational stores have schemas and tables; document and vector stores have collections). The **vendor is a property**, because it's an open-ended list that doesn't change the model. |
 | `Schema` | DataStore | `name` | V1: only when the code names one |
 | `Table` | Schema, or DataStore when there's no schema | `name`, `kind` (table / collection / index), `stub` | V1: stubs. V2: filled in. See [Data stores](#7-data-stores). |
 | `Column` | Table | `name`, `type`, `nullable`, `purpose` | V2 |

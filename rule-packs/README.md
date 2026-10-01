@@ -55,7 +55,7 @@ match:
     has:
       kind: decorator
       has:
-        pattern: $ROUTER.$METHOD($PATH, $$$)
+        pattern: $ROUTER.$METHOD($PATH $$$)
   constraints:
     METHOD: { regex: "^(get|post|put|patch|delete)$" }
 emit:

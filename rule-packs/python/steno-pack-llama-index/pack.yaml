@@ -1,0 +1,8 @@
+name: steno-pack-llama-index
+version: 0.1.0
+language: python
+source: core
+description: LlamaIndex LLM and embedding clients, as calls to the model providers behind them
+enabled_when:
+  dependencies: [llama-index-core, llama-index]
+  imports: [llama_index]

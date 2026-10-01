@@ -1,0 +1,3 @@
+# The client arrives as a typed parameter; `where` recognizes it by its type.
+edges:
+  - CALLS: { from: bitbucket.BitbucketRepository.fetch_pull_request, to: { http: { method: GET, url: "https://bitbucket.example.com/rest/api/1.0/projects/PAY/repos/svc/pull-requests/{pr_id}" } } }

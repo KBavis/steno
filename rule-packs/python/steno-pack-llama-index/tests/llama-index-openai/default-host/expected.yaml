@@ -1,0 +1,2 @@
+clues:
+  - client: { type: llama_index.llms.openai.OpenAI, target: { ExternalSystem: { host: api.openai.com, name: OpenAI } } }

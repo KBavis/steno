@@ -1,0 +1,10 @@
+id: sqlalchemy-select
+description: A SELECT on a mapped entity, e.g. select(Job).where(Job.id == job_id) or select(File.path)
+match:
+  rule:
+    pattern: select($MODEL $$$)
+emit:
+  - edge: READS_FROM
+    from: "@function"
+    to: { table_of: $MODEL }     # dropped when $MODEL isn't a mapped entity (e.g. select(func.count()))
+    operation: select

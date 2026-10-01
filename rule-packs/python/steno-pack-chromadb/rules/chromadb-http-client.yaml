@@ -1,0 +1,47 @@
+id: chromadb-http-client
+description: A connection to a Chroma server, e.g. chromadb.HttpClient(host=settings.VECTOR_DB_HOST, port=settings.VECTOR_DB_PORT)
+match:
+  rule:
+    pattern: chromadb.$CTOR($$$)
+    has:
+      stopBy: end
+      kind: keyword_argument
+      all:
+        - has: { field: name, regex: "^host$" }
+        - has: { field: value, pattern: $HOST }
+  constraints:
+    CTOR: { regex: "^(HttpClient|AsyncHttpClient)$" }
+emit:
+  - node: [DataStore, Vector]
+    as: store
+    vendor: chroma
+    host: $HOST
+    database: default_database          # Chroma's default when no database= is given
+  - clue: client
+    type: chromadb.api.ClientAPI        # covers the sync and async clients and their subclasses
+    target: store
+    operations:
+      get_collection: read
+      list_collections: read
+      count_collections: read
+      create_collection: write
+      get_or_create_collection: write
+      delete_collection: write
+  - clue: client
+    type: chromadb.api.AsyncClientAPI
+    target: store
+    operations:
+      get_collection: read
+      list_collections: read
+      count_collections: read
+      create_collection: write
+      get_or_create_collection: write
+      delete_collection: write
+  - clue: client
+    type: chromadb.api.models.Collection.Collection
+    target: store
+    operations: { get: read, query: read, count: read, peek: read, add: write, upsert: write, update: write, delete: write }
+  - clue: client
+    type: chromadb.api.models.AsyncCollection.AsyncCollection
+    target: store
+    operations: { get: read, query: read, count: read, peek: read, add: write, upsert: write, update: write, delete: write }

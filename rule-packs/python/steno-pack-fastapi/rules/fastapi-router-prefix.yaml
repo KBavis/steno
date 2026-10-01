@@ -1,0 +1,15 @@
+id: fastapi-router-prefix
+description: A router created with a URL prefix, e.g. router = APIRouter(prefix="/jobs", tags=["Jobs"])
+match:
+  rule:
+    pattern: $ROUTER = APIRouter($$$)
+    has:
+      stopBy: end
+      kind: keyword_argument
+      all:
+        - has: { field: name, regex: "^prefix$" }
+        - has: { field: value, pattern: $PREFIX }
+emit:
+  - clue: prefix
+    owner: $ROUTER          # labeled by the router's symbol, e.g. app.api.routers.job.router
+    value: $PREFIX

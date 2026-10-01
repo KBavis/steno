@@ -1,0 +1,2 @@
+clues:
+  - client: { type: gateway.GatewayOpenAILike, target: { ExternalSystem: { host: "gateway.example.com", name: OpenAI-compatible API } } }

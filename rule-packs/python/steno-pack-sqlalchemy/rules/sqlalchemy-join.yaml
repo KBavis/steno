@@ -1,0 +1,12 @@
+id: sqlalchemy-join
+description: A joined entity in a query, e.g. select(Project).join(ProjectData)
+match:
+  rule:
+    pattern: $QUERY.$JOIN($MODEL $$$)
+  constraints:
+    JOIN: { regex: "^(join|outerjoin)$" }
+emit:
+  - edge: READS_FROM
+    from: "@function"
+    to: { table_of: $MODEL }     # ", ".join(names) also matches the pattern; table_of drops it
+    operation: select

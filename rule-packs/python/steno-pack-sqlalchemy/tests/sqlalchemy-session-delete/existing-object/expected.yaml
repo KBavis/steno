@@ -1,0 +1,3 @@
+# Only this rule's output is listed; the session.get is covered by sqlalchemy-session-get.
+edges:
+  - WRITES_TO: { from: service.remove, to: project, operation: delete }

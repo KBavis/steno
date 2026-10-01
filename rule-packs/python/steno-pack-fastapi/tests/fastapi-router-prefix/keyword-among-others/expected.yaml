@@ -1,0 +1,3 @@
+# A router without prefix= produces no clue.
+clues:
+  - prefix: { owner: routers.router, value: "/jobs" }

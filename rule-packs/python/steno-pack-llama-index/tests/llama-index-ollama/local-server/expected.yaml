@@ -1,0 +1,4 @@
+clues:
+  - client: { type: llama_index.llms.ollama.Ollama, target: { ExternalSystem: { host: "localhost:11434", name: Ollama } } }
+edges:
+  - CALLS: { from: llm.summarize, to: { ExternalSystem: { host: "localhost:11434" } } }

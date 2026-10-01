@@ -1,0 +1,3 @@
+clues:
+  - mount: { parent: main.app_router, child: main.job_router }
+  - mount: { parent: main.app, child: main.app_router }

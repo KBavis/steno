@@ -1,0 +1,7 @@
+name: steno-pack-python-stdlib
+version: 0.1.0
+language: python
+source: core
+description: Python standard library patterns, such as tasks started with asyncio
+enabled_when:
+  always: true

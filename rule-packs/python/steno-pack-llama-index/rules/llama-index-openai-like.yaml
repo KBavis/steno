@@ -1,0 +1,17 @@
+id: llama-index-openai-like
+description: A client for any OpenAI-compatible API, including app subclasses, e.g. GatewayOpenAILike(api_base=f"{settings.AZURE_STANDARD_API_BASE}/{model}/v1")
+match:
+  rule:
+    pattern: $CLS($$$)
+    has:
+      stopBy: end
+      kind: keyword_argument
+      all:
+        - has: { field: name, regex: "^api_base$" }
+        - has: { field: value, pattern: $API_BASE }
+where:
+  $CLS: { class: [llama_index.llms.openai_like.OpenAILike] }
+emit:
+  - clue: client
+    type: $CLS                 # the class actually constructed, e.g. the app's GatewayOpenAILike
+    target: { ExternalSystem: { host: $API_BASE, name: OpenAI-compatible API } }

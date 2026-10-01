@@ -1,0 +1,2 @@
+clues:
+  - mount: { parent: main.app, child: main.api_router, prefix: "/api/v1" }

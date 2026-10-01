@@ -1,0 +1,20 @@
+id: llama-index-azure-openai
+description: An Azure OpenAI LLM or embedding client, e.g. AzureOpenAI(engine=deployment, azure_endpoint=settings.AZURE_OPENAI_API_BASE)
+match:
+  rule:
+    pattern: $CLS($$$)
+    has:
+      stopBy: end
+      kind: keyword_argument
+      all:
+        - has: { field: name, regex: "^azure_endpoint$" }
+        - has: { field: value, pattern: $ENDPOINT }
+where:
+  $CLS:
+    class:
+      - llama_index.llms.azure_openai.AzureOpenAI
+      - llama_index.embeddings.azure_openai.AzureOpenAIEmbedding
+emit:
+  - clue: client
+    type: $CLS
+    target: { ExternalSystem: { host: $ENDPOINT, name: Azure OpenAI } }

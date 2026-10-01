@@ -513,6 +513,11 @@ Correctness comes first, so it has to be measured:
 | D42 | A person owns every rule and may write it by hand or with the `rule-pack-author` skill. Steno generating rules on its own stays deferred (refines D25). | Decided |
 | D43 | Rule packs are grouped by ecosystem: `rule-packs/java/`, `python/`, `org/` | Decided |
 | D44 | Phase 1 ingests Contextualized first, then one application in our org | Decided |
+| D45 | Rules can refer to a function that's referenced but not called (`{Function: {symbol}}`), so background tasks and callbacks become async `INVOKES` edges; a rule's edge merges into the call graph's edge for the same call site | Decided |
+| D46 | Rules can target "the table this entity maps to" (`{table_of: …}`), so ORM queries become `READS_FROM` / `WRITES_TO` on tables; the emit is dropped when the value isn't a mapped entity | Decided |
+| D47 | A `client` clue type: method calls on SDK client objects (LLM APIs, vector stores) become `CALLS` to an `ExternalSystem` or reads and writes on a `DataStore`; base-class receivers resolve like DI (candidates, `ambiguous` when several) | Decided |
+| D48 | `Vector` is a `DataStore` category (Chroma, pgvector, Pinecone, …) | Decided |
+| D49 | A rule pack is enabled by a declared dependency, an import of the library, or `always` (standard library packs) | Decided |
 | D39 | A connector's scope is access only. Repository selection and placement are separate; at org scale, placement rules (connector + host grouping + optional name pattern → space) place repositories, an explicit assignment wins, and unmatched repositories go to an unassigned queue. Rules are built with discovery. | Decided |
 | D25 | Rule packs, auto-enabled from dependencies, plus a coverage report after every ingestion. Phase 1 rules are hand-written; templates and LLM-drafted rules are deferred. | Decided |
 

@@ -134,7 +134,7 @@ id: fastapi-endpoint
 match:
   rule:
     kind: decorated_definition
-    has: { kind: decorator, has: { pattern: "$ROUTER.$METHOD($PATH, $$$)" } }
+    has: { kind: decorator, has: { pattern: "$ROUTER.$METHOD($PATH $$$)" } }
 emit:
   - node: [Interface, HttpEndpoint]
     as: endpoint

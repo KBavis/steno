@@ -1,0 +1,22 @@
+id: fastapi-include-router
+description: One router mounted inside another (or inside the app), e.g. app_router.include_router(job_router) or app.include_router(api_router, prefix="/api/v1")
+match:
+  rule:
+    pattern: $PARENT.include_router($CHILD $$$)
+    any:                                    # prefix= is optional; $PREFIX is bound only when present
+      - has:
+          stopBy: end
+          kind: keyword_argument
+          all:
+            - has: { field: name, regex: "^prefix$" }
+            - has: { field: value, pattern: $PREFIX }
+      - not:
+          has:
+            stopBy: end
+            kind: keyword_argument
+            has: { field: name, regex: "^prefix$" }
+emit:
+  - clue: mount
+    parent: $PARENT
+    child: $CHILD
+    prefix: $PREFIX         # omitted when the call has no prefix=

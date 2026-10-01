@@ -1,0 +1,2 @@
+edges:
+  - WRITES_TO: { from: service.ProjectService.create, to: project, operation: insert }

@@ -1,0 +1,4 @@
+# A URL built from a runtime value stays unresolved; a literal URL resolves.
+edges:
+  - CALLS: { from: jira.JiraIssueTracker.search, to: { http: { method: POST, url: "<unresolved>" } } }
+  - CALLS: { from: jira.JiraIssueTracker.status, to: { http: { method: GET, url: "https://status.atlassian.com/api/v2/status.json" } } }

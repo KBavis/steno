@@ -1,0 +1,8 @@
+name: steno-pack-sqlalchemy
+version: 0.1.0
+language: python
+source: core
+description: SQLAlchemy models, the tables they map to, and the queries that read and write them
+enabled_when:
+  dependencies: [sqlalchemy]
+  imports: [sqlalchemy]

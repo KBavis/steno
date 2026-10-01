@@ -1,0 +1,8 @@
+name: steno-pack-httpx
+version: 0.1.0
+language: python
+source: core
+description: Outbound HTTP calls made with httpx clients
+enabled_when:
+  dependencies: [httpx]
+  imports: [httpx]

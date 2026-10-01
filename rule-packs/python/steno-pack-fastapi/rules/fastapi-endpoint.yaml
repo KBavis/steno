@@ -1,0 +1,27 @@
+id: fastapi-endpoint
+description: A route handler, e.g. @router.post("/projects/{project_id}") on an async def
+match:
+  rule:
+    kind: decorated_definition
+    has:
+      kind: decorator
+      has:
+        # No comma after $PATH: "$PATH, $$$" would miss decorators whose only argument is the path
+        pattern: $ROUTER.$METHOD($PATH $$$)
+  constraints:
+    METHOD: { regex: "^(get|post|put|patch|delete)$" }
+    PATH: { kind: string }
+where:
+  $ROUTER: { type: [fastapi.APIRouter, fastapi.FastAPI] }
+emit:
+  - node: [Interface, HttpEndpoint]
+    as: endpoint
+    method: $METHOD
+    path: $PATH
+    prefixed_by: $ROUTER     # the prefix-chain resolver adds the router's prefixes and mounts
+  - edge: EXPOSES
+    from: "@app"
+    to: endpoint
+  - entry_point:
+      trigger: endpoint
+      function: "@function"

@@ -1,0 +1,7 @@
+nodes:
+  - DataStore: { labels: [DataStore, Vector], vendor: chroma, host: chroma, database: default_database }
+edges:
+  # Calls through the client and its collections, via the rule's client clues
+  - READS_FROM: { from: vector_db.search, to: { DataStore: { vendor: chroma, host: chroma, database: default_database } } }
+  - READS_FROM: { from: vector_db.store, to: { DataStore: { vendor: chroma, host: chroma, database: default_database } } }   # get_collection
+  - WRITES_TO:  { from: vector_db.store, to: { DataStore: { vendor: chroma, host: chroma, database: default_database } } }   # add

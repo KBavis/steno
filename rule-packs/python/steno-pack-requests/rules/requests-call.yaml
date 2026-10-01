@@ -1,0 +1,11 @@
+id: requests-call
+description: A module-level requests call, e.g. requests.get(base_url + "/api/tags")
+match:
+  rule:
+    pattern: requests.$VERB($URL $$$)
+  constraints:
+    VERB: { regex: "^(get|post|put|patch|delete|head|options)$" }
+emit:
+  - edge: CALLS
+    from: "@function"
+    to: { http: { method: $VERB, url: $URL } }

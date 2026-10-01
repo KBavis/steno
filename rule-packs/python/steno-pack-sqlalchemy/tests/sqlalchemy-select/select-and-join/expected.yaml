@@ -1,0 +1,3 @@
+# select(Project) reads project. The join is covered by sqlalchemy-join; select(func.count()) isn't an entity.
+edges:
+  - READS_FROM: { from: service.projects_for_source, to: project, operation: select }

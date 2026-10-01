@@ -1,0 +1,15 @@
+id: httpx-client-call
+description: An HTTP call on an httpx client, e.g. await client.get(url, headers=...) inside `async with httpx.AsyncClient() as client`
+match:
+  rule:
+    pattern: $CLIENT.$VERB($URL $$$)
+  constraints:
+    VERB: { regex: "^(get|post|put|patch|delete|head|options)$" }
+where:
+  # Without this, the pattern also matches dict.get(...), routers, and every other .get(...):
+  # 246 matches in Contextualized, of which 24 are httpx calls.
+  $CLIENT: { type: [httpx.AsyncClient, httpx.Client] }
+emit:
+  - edge: CALLS
+    from: "@function"
+    to: { http: { method: $VERB, url: $URL } }   # URLs built from runtime values stay unresolved

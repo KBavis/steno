@@ -1,0 +1,3 @@
+# The handler doesn't call run_project_jobs; it hands it to FastAPI to run after the response.
+edges:
+  - INVOKES: { from: routers.run_project_jobs, to: services.JobService.run_project_jobs, async: true }

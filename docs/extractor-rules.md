@@ -30,7 +30,7 @@ match:                                # ast-grep: rule + optional constraints / 
     has:
       kind: decorator
       has:
-        pattern: $ROUTER.$METHOD($PATH, $$$)
+        pattern: $ROUTER.$METHOD($PATH $$$)
   constraints:
     METHOD: { regex: "^(get|post|put|patch|delete)$" }
 where:                                # optional; checked after symbol resolution
@@ -45,10 +45,11 @@ emit:                                 # one or more outputs
 
   ```yaml
   where:
-    $CLIENT: { type: [httpx.AsyncClient, httpx.Client] }   # client.get(...) on httpx, not dict.get(...)
+    $CLIENT: { type: [httpx.AsyncClient, httpx.Client] }    # an instance of one of these, or of a subclass
+    $CLS:    { class: [llama_index.llms.ollama.Ollama] }    # the class itself, or a subclass (for constructor calls)
   ```
 
-  `where` is evaluated in the resolve pass; a match whose condition fails is dropped.
+  `type` is about **instances** (`client.get(...)` on an httpx client, not `dict.get(...)`); `class` is about **classes**, so a constructor rule also catches a subclass the app defines (`class Gateway(OpenAILike)`). `where` is evaluated in the resolve pass; a match whose condition fails is dropped.
 
 ## 3. What a rule emits (Decided)
 
@@ -71,6 +72,12 @@ emit:                                 # one or more outputs
 | `as: name` | Names an emitted node so later lines in the same rule can refer to it | `as: endpoint` … `to: endpoint` |
 | `{Label: {key: value}}` | An inline reference to a node by its identity; a stub is created if it doesn't exist yet | `to: { KafkaTopic: { name: $TOPIC } }` |
 | `{http: {method, url}}` | An outbound HTTP target; the resolver decides whether it's another app's endpoint or an `ExternalSystem` | `to: { http: { method: $VERB, url: $URL } }` |
+| `{Function: {symbol: $X}}` | A function that's **referenced, not called** here: a callback, a background task. Symbol resolution turns `$X` into the function's identity. | `to: { Function: { symbol: $TASK } }` |
+| `{table_of: $X}` | The `Table` an entity maps to (through `MAPS_TO`). `$X` may be the entity class, an instance of it, or one of its attributes (`Job.status`). **If `$X` isn't a mapped entity, the emit is dropped**, so a rule can match broadly (`select(...)`) without producing noise. | `to: { table_of: $MODEL }` |
+
+**Edge properties** listed for an edge in [Knowledge Graph §4](./knowledge-graph.md#4-relationship-types) can be set in the emit, such as `async: true` on `INVOKES` or `operation: insert` on `WRITES_TO`. An emitted edge between the same two things, at the same call site, as one the call graph extracts **merges** into it; that's how a rule marks an existing call as async.
+
+**Optional captures.** A capture bound in only one branch of an `any:` (for example an optional `prefix=` keyword) is simply left out of the emit when that branch didn't match.
 
 **Captured values are resolved, not taken literally.** When a capture is a variable, a constant, an f-string, a `${placeholder}`, or a settings lookup, the resolver follows it as far as it can (local assignments, constants, config properties). What it can't resolve, such as a URL built from a runtime value, is recorded as **unresolved** with lower confidence and shows up in the coverage report.
 
@@ -84,10 +91,11 @@ Steno builds every node's stable ID from its identity properties ([Knowledge Gra
 | `GrpcMethod` | `service`, `method` | |
 | `KafkaTopic` / `Queue` | `name` | `cluster` when known |
 | `Schedule` | `kind`, `expression` | Plus the app, implied |
+| `Function` | `symbol` (fully qualified; parameter types where the language has overloading) | Usually created by the call graph; rules refer to existing functions |
 | `Entity` | `name` (the symbol) | |
 | `Table` | `name` | `schema`, `datastore` when known |
 | `DataStore` | `vendor`, `host`, `database` | |
-| `ExternalSystem` | `host` | |
+| `ExternalSystem` | `host`, or `name` when the host can't be resolved | A URL is accepted; the resolver keeps its host |
 
 ### Example: an endpoint (node + edge + entry point)
 
@@ -148,6 +156,7 @@ Each clue type has exactly one built-in resolver that knows how to combine it. A
 |---|---|---|---|
 | `prefix` | `owner`, `value` | **Prefix chain** | URL prefixes on routers, controllers, blueprints: FastAPI `APIRouter(prefix=…)`, Spring class-level `@RequestMapping` |
 | `mount` | `parent`, `child`, `prefix?` | **Prefix chain** | One router mounted inside another: `include_router`, Express `app.use("/x", router)` |
+| `client` | `type`, `target`, `operations?` | **Client** | SDK client objects that talk to something outside the app without a visible URL: LLM APIs, vector stores, cloud SDKs. A method call on an object of `type` (or a subclass) becomes `CALLS` to `target` when it's an `ExternalSystem`, or `READS_FROM` / `WRITES_TO` per `operations` (method → `read` / `write`) when it's a `DataStore`. Methods not listed produce nothing. When a receiver is typed only as a base class, every client clue whose `type` is a subclass is a candidate; more than one is marked `ambiguous`, like DI. |
 | `property` | `key`, `value`, `profile?` | **Config** | Configuration values, for resolving `${placeholders}` and settings lookups. Steno emits these automatically for recognized config files; rules emit them only for unusual sources. |
 
 More clue types arrive with the resolvers that need them, e.g. DI bindings with the DI resolver ([Ingestion §5](./ingestion.md#5-symbol-and-di-resolution)).
@@ -207,11 +216,13 @@ version: 0.1.0
 language: python
 source: core                    # core | org
 description: FastAPI routers, endpoints, and dependencies
-enabled_when:
-  dependencies: [fastapi]       # read from requirements.txt, pyproject.toml, pom.xml, build.gradle, package.json
+enabled_when:                   # any one of these turns the pack on
+  dependencies: [fastapi]       # declared in requirements.txt, pyproject.toml, pom.xml, build.gradle, package.json
+  imports: [fastapi]            # imported by any source file (catches libraries that arrive indirectly)
+  # always: true                # for a language's standard library (asyncio, java.util.concurrent)
 ```
 
-A pack is **auto-enabled** when the repository's build file lists one of `enabled_when.dependencies` (D25).
+A pack is **auto-enabled** when any `enabled_when` condition holds (D25). Checking imports as well as declared dependencies matters: a library often arrives indirectly (Contextualized uses `requests` without listing it).
 
 ## 7. Tests (Decided)
 
@@ -227,6 +238,9 @@ entry_points:
   - "POST /api/jobs/projects/{project_id}" -> routers.job.run_project_jobs
 ```
 
+- A case lists **only the output of the rule it's filed under** (`tests/<rule-id>/`). The pack's other rules still run, so the clues they emit are available, but their own facts aren't compared.
+- `expected.yaml` has up to four sections: `nodes`, `edges`, `entry_points`, and `clues`. A rule that only emits clues (a router prefix, a settings default) is tested through its `clues`; an empty list (`nodes: []`) asserts that nothing is emitted.
+- Symbols are written relative to the case's `input/` folder (`app.api.routers.job.run_project_jobs`). A value that can't be known from the code, such as a URL built from a runtime value, is written `"<unresolved>"`.
 - `steno rules test <pack>` runs every rule against its cases, through clue resolution, and shows any difference.
 - Include at least one **negative case** (similar code that must *not* match) when a pattern could over-match.
 - A case for a rule that depends on clues includes the other files it needs (here, the router's `__init__.py`), so the test covers the whole join.

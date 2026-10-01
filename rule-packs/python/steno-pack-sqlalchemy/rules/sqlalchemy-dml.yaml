@@ -1,0 +1,12 @@
+id: sqlalchemy-dml
+description: An INSERT, UPDATE, or DELETE statement on a mapped entity, e.g. update(File).where(...).values(...)
+match:
+  rule:
+    pattern: $OPERATION($MODEL $$$)
+  constraints:
+    OPERATION: { regex: "^(insert|update|delete)$" }
+emit:
+  - edge: WRITES_TO
+    from: "@function"
+    to: { table_of: $MODEL }
+    operation: $OPERATION

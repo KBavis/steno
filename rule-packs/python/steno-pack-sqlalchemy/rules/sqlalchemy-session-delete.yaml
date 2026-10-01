@@ -1,0 +1,12 @@
+id: sqlalchemy-session-delete
+description: Deleting an object through a session, e.g. await self.db.delete(conversation)
+match:
+  rule:
+    pattern: $SESSION.delete($OBJ $$$)
+where:
+  $SESSION: { type: [sqlalchemy.orm.Session, sqlalchemy.ext.asyncio.AsyncSession] }
+emit:
+  - edge: WRITES_TO
+    from: "@function"
+    to: { table_of: $OBJ }
+    operation: delete

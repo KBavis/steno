@@ -1,0 +1,13 @@
+id: fastapi-background-task
+description: A function handed to BackgroundTasks to run after the response, e.g. background_tasks.add_task(svc.run_project_jobs, project_id)
+match:
+  rule:
+    # The function is passed, not called, so the call graph alone wouldn't see this edge
+    pattern: $TASKS.add_task($FN $$$)
+where:
+  $TASKS: { type: [fastapi.BackgroundTasks, starlette.background.BackgroundTasks] }
+emit:
+  - edge: INVOKES
+    from: "@function"
+    to: { Function: { symbol: $FN } }
+    async: true
