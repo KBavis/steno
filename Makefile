@@ -2,7 +2,10 @@
 COMPOSE := docker compose -f deploy/docker-compose.yml
 STENO   := cd backend && uv run steno
 
-.PHONY: up down setup migrate graph-init load-config api worker web dry-run test lint resolver
+.PHONY: dev up down setup migrate graph-init load-config api worker web dry-run test lint resolver
+
+dev:           ## Databases + API/MCP + worker + UI in one terminal (Ctrl+C to stop)
+	./scripts/dev.sh
 
 up:            ## Start Postgres and Neo4j
 	$(COMPOSE) up -d --wait

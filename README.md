@@ -37,9 +37,8 @@ cp .env.example backend/.env
 cp config/steno.example.yaml config/steno.yaml  # then edit: your space and repository
 make migrate graph-init load-config
 
-make api       # :8000/api and :8000/mcp
-make worker    # runs queued ingestion jobs
-make web       # UI on :5173
+make dev       # databases + API/MCP (:8000) + worker + UI (:5173); Ctrl+C to stop
+               # or separately: make api / make worker / make web
 
 make dry-run REPO=<name>                        # or click "Dry run" in the UI
 ```
