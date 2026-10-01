@@ -81,7 +81,7 @@ Other points:
 | `Space` | Organization or parent Space | `name`, `purpose` | Any way an org divides itself. Can nest to any depth. |
 | `Repository` | Space | `url`, `default_branch`, `last_ingested_sha` | What a connector points at. Can contain many applications. |
 | `Application` | Space | `name`, `purpose` | An **independently deployable unit**. `(:Application)-[:BUILT_FROM]->(:Module)` |
-| `Module` (+ role label) | Repository | `path`, `build_tool` | A build unit (Maven/Gradle module). **Not a package**: packages are paths. See [Module roles](#module-roles). |
+| `Module` (+ role label) | Repository | `path`, `build_tool` | The ecosystem's build unit: a Maven/Gradle module, a Python package with its own `pyproject.toml`, an npm workspace, a Go module. **Not a namespace package**: packages are paths. See [Module roles](#module-roles). |
 | `File` | Module | `path`, `language`, `content_hash` | |
 | `Function` | File | See [Function properties](#function-properties) | Every first-party function reachable from an entry point. See [Flows](#6-flows). |
 | `Interface` + `HttpEndpoint` | exposing Application | `method`, `path` | |
@@ -95,7 +95,7 @@ Other points:
 | `Schema` | DataStore | `name` | V1: only when the code names one |
 | `Table` | Schema, or DataStore when there's no schema | `name`, `kind` (table / collection / index), `stub` | V1: stubs. V2: filled in. See [Data stores](#7-data-stores). |
 | `Column` | Table | `name`, `type`, `nullable`, `purpose` | V2 |
-| `Entity` | Application | `name`, `symbol`, `fields` [{name, type}] | Domain models, request/response payloads |
+| `Entity` | Application | `name`, `symbol`, `fields` [{name, type}] | Domain models and payloads in any language: JPA classes, SQLAlchemy / Pydantic models, protobuf / Avro messages, DTOs |
 | `ExternalSystem` | Organization | `host`, `name` | Vendor and third-party APIs |
 | `KafkaCluster` (and other brokers) | Organization | `name` | Infrastructure, attached with `HOSTED_ON` |
 
@@ -103,22 +103,30 @@ Candidates for later: `Team`/owner, deployment `Environment`.
 
 ### Function properties
 
+**One schema for every language.** Nodes are not typed by language: a Java method, a Python function, and a Go method are all `Function` nodes with the same properties. Language differences live in the **extractors and resolvers** (one rule pack and resolver per language). Properties a language doesn't have are left empty, and anything truly language-specific goes in the `lang` bag.
+
 **How much to store:** only what's needed to (1) **identify** a function uniquely, (2) **resolve and traverse** calls, and (3) **display and summarize** it. Everything else is read from the source when needed.
 
-| Property | Example | Why |
-|---|---|---|
-| `id` | `fn:microservices:com.x.PassServiceImpl#callToFunction(com.x.ClientRequest)` | Identity. **Parameter types are included**, so overloads are distinct. |
-| `name` | `callToFunction` | Display, keyword search |
-| `class` | `com.x.PassServiceImpl` | Display, grouping |
-| `params` | `[{name: "req", type: "com.x.ClientRequest"}]` | Overload resolution. Names say which argument holds a topic or URL. |
-| `return_type` | `com.x.ClientResponse` | Resolving chained calls, and payloads |
-| `annotations` | `["@Transactional"]` | Rules, entry-point detection, display |
-| `visibility`, `is_static` | `public`, `false` | Entry-point rules |
-| `javadoc` | First sentence only | Cards |
-| `start_line`, `end_line` | `42`, `87` (at the ingested commit) | Slicing the function's source for `view_flow_code` |
-| `significant`, `utility` | tags | Presentation (see [Flows](#6-flows)) |
+| Property | Meaning | Java example | Python example | Why |
+|---|---|---|---|---|
+| `id` | `fn:{repo}:{qualified_name}`, plus `({param types})` where the language has overloading | `fn:microservices:com.x.PassServiceImpl#callToFunction(com.x.ClientRequest)` | `fn:contextualized:app.services.job.JobService.run_data_source_job` | Identity |
+| `language` | Source language | `java` | `python` | Picks the rules and resolver |
+| `name` | Short name | `callToFunction` | `run_data_source_job` | Display, keyword search |
+| `container` | What it's defined in: class, module, struct, object, or none | `com.x.PassServiceImpl` (class) | `app.services.job.JobService` (class) | Display, grouping |
+| `kind` | `function` / `method` / `static_method` / `constructor` / `lambda` | `method` | `method` | Resolution, display |
+| `params` | `[{name, type?}]`; `type` is empty when the language or code doesn't declare one | `[{name: "req", type: "com.x.ClientRequest"}]` | `[{name: "project_id", type: "UUID"}, …]` | Overloads; which argument holds a topic or URL |
+| `returns` | Declared return type, if any | `com.x.ClientResponse` | *(empty)* | Chained calls, payloads |
+| `annotations` | Annotations, decorators, or attributes, whatever the language calls them | `["@Transactional"]` | `["@router.post(\"/projects/{project_id}…\")"]` | Rules, entry points, display |
+| `visibility` | `public` / `private` / `protected` / `internal`; by convention where the language has none (Python `_name` → private) | `public` | `public` | Entry-point rules |
+| `is_async` | Runs asynchronously | `false` | `true` | Flow ordering (async steps) |
+| `doc` | First sentence of its doc comment (Javadoc, docstring, JSDoc, GoDoc) | | "Creates Job, builds the applicable Tasks, and runs them." | Cards |
+| `start_line`, `end_line` | Line range at the ingested commit | `42`, `87` | `111`, `146` | Slicing source for `view_flow_code` |
+| `significant`, `utility` | Derived tags | | | Presentation (see [Flows](#6-flows)) |
+| `lang` | Language-specific extras, only when a rule needs them | `{throws: ["IOException"]}` | `{is_generator: false}` | Kept out of the shared schema |
 
-**Not stored:** method bodies (the source is fetched or stored separately), local variables, and individual statements. The call sites inside a body are stored only as `INVOKES` / `CALLS` / `PRODUCES` / … edges with their `seq` order.
+**Not stored:** function bodies (the source is fetched from the git host), local variables, and individual statements. The call sites inside a body are stored only as `INVOKES` / `CALLS` / `PRODUCES` / … edges with their `seq` order.
+
+**The same rule applies to every node type.** `Module` is whatever the ecosystem's build unit is (a Maven/Gradle module, a Python package with its own `pyproject.toml`, an npm workspace, a Go module), and `Entity` covers JPA classes, SQLAlchemy models, Pydantic models, protobuf messages, and so on.
 
 ### Properties every fact carries
 
