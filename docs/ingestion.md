@@ -286,8 +286,9 @@ flowchart TD
 
 ### 5.1b The call resolution plan (Python) (Decided)
 
-Steno's own small resolver, built on tree-sitter (D51). It answers the same questions as the Java plan with Python's rules:
+Steno's own small resolver, built on Python's `ast` module (D51); rules still match with ast-grep. It answers the same questions as the Java plan with Python's rules:
 
+0. **Source roots:** module names are relative to each Python project in the repository (a folder with `pyproject.toml`, `setup.py`, `setup.cfg`, or `requirements*.txt`, or its `src/`), so `apps/backend/app/models.py` in a monorepo is `app.models`.
 1. **Names:** follow `import` / `from … import … as …` and module-level assignments, so `job_router` in `__init__.py` and `router` in `job.py` are the same symbol.
 2. **Types:** from annotations (`client: httpx.AsyncClient`, `-> Ollama`), constructor assignments (`x = Job()`), `with … as x`, and `self.x` attributes set in `__init__`.
 3. **Methods:** find the method on the resolved type, walking base classes in the repository and, by name, in libraries.

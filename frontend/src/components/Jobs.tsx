@@ -76,7 +76,11 @@ function JobDetail({ id }: { id: number }) {
         {STAGES.map((name) => {
           const stage = byName.get(name)
           return (
-            <li key={name} className={stage?.status ?? 'pending'}>
+            <li
+              key={name}
+              className={stage?.status ?? 'pending'}
+              title={typeof stage?.metrics.reason === 'string' ? `Skipped: ${stage.metrics.reason}` : undefined}
+            >
               <StageIcon stage={stage} />
               <span className="stage-name">{name}</span>
               <span className="muted small">{stage ? (duration(stage.started_at, stage.finished_at) ?? '…') : ''}</span>

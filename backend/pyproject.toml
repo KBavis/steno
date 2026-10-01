@@ -8,6 +8,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.20.0",
+    "ast-grep-py>=0.45.3",
     "fastapi>=0.142.2",
     "mcp>=2.2.0",
     "neo4j>=6.3.1",

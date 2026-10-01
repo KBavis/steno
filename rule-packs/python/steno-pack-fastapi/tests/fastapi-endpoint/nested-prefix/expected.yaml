@@ -6,5 +6,5 @@ edges:
   - EXPOSES: { from: "@app", to: "POST /api/jobs/projects/{project_id}" }
   - EXPOSES: { from: "@app", to: "GET /api/jobs/{job_id}" }
 entry_points:
-  - "POST /api/jobs/projects/{project_id}" -> app.api.routers.job.run_project_jobs
-  - "GET /api/jobs/{job_id}" -> app.api.routers.job.get_job
+  - { trigger: "POST /api/jobs/projects/{project_id}", function: app.api.routers.job.run_project_jobs }
+  - { trigger: "GET /api/jobs/{job_id}", function: app.api.routers.job.get_job }

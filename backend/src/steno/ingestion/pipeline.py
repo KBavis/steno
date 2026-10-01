@@ -1,14 +1,15 @@
 """The ingestion pipeline for one repository (docs/ingestion.md §2).
 
 Each stage is timed and recorded in `ingestion_stage`; together those rows are the
-dry-run report (time per stage, graph size, projected LLM cost).
-
-Every stage below is a stub that records itself and returns no metrics. They get
-filled in one at a time.
+dry-run report (time per stage, graph size, projected LLM cost). Stages that aren't
+built yet are recorded as skipped, with the reason.
 """
 
+import json
 import logging
+import shutil
 import time
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -17,7 +18,10 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from steno.config import get_settings
+from steno.connectors.git import clone as git_clone
 from steno.db.models import (
+    Connector,
     IngestionJob,
     IngestionStage,
     JobMode,
@@ -25,6 +29,9 @@ from steno.db.models import (
     StageName,
     StageStatus,
 )
+from steno.extractors.engine import Engine
+from steno.extractors.packs import is_enabled, load_packs
+from steno.extractors.report import to_json
 
 log = logging.getLogger(__name__)
 
@@ -33,8 +40,9 @@ log = logging.getLogger(__name__)
 class JobContext:
     job: IngestionJob
     repository: Repository
+    connector: Connector
     workspace: Path | None = None
-    # Facts handed from one stage to the next (raw facts, call graph, flows, ...)
+    # Handed from one stage to the next (the extractor engine, facts, call graph, ...)
     state: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -42,42 +50,84 @@ class JobContext:
         return self.job.mode == JobMode.DRY_RUN
 
 
+class Skip(Exception):
+    """A stage that doesn't apply, or isn't built yet. The message says why."""
+
+
 StageFn = Callable[[JobContext], dict[str, Any]]
 
 
 def clone(ctx: JobContext) -> dict[str, Any]:
-    """Clone the repository at `to_sha` into a temporary workspace."""
-    return {}
+    """Clone the default branch into a temporary workspace and record the commit."""
+    workspace = get_settings().workspace_dir / f"job-{ctx.job.id}"
+    if workspace.exists():
+        shutil.rmtree(workspace)
+    repo = ctx.repository
+    sha = git_clone(
+        repo.clone_url,
+        repo.default_branch,
+        workspace,
+        ctx.connector.kind,
+        ctx.connector.credentials_ref,
+    )
+    ctx.workspace = workspace
+    ctx.job.to_sha = sha
+    files = [p for p in workspace.rglob("*") if p.is_file() and ".git" not in p.parts]
+    return {"sha": sha, "files": len(files), "bytes": sum(p.stat().st_size for p in files)}
 
 
 def deps(ctx: JobContext) -> dict[str, Any]:
-    """Fetch dependency JARs (e.g. `mvn dependency:copy-dependencies`) for symbol resolution."""
-    return {}
+    """Fetch dependency JARs for Java symbol resolution."""
+    raise Skip("dependency JARs are only needed for Java")
 
 
 def parse(ctx: JobContext) -> dict[str, Any]:
-    """Pass 1, per file: run enabled rule packs to emit raw structural facts."""
-    return {}
+    """Pass 1, per file: run the enabled rule packs and collect facts and clues."""
+    assert ctx.workspace is not None
+    packs = [p for p in load_packs(get_settings().rule_packs_dir) if is_enabled(p, ctx.workspace)]
+    engine = Engine(ctx.workspace, packs)
+    x = engine.collect()
+    ctx.state["engine"] = engine
+    return {
+        "packs": [p.name for p in packs],
+        "python_modules": len(engine.resolver.modules) if engine.resolver else 0,
+        "matched": {"nodes": len(x.nodes), "edges": len(x.edges), "clues": len(x.clues)},
+        "errors": len(x.errors),
+    }
 
 
 def resolve(ctx: JobContext) -> dict[str, Any]:
-    """Pass 2–3: symbol + DI resolution (JVM helper), config placeholders, stubs."""
-    return {}
+    """Pass 3: prefix chains, table_of, SDK clients, partial identities."""
+    engine: Engine = ctx.state["engine"]
+    engine.resolve()
+    x = engine.out
+    # Nothing is written to the graph yet: keep the facts for review
+    facts_path = get_settings().workspace_dir / f"job-{ctx.job.id}-facts.json"
+    facts_path.write_text(json.dumps(to_json(x), indent=2, default=str))
+    ctx.job.stats = {**(ctx.job.stats or {}), "facts_file": str(facts_path)}
+    return {
+        "nodes": dict(Counter(n.label for n in x.nodes)),
+        "edges": dict(Counter(e.type for e in x.edges)),
+        "clues": dict(Counter(c.kind for c in x.clues)),
+        "entry_points": len(x.entry_points),
+        "dropped": len(x.dropped),
+        "facts_file": str(facts_path),
+    }
 
 
 def flows(ctx: JobContext) -> dict[str, Any]:
     """Build the call graph and derive every flow from every entry point."""
-    return {}
+    raise Skip("not built yet")
 
 
 def write(ctx: JobContext) -> dict[str, Any]:
     """MERGE facts into Neo4j by stable ID, remove stale ones, record the delta."""
-    return {}
+    raise Skip("not built yet: facts are saved as JSON (see the resolve stage)")
 
 
 def cards(ctx: JobContext) -> dict[str, Any]:
     """Generate LLM purposes and narratives. In a dry run: count tokens and project cost only."""
-    return {}
+    raise Skip("not built yet")
 
 
 STAGES: list[tuple[StageName, StageFn]] = [
@@ -94,26 +144,43 @@ STAGES: list[tuple[StageName, StageFn]] = [
 def run_job(session: Session, job: IngestionJob) -> None:
     """Run every stage in order, committing each stage's row so progress is visible."""
     repository = session.get_one(Repository, job.repository_id)
-    ctx = JobContext(job=job, repository=repository)
+    ctx = JobContext(
+        job=job,
+        repository=repository,
+        connector=session.get_one(Connector, repository.connector_id),
+    )
+    try:
+        for name, fn in STAGES:
+            _run_stage(session, ctx, name, fn)
+    finally:
+        if ctx.workspace is not None and ctx.workspace.exists():
+            shutil.rmtree(ctx.workspace, ignore_errors=True)
 
-    for name, fn in STAGES:
-        stage = IngestionStage(
-            job_id=job.id, stage=name, status=StageStatus.RUNNING, started_at=_now()
-        )
-        session.add(stage)
+
+def _run_stage(session: Session, ctx: JobContext, name: StageName, fn: StageFn) -> None:
+    stage = IngestionStage(
+        job_id=ctx.job.id, stage=name, status=StageStatus.RUNNING, started_at=_now()
+    )
+    session.add(stage)
+    session.commit()
+
+    started = time.perf_counter()
+    try:
+        metrics = fn(ctx)
+        stage.status = StageStatus.SUCCEEDED
+    except Skip as reason:
+        metrics = {"reason": str(reason)}
+        stage.status = StageStatus.SKIPPED
+    except Exception as exc:
+        stage.status = StageStatus.FAILED
+        stage.metrics = {"error": f"{type(exc).__name__}: {exc}"}
+        stage.finished_at = _now()
         session.commit()
-
-        started = time.perf_counter()
-        try:
-            stage.metrics = {**fn(ctx), "seconds": round(time.perf_counter() - started, 3)}
-            stage.status = StageStatus.SUCCEEDED
-        except Exception:
-            stage.status = StageStatus.FAILED
-            raise
-        finally:
-            stage.finished_at = _now()
-            session.commit()
-        log.info("job %s: %s %s", job.id, name, stage.status)
+        raise
+    stage.metrics = {**metrics, "seconds": round(time.perf_counter() - started, 3)}
+    stage.finished_at = _now()
+    session.commit()
+    log.info("job %s: %s %s", ctx.job.id, name, stage.status)
 
 
 def _now() -> datetime:

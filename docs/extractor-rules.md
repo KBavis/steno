@@ -157,7 +157,7 @@ Each clue type has exactly one built-in resolver that knows how to combine it. A
 |---|---|---|---|
 | `prefix` | `owner`, `value` | **Prefix chain** | URL prefixes on routers, controllers, blueprints: FastAPI `APIRouter(prefix=…)`, Spring class-level `@RequestMapping` |
 | `mount` | `parent`, `child`, `prefix?` | **Prefix chain** | One router mounted inside another: `include_router`, Express `app.use("/x", router)` |
-| `client` | `type`, `target`, `operations?` | **Client** | SDK client objects that talk to something outside the app without a visible URL: LLM APIs, vector stores, cloud SDKs. A method call on an object of `type` (or a subclass) becomes `CALLS` to `target` when it's an `ExternalSystem`, or `READS_FROM` / `WRITES_TO` per `operations` (method → `read` / `write`) when it's a `DataStore`. Methods not listed produce nothing. When a receiver is typed only as a base class, every client clue whose `type` is a subclass is a candidate; more than one is marked `ambiguous`, like DI. |
+| `client` | `type`, `target`, `operations?`, `returns?` | **Client** | SDK client objects that talk to something outside the app without a visible URL: LLM APIs, vector stores, cloud SDKs. A method call on an object of `type` (or a subclass) becomes `CALLS` to `target` when it's an `ExternalSystem`, or `READS_FROM` / `WRITES_TO` per `operations` (method → `read` / `write`) when it's a `DataStore`. Methods not listed produce nothing. `returns` (method → type) tells the resolver what a method hands back, so chained calls keep their type: `client.get_collection(...)` returns a `Collection`, whose `query(...)` is then a read. When a receiver is typed only as a base class, every client clue whose `type` is a subclass is a candidate; more than one is marked `ambiguous`, like DI. |
 | `property` | `key`, `value`, `profile?` | **Config** | Configuration values, for resolving `${placeholders}` and settings lookups. Steno emits these automatically for recognized config files; rules emit them only for unusual sources. |
 
 More clue types arrive with the resolvers that need them, e.g. DI bindings with the DI resolver ([Ingestion §5](./ingestion.md#5-symbol-and-di-resolution)).
@@ -236,11 +236,11 @@ nodes:
 edges:
   - EXPOSES: { from: "@app", to: "POST /api/jobs/projects/{project_id}" }
 entry_points:
-  - "POST /api/jobs/projects/{project_id}" -> routers.job.run_project_jobs
+  - { trigger: "POST /api/jobs/projects/{project_id}", function: routers.job.run_project_jobs }
 ```
 
 - A case lists **only the output of the rule it's filed under** (`tests/<rule-id>/`). The pack's other rules still run, so the clues they emit are available, but their own facts aren't compared.
-- `expected.yaml` has up to four sections: `nodes`, `edges`, `entry_points`, and `clues`. A rule that only emits clues (a router prefix, a settings default) is tested through its `clues`; an empty list (`nodes: []`) asserts that nothing is emitted.
+- `expected.yaml` has up to four sections: `nodes`, `edges`, `entry_points`, and `clues`. A rule that only emits clues (a router prefix, a settings default) is tested through its `clues`. **A section the case omits isn't checked**; a listed section must match exactly, and an empty list (`edges: []`) asserts that nothing is emitted.
 - Symbols are written relative to the case's `input/` folder (`app.api.routers.job.run_project_jobs`). A value that can't be known from the code, such as a URL built from a runtime value, is written `"<unresolved>"`.
 - `steno rules test <pack>` runs every rule against its cases, through clue resolution, and shows any difference.
 - Include at least one **negative case** (similar code that must *not* match) when a pattern could over-match.

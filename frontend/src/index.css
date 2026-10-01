@@ -1009,3 +1009,11 @@ textarea {
   font-weight: 650;
   letter-spacing: -0.02em;
 }
+
+.skipped .stage-icon {
+  border-style: dashed;
+}
+
+.skipped .stage-name {
+  color: var(--muted);
+}

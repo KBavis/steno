@@ -3,4 +3,4 @@ nodes:
 edges:
   - EXPOSES: { from: "@app", to: "DELETE /chroma/collection/{project_id}" }
 entry_points:
-  - "DELETE /chroma/collection/{project_id}" -> routers.chroma.delete_collection
+  - { trigger: "DELETE /chroma/collection/{project_id}", function: routers.chroma.delete_collection }

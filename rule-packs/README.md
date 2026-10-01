@@ -112,7 +112,12 @@ You review and own the result. GitHub Copilot and other agents can follow the sa
    uv run .claude/skills/rule-pack-author/scripts/check_match.py \
      rule-packs/python/steno-pack-fastapi/rules/fastapi-endpoint.yaml path/to/repo
    ```
-   It shows every match and what was captured. `steno rules test <pack>`, which checks the full emitted facts against `expected.yaml`, comes with the extractor engine.
+   It shows every match and what was captured.
+6. Run the pack's tests, which check the emitted facts against `expected.yaml`:
+   ```sh
+   cd backend && uv run steno rules test steno-pack-fastapi
+   ```
+   `uv run steno extract <folder>` shows everything the enabled packs produce on a whole repository.
 
 ## Core packs and org packs
 

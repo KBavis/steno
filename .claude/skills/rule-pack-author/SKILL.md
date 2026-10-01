@@ -77,7 +77,7 @@ Rules never create `Flow` or `Step` nodes, and never reference another rule.
 uv run .claude/skills/rule-pack-author/scripts/check_match.py <rule.yaml> <repo-or-dir> [--limit N]
 ```
 
-It prints every match with its captures (code rules through ast-grep, config rules through key paths). It doesn't check `where:` or the emitted facts.
+It prints every match with its captures (code rules through ast-grep, config rules through key paths). It doesn't check `where:` or the emitted facts; `steno rules test` (step 7) does.
 
 - Run it on the examples **and on the whole repository**. Compare the count with an independent estimate (for example, `grep -c "@router\."`). **A pattern that looks right can silently miss cases.** The first FastAPI prefix pattern, `$ROUTER = APIRouter($$$, prefix=$PREFIX, $$$)`, matched only 1 of Contextualized's 8 routers, because it needed another argument next to `prefix=`. A structural rule found all 8.
 - Investigate every miss and every unexpected match, then adjust. Repeat until the numbers make sense.
@@ -90,7 +90,13 @@ Under `tests/<rule-id>/<case-name>/`:
 - At least one **negative case** (`expected.yaml` with nothing in it) when the pattern could over-match.
 - **Never copy secrets**, tokens, internal hostnames, or personal data into test inputs. Replace them with placeholders.
 
-When `steno rules test` exists, run it until it passes. Until then, say that the emitted facts are unverified.
+Then run the pack's tests until they pass:
+
+```sh
+cd backend && uv run steno rules test <pack-name>
+```
+
+It runs every case through the full engine (resolver, clues, `where:`) and shows what's missing or unexpected. To see everything a pack produces on a whole repository, use `uv run steno extract <folder> --json facts.json`.
 
 ### 8. Report back
 
@@ -99,7 +105,7 @@ Give the person a short summary:
 - **What it emits** (node / edge / clue / entry point).
 - **Measured:** matches across N files, versus the independent estimate. Misses or false positives you found and how you handled them.
 - **Proposed, not done:** any new type or plugin the request needs.
-- **Unverified:** `where:` conditions and emitted facts, if `steno rules test` isn't available yet.
+- **Tests:** the `steno rules test` result for the pack.
 
 ## Guardrails
 

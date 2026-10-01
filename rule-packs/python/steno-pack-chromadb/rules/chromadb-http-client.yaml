@@ -27,6 +27,10 @@ emit:
       create_collection: write
       get_or_create_collection: write
       delete_collection: write
+    returns:                            # so collection = client.get_collection(...) keeps its type
+      get_collection: chromadb.api.models.Collection.Collection
+      get_or_create_collection: chromadb.api.models.Collection.Collection
+      create_collection: chromadb.api.models.Collection.Collection
   - clue: client
     type: chromadb.api.AsyncClientAPI
     target: store
@@ -37,6 +41,10 @@ emit:
       create_collection: write
       get_or_create_collection: write
       delete_collection: write
+    returns:                            # so collection = client.get_collection(...) keeps its type
+      get_collection: chromadb.api.models.AsyncCollection.AsyncCollection
+      get_or_create_collection: chromadb.api.models.AsyncCollection.AsyncCollection
+      create_collection: chromadb.api.models.AsyncCollection.AsyncCollection
   - clue: client
     type: chromadb.api.models.Collection.Collection
     target: store

@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     # Where ingestion workers clone repositories; deleted after each run
     workspace_dir: Path = Path("/tmp/steno-workspaces")
 
+    # Extractor rule packs (docs/extractor-rules.md)
+    rule_packs_dir: Path = Path(__file__).resolve().parents[3] / "rule-packs"
+
     # Worker queue polling
     worker_poll_seconds: float = 2.0
 

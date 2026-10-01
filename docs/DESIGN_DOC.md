@@ -519,7 +519,7 @@ Correctness comes first, so it has to be measured:
 | D48 | `Vector` is a `DataStore` category (Chroma, pgvector, Pinecone, …) | Decided |
 | D49 | A rule pack is enabled by a declared dependency, an import of the library, or `always` (standard library packs) | Decided |
 | D50 | A rule may reference a node by only some of its identity properties (`{DataStore: {vendor: chroma}}`): it resolves to the app's single match, `ambiguous` if several, a stub if none | Decided |
-| D51 | Python symbol resolution is Steno's own small resolver on tree-sitter (imports and aliases, type annotations, simple assignments, `self` attributes, method lookup through base classes), like Java's own resolver (D13). Pyright or Jedi only if the coverage report shows real gaps. | Decided |
+| D51 | Python symbol resolution is Steno's own small resolver on Python's `ast` module (source roots, imports and aliases including function-local ones, type annotations, simple assignments, `self` attributes, method lookup through base classes), like Java's own resolver (D13). Pyright or Jedi only if the coverage report shows real gaps. | Decided |
 | D39 | A connector's scope is access only. Repository selection and placement are separate; at org scale, placement rules (connector + host grouping + optional name pattern → space) place repositories, an explicit assignment wins, and unmatched repositories go to an unassigned queue. Rules are built with discovery. | Decided |
 | D25 | Rule packs, auto-enabled from dependencies, plus a coverage report after every ingestion. Phase 1 rules are hand-written; templates and LLM-drafted rules are deferred. | Decided |
 

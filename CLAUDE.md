@@ -20,7 +20,7 @@ An organization-wide context engine for AI agents. It ingests repositories into 
 
 ## Commands
 
-Run from the repo root (see `Makefile`): `make up`, `make migrate`, `make graph-init`, `make dev`, `make api`, `make worker`, `make web`, `make dry-run REPO=<name>`, `make test`, `make lint`. After changing `db/models.py`, create a migration with `cd backend && uv run alembic revision --autogenerate -m "..."` and review it.
+Run from the repo root (see `Makefile`): `make up`, `make migrate`, `make graph-init`, `make dev`, `make api`, `make worker`, `make web`, `make dry-run REPO=<name>`, `make test` (includes every rule pack's test cases), `make lint`. Extractors: `cd backend && uv run steno rules test [pack]` and `uv run steno extract <folder> [--json out.json]`. After changing `db/models.py`, create a migration with `cd backend && uv run alembic revision --autogenerate -m "..."` and review it.
 
 ## Skills
 
