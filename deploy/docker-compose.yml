@@ -9,7 +9,7 @@ services:
       POSTGRES_USER: steno
       POSTGRES_PASSWORD: steno
       POSTGRES_DB: steno
-    ports: ["5432:5432"]
+    ports: ["5434:5432"]   # 5434 on the host, so it can run next to other local Postgres containers
     volumes: [postgres-data:/var/lib/postgresql]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U steno"]

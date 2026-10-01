@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="STENO_", env_file=".env", extra="ignore")
 
     # Postgres: what Steno is told and what it did (DESIGN_DOC D33)
-    database_url: str = "postgresql+psycopg://steno:steno@localhost:5432/steno"
+    database_url: str = "postgresql+psycopg://steno:steno@localhost:5434/steno"
 
     # Neo4j: what Steno knows
     neo4j_uri: str = "bolt://localhost:7687"
