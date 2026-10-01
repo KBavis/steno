@@ -1,0 +1,20 @@
+id: llama-index-chroma-read
+description: A retriever or query engine over a ChromaVectorStore-backed index, e.g. VectorStoreIndex.from_vector_store(vector_store).as_retriever(similarity_top_k=k)
+match:
+  rule:
+    pattern: $INDEX.$AS($$$)
+    inside:
+      stopBy: end
+      kind: function_definition
+      has:
+        stopBy: end
+        pattern: ChromaVectorStore($$$)
+  constraints:
+    AS: { regex: "^(as_retriever|as_query_engine|as_chat_engine)$" }
+emit:
+  # The search runs later, wherever the retriever is called (often inside a fusion retriever).
+  # Following it there needs data flow, so the read is attributed to the function that builds it.
+  - edge: READS_FROM
+    from: "@function"
+    to: { DataStore: { vendor: chroma } }
+    operation: query

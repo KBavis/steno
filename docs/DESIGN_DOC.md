@@ -157,7 +157,7 @@ The UI (later) talks to an Admin API for connectors and runs, and uses the same 
 | Application state | **Postgres** | Relational data: connectors, runs, deltas, logs | Decided |
 | Code-pattern rules | **ast-grep / Semgrep** YAML rules (tree-sitter based) | Declarative, many languages, orgs can write their own | Decided |
 | Config rules | YAML / properties path rules | Kafka topics, URLs, and placeholders are in config | Decided |
-| Symbol resolution | **Our own**: JavaParser symbol solver + dependency JARs, run as a JVM helper | Resolves calls, including through library types, without a full build | Decided (**SCIP not planned**) |
+| Symbol resolution | **Our own, per language.** Java: JavaParser symbol solver + dependency JARs, run as a JVM helper. Python: a small resolver on tree-sitter. | Resolves calls, including through library types, without a full build | Decided (**SCIP not planned**) |
 | DI resolution | Per-framework rule plugins (Spring first) + Jev I1 | The compiler can't know which bean gets injected | Decided |
 | Source access | **git clone** into temporary workspaces | Full source for resolution, rate limits, exact diffs | Decided |
 | Code access | Git host API at the ingested commit, with an in-memory cache. **No stored file contents.** | Simplest; code always matches the graph | Decided |
@@ -518,6 +518,8 @@ Correctness comes first, so it has to be measured:
 | D47 | A `client` clue type: method calls on SDK client objects (LLM APIs, vector stores) become `CALLS` to an `ExternalSystem` or reads and writes on a `DataStore`; base-class receivers resolve like DI (candidates, `ambiguous` when several) | Decided |
 | D48 | `Vector` is a `DataStore` category (Chroma, pgvector, Pinecone, …) | Decided |
 | D49 | A rule pack is enabled by a declared dependency, an import of the library, or `always` (standard library packs) | Decided |
+| D50 | A rule may reference a node by only some of its identity properties (`{DataStore: {vendor: chroma}}`): it resolves to the app's single match, `ambiguous` if several, a stub if none | Decided |
+| D51 | Python symbol resolution is Steno's own small resolver on tree-sitter (imports and aliases, type annotations, simple assignments, `self` attributes, method lookup through base classes), like Java's own resolver (D13). Pyright or Jedi only if the coverage report shows real gaps. | Decided |
 | D39 | A connector's scope is access only. Repository selection and placement are separate; at org scale, placement rules (connector + host grouping + optional name pattern → space) place repositories, an explicit assignment wins, and unmatched repositories go to an unassigned queue. Rules are built with discovery. | Decided |
 | D25 | Rule packs, auto-enabled from dependencies, plus a coverage report after every ingestion. Phase 1 rules are hand-written; templates and LLM-drafted rules are deferred. | Decided |
 
@@ -531,7 +533,6 @@ Correctness comes first, so it has to be measured:
 - [ ] Neo4j edition and licensing (Community vs. Enterprise, Graph Data Science library)
 - [ ] Jev: calibration on our data, and our org's data policy
 
-- [ ] The Python symbol resolver for Contextualized's call graph (e.g. a simple import-following resolver on tree-sitter, Jedi, or Pyright), including FastAPI's `Depends` injection
 
 **Not yet discussed**
 - [ ] Deployment: where Steno runs

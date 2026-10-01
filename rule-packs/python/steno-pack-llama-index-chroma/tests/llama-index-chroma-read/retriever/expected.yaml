@@ -1,0 +1,2 @@
+edges:
+  - READS_FROM: { from: retrieval.vector_retriever, to: { DataStore: { vendor: chroma } }, operation: query }

@@ -1,0 +1,20 @@
+id: llama-index-chroma-write
+description: Building a VectorStoreIndex from nodes over a ChromaVectorStore, which embeds and inserts them, e.g. VectorStoreIndex(nodes=nodes, storage_context=storage_context)
+match:
+  rule:
+    pattern: VectorStoreIndex($$$)
+    has:                                   # constructing with nodes= inserts them; from_vector_store(...) doesn't
+      stopBy: end
+      kind: keyword_argument
+      has: { field: name, regex: "^nodes$" }
+    inside:                                # ...and the same function sets up a Chroma-backed store
+      stopBy: end
+      kind: function_definition
+      has:
+        stopBy: end
+        pattern: ChromaVectorStore($$$)
+emit:
+  - edge: WRITES_TO
+    from: "@function"
+    to: { DataStore: { vendor: chroma } }  # the app's Chroma store, from steno-pack-chromadb
+    operation: insert

@@ -284,6 +284,17 @@ flowchart TD
 - **Library repository ingested:** calls resolve into its functions, keyed by fully qualified name, and its facts (e.g. publishing to Kafka) carry through into the flows that call it.
 - **Not ingested:** the call ends at a stub for the external symbol, which shows up in the coverage report.
 
+### 5.1b The call resolution plan (Python) (Decided)
+
+Steno's own small resolver, built on tree-sitter (D51). It answers the same questions as the Java plan with Python's rules:
+
+1. **Names:** follow `import` / `from … import … as …` and module-level assignments, so `job_router` in `__init__.py` and `router` in `job.py` are the same symbol.
+2. **Types:** from annotations (`client: httpx.AsyncClient`, `-> Ollama`), constructor assignments (`x = Job()`), `with … as x`, and `self.x` attributes set in `__init__`.
+3. **Methods:** find the method on the resolved type, walking base classes in the repository and, by name, in libraries.
+4. **DI:** FastAPI's `Depends(provider)` uses the parameter's annotation when it's concrete; otherwise the provider's return type.
+
+What it can't follow (dynamic attribute access, values built at runtime, untyped parameters) is marked unresolved and shows up in the coverage report. Pyright or Jedi are options only if those gaps turn out to matter.
+
 ### 5.2 DI rules are per-framework plugins
 
 Step 4 above is Spring's set of rules. Other frameworks (Guice, Dagger, .NET DI) are separate plugins with their own rules for registration and selection, so the pipeline stays agnostic.

@@ -1,0 +1,2 @@
+edges:
+  - WRITES_TO: { from: insertion.save_to_chroma, to: { DataStore: { vendor: chroma } }, operation: insert }
