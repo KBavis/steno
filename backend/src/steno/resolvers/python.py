@@ -17,9 +17,23 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from steno.extractors.files import source_files
+from steno.extractors.files import is_test_file, source_files
 
 log = logging.getLogger(__name__)
+
+
+# Generic types whose first argument is what `with … as x` binds
+_YIELDING = {
+    "Generator",
+    "AsyncGenerator",
+    "Iterator",
+    "AsyncIterator",
+    "Iterable",
+    "ContextManager",
+    "AsyncContextManager",
+    "AbstractContextManager",
+    "AbstractAsyncContextManager",
+}
 
 
 class _Unresolved:
@@ -95,7 +109,8 @@ class PythonResolver:
         self._busy: set[Any] = set()
         self.source_roots = find_source_roots(root)
         for path in source_files(root, (".py",)):
-            self._index(path)
+            if not is_test_file(path.relative_to(root)):
+                self._index(path)
 
     # ---------------------------------------------------------------- indexing
 
@@ -481,8 +496,21 @@ class PythonResolver:
             elif isinstance(node, (ast.With, ast.AsyncWith)):
                 for item in node.items:
                     if isinstance(item.optional_vars, ast.Name) and item.optional_vars.id == name:
-                        return self.type_of(item.context_expr, scope)
+                        return self._with_type(item.context_expr, scope)
         return None
+
+    def _with_type(self, expr: ast.expr, scope: Scope) -> str | None:
+        """The type bound by `with expr as x`. A @contextmanager function annotated
+        `-> AsyncGenerator[AsyncSession, None]` binds an AsyncSession, not the generator."""
+        if isinstance(expr, ast.Call):
+            fn = self.function_of(expr.func, scope)
+            ret = fn.node.returns if fn is not None else None
+            if isinstance(ret, ast.Subscript):
+                base = self.symbol_of(ret.value, Scope(fn.module)) or ""  # type: ignore[union-attr]
+                if base.rsplit(".", 1)[-1] in _YIELDING:
+                    first = ret.slice.elts[0] if isinstance(ret.slice, ast.Tuple) else ret.slice
+                    return self.annotation_type(first, Scope(fn.module))  # type: ignore[union-attr]
+        return self.type_of(expr, scope)
 
     def _attr_type(self, cls: ClassInfo, attr: str) -> str | None:
         for c in self._mro(cls):
@@ -661,6 +689,45 @@ class PythonResolver:
             for cls in mod.classes.values():
                 yield from cls.methods.values()
 
+    def invocations(self, fn: FunctionInfo) -> list["Invocation"]:
+        """Calls from `fn` to first-party functions, in source order (the call graph's edges).
+
+        A constructor call (`Job()`) counts as a call to the class's `__init__` when the
+        repository defines one. Calls into libraries aren't listed.
+        """
+        found: list[Invocation] = []
+        scope = self.scope_of(fn)
+
+        def visit(node: ast.AST, conditional: bool, in_loop: bool) -> None:
+            # Nested functions and lambdas (closures, `async def _run(...)` handed to
+            # asyncio.gather) run as part of this function's work, so their calls count here.
+            # Nested classes don't.
+            if isinstance(node, ast.ClassDef):
+                return
+            if isinstance(node, ast.Call):
+                callee = self._callee(node.func, scope)
+                if callee is not None:
+                    # Ordered by where each call ends: in `Runner(x).run()`,
+                    # the constructor runs first
+                    end = (node.end_lineno or node.lineno, node.end_col_offset or node.col_offset)
+                    found.append(Invocation(callee.qualname, end[0], end[1], conditional, in_loop))
+            branchy = isinstance(node, (ast.If, ast.IfExp, ast.Try, ast.Match, ast.BoolOp))
+            loopy = isinstance(node, (ast.For, ast.AsyncFor, ast.While, ast.comprehension))
+            for child in ast.iter_child_nodes(node):
+                visit(child, conditional or branchy, in_loop or loopy)
+
+        for stmt in fn.node.body:
+            visit(stmt, False, False)
+        return sorted(found, key=lambda i: (i.line, i.column))
+
+    def _callee(self, func: ast.expr, scope: Scope) -> "FunctionInfo | None":
+        found = self.function_of(func, scope)
+        if found is not None:
+            return found
+        cls = self.class_of(func, scope)
+        target = self.lookup(cls) if cls else None
+        return self._class_member(target, "__init__") if isinstance(target, ClassInfo) else None
+
     def method_calls(self) -> Iterator[tuple[FunctionInfo, ast.Call]]:
         """Every `receiver.method(...)` call, with the function it's in."""
         for fn in self.functions():
@@ -682,6 +749,15 @@ def find_source_roots(repo: Path) -> list[Path]:
             project = f.parent
             roots.add(project / "src" if (project / "src").is_dir() else project)
     return sorted(roots)
+
+
+@dataclass(frozen=True)
+class Invocation:
+    callee: str  # qualified name of the called function
+    line: int
+    column: int
+    conditional: bool  # inside an if / try / match / boolean shortcut
+    in_loop: bool
 
 
 @dataclass(frozen=True)

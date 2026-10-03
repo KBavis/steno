@@ -47,3 +47,23 @@ def table_id(datastore: str, schema: str | None, name: str) -> str:
 
 def flow_id(app: str, trigger: str) -> str:
     return f"flow:{app}:{trigger}"
+
+
+def module_id(repo: str, path: str) -> str:
+    return f"module:{repo}:{path}"
+
+
+def file_id(repo: str, path: str) -> str:
+    return f"file:{repo}:{path}"
+
+
+def entity_id(app: str, symbol: str) -> str:
+    return f"entity:{app}:{symbol}"
+
+
+def datastore_id(vendor: str, host: str, database: str) -> str:
+    return f"datastore:{vendor}:{host}:{database}"
+
+
+def external_system_id(host_or_name: str) -> str:
+    return f"external:{host_or_name}"

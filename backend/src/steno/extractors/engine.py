@@ -29,7 +29,7 @@ from steno.extractors.facts import (
     TableOfRef,
     host_of,
 )
-from steno.extractors.files import source_files
+from steno.extractors.files import is_test_file, source_files
 from steno.extractors.packs import EXTENSIONS, Pack, Rule
 from steno.extractors.resolve import resolve
 from steno.resolvers.python import UNRESOLVED, ClassInfo, FunctionInfo, PythonResolver, Scope
@@ -111,6 +111,8 @@ class Engine:
             if k in rule.match
         }
         for path in source_files(self.repo, EXTENSIONS.get(rule.language, ())):
+            if is_test_file(path.relative_to(self.repo)):
+                continue
             root = self._root(path, rule.language)
             if root is None:
                 continue

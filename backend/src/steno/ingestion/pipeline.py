@@ -25,6 +25,7 @@ from steno.db.models import (
     IngestionJob,
     IngestionStage,
     JobMode,
+    Organization,
     Repository,
     StageName,
     StageStatus,
@@ -32,6 +33,12 @@ from steno.db.models import (
 from steno.extractors.engine import Engine
 from steno.extractors.packs import is_enabled, load_packs
 from steno.extractors.report import to_json
+from steno.extractors.structure import detect as detect_structure
+from steno.graph import ids
+from steno.graph.build import Context as GraphContext
+from steno.graph.build import build as build_graph
+from steno.graph.driver import database, get_driver
+from steno.graph.writer import write_plan
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +48,7 @@ class JobContext:
     job: IngestionJob
     repository: Repository
     connector: Connector
+    session: Session
     workspace: Path | None = None
     # Handed from one stage to the next (the extractor engine, facts, call graph, ...)
     state: dict[str, Any] = field(default_factory=dict)
@@ -101,7 +109,7 @@ def resolve(ctx: JobContext) -> dict[str, Any]:
     engine: Engine = ctx.state["engine"]
     engine.resolve()
     x = engine.out
-    # Nothing is written to the graph yet: keep the facts for review
+    # Kept for review alongside the graph: every fact with its source line
     facts_path = get_settings().workspace_dir / f"job-{ctx.job.id}-facts.json"
     facts_path.write_text(json.dumps(to_json(x), indent=2, default=str))
     ctx.job.stats = {**(ctx.job.stats or {}), "facts_file": str(facts_path)}
@@ -116,13 +124,39 @@ def resolve(ctx: JobContext) -> dict[str, Any]:
 
 
 def flows(ctx: JobContext) -> dict[str, Any]:
-    """Build the call graph and derive every flow from every entry point."""
-    raise Skip("not built yet")
+    """Build the call graph, find what each entry point reaches, and plan the graph:
+    architecture nodes, code nodes, the bridges between them, and flow rollups."""
+    engine: Engine = ctx.state["engine"]
+    x = engine.out
+    structure = detect_structure(ctx.workspace, {ep.origin.file for ep in x.entry_points})  # type: ignore[arg-type]
+    org = ctx.session.get(Organization, 1)
+    plan = build_graph(
+        x,
+        engine.resolver,
+        structure,
+        GraphContext(
+            repo=ctx.repository.name,
+            space_id=ids.space_id(ctx.repository.space_id) if ctx.repository.space_id else None,
+            org_id=ids.organization_id(org.id) if org else None,
+            job_id=ctx.job.id,
+            commit=ctx.job.to_sha,
+        ),
+    )
+    ctx.state["plan"] = plan
+    functions = [n for n in plan.nodes.values() if n.labels[0] == "Function"]
+    return {
+        "modules": {m.path: sorted(m.roles) for m in structure.modules},
+        "flows": sum(1 for n in plan.nodes.values() if n.labels[0] == "Flow"),
+        "functions": len(functions),
+        "functions_reachable": sum(1 for n in functions if n.props.get("reachable")),
+        "invokes": plan.counts()["edges"].get("INVOKES", 0),
+    }
 
 
 def write(ctx: JobContext) -> dict[str, Any]:
-    """MERGE facts into Neo4j by stable ID, remove stale ones, record the delta."""
-    raise Skip("not built yet: facts are saved as JSON (see the resolve stage)")
+    """MERGE the plan into Neo4j by stable ID and remove what this repository's earlier runs
+    left behind. A dry run writes the graph too: it only skips LLM text (D26)."""
+    return write_plan(get_driver(), database(), ctx.state["plan"], ctx.repository.name, ctx.job.id)
 
 
 def cards(ctx: JobContext) -> dict[str, Any]:
@@ -148,6 +182,7 @@ def run_job(session: Session, job: IngestionJob) -> None:
         job=job,
         repository=repository,
         connector=session.get_one(Connector, repository.connector_id),
+        session=session,
     )
     try:
         for name, fn in STAGES:
