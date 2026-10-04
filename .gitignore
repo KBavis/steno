@@ -16,6 +16,9 @@ build/
 # Local config and secrets
 .env
 
+# Local working notes (not shared)
+docs/next-steps.md
+
 # Editors / OS
 .idea/
 .DS_Store

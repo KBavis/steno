@@ -1,5 +1,5 @@
-import { Building2, FolderGit2, Layers, Plug, type LucideIcon } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Building2, FolderGit2, Layers, Network, Plug, type LucideIcon } from 'lucide-react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { api, type Organization } from './api/client'
 import { HealthStatus } from './components/HealthStatus'
 import { ErrorAlert, Logo } from './components/ui'
@@ -9,16 +9,21 @@ import { OnboardingPage } from './pages/OnboardingPage'
 import { OrganizationPage } from './pages/OrganizationPage'
 import { SpacesPage } from './pages/SpacesPage'
 
+// The graph view pulls in React Flow and ELK; load it only when the tab opens
+const VisualizePage = lazy(() => import('./pages/VisualizePage').then((m) => ({ default: m.VisualizePage })))
+
 const TABS: Record<string, { label: string; icon: LucideIcon }> = {
   ingestion: { label: 'Ingestion', icon: FolderGit2 },
+  visualize: { label: 'Visualize', icon: Network },
   spaces: { label: 'Spaces', icon: Layers },
   connectors: { label: 'Connectors', icon: Plug },
   organization: { label: 'Organization', icon: Building2 },
 }
 
-// The tab lives in the URL hash (#spaces), so reloads and links keep it
+// The tab lives in the URL hash (#spaces), so reloads and links keep it.
+// Visualize keeps its own location after a slash (#visualize/flow/<id>).
 function tabFromHash(): string {
-  const hash = window.location.hash.slice(1)
+  const hash = window.location.hash.slice(1).split('/')[0]
   return hash in TABS ? hash : 'ingestion'
 }
 
@@ -57,6 +62,15 @@ export default function App() {
   if (org === undefined) return null
   if (!org?.onboarded_at) {
     return <OnboardingPage organization={org} onOrganizationSaved={setOrg} onFinished={setOrg} />
+  }
+
+  // The graph takes the whole window: it's a place to move around in, not a page
+  if (tab === 'visualize') {
+    return (
+      <Suspense fallback={null}>
+        <VisualizePage onExit={() => navigate('ingestion')} />
+      </Suspense>
+    )
   }
 
   return (

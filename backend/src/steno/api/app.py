@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
 import steno
-from steno.api.routes import connectors, health, jobs, organization, repositories, spaces
+from steno.api.routes import connectors, graph, health, jobs, organization, repositories, spaces
 from steno.config import get_settings
 from steno.mcp.server import mcp
 
@@ -35,7 +35,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    for module in (health, organization, spaces, connectors, repositories, jobs):
+    for module in (health, organization, spaces, connectors, repositories, jobs, graph):
         app.include_router(module.router, prefix="/api")
 
     @app.exception_handler(IntegrityError)

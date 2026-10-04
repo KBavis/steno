@@ -81,6 +81,85 @@ export interface JobDetail extends Job {
   stages: Stage[]
 }
 
+// ---------------------------------------------------------------- graph views
+
+export interface GraphNode {
+  id: string
+  kind: string
+  label: string
+  sub?: string | null
+  parent?: string | null
+  stub?: boolean
+  drill?: 'space' | 'app' | 'flow' | null
+  /** Organization and space levels: outside the current container (a neighbor) */
+  outside?: boolean
+  /** Index of the top-level space the node sits in, so it keeps one color at every level */
+  hue?: number | null
+  description?: string | null
+  stats?: Record<string, number>
+  /** A space's largest applications */
+  preview?: string[]
+  method?: string
+  significant?: boolean
+  is_async?: boolean
+  functions?: number
+}
+export interface GraphGroup {
+  id: string
+  kind: string
+  label: string
+  parent: string | null
+  stub?: boolean
+}
+export interface GraphEdge {
+  id: string
+  src: string
+  dst: string
+  type: string
+  n: number
+  label?: string
+  async?: boolean
+  conditional?: boolean
+  op?: string
+}
+export interface Crumb {
+  id: string
+  label: string
+  kind: string
+}
+export interface GraphView {
+  view: 'organization' | 'space' | 'application' | 'code' | 'flow'
+  focus?: string
+  /** Organization and space levels: the container being shown */
+  container?: GraphNode
+  nodes: GraphNode[]
+  groups: GraphGroup[]
+  edges: GraphEdge[]
+  breadcrumbs: Crumb[]
+  summary?: Record<string, number | boolean>
+  empty?: boolean
+}
+export interface NodeDetail {
+  id: string
+  kind: string
+  labels: string[]
+  label: string
+  properties: Record<string, unknown>
+  provenance: Record<string, string | number>
+  neighbors: { type: string; dir: 'in' | 'out'; node: { id: string; kind: string; label: string }; props: Record<string, unknown> }[]
+  breadcrumbs: Crumb[]
+  source_url: string | null
+}
+export interface SearchHit {
+  id: string
+  kind: string
+  label: string
+  sub?: string
+}
+
+const q = (params: Record<string, string | boolean>) =>
+  new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString()
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
     ...init,
@@ -133,6 +212,16 @@ export const api = {
   connectors: crud<Connector, ConnectorInput>('/connectors'),
   repositories: crud<Repository, RepositoryInput>('/repositories'),
   jobs: () => request<Job[]>('/jobs'),
+  graph: {
+    overview: () => request<GraphView>('/graph/overview'),
+    space: (id: string) => request<GraphView>(`/graph/space?${q({ id })}`),
+    application: (id: string, layer: 'architecture' | 'code') =>
+      request<GraphView>(`/graph/application?${q({ id, layer })}`),
+    flow: (id: string, significantOnly: boolean) =>
+      request<GraphView>(`/graph/flow?${q({ id, significant_only: significantOnly })}`),
+    node: (id: string) => request<NodeDetail>(`/graph/node?${q({ id })}`),
+    search: (text: string) => request<SearchHit[]>(`/graph/search?${q({ q: text })}`),
+  },
   job: (id: number) => request<JobDetail>(`/jobs/${id}`),
   createJob: (repository_id: number, mode: JobMode) =>
     request<Job>('/jobs', { method: 'POST', body: JSON.stringify({ repository_id, mode }) }),

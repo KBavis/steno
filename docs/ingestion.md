@@ -296,6 +296,20 @@ Steno's own small resolver, built on Python's `ast` module (D51); rules still ma
 
 What it can't follow (dynamic attribute access, values built at runtime, untyped parameters) is marked unresolved and shows up in the coverage report. Pyright or Jedi are options only if those gaps turn out to matter.
 
+**How it works.** At the start of the parse stage the resolver reads every source file once into an index: source roots and module names, and per module its imports, classes (bases, methods, class values, `self.x` attributes), functions (parameters, annotations, return types, line spans), and module-level values. Nothing is resolved in advance; each question is answered when the engine, the resolve pass, or the call graph asks it, by recursively asking smaller questions. Clues teach it two things during the run: configuration values (`property`) and library return types (`client` … `returns`).
+
+| Question | Answers | Gives up on |
+|---|---|---|
+| `enclosing(file, line)` | The function and class a line belongs to; a function's span starts at its first decorator. This is where the `@function` / `@class` anchors come from. | Nested functions (attributed to the outer one) |
+| `symbol_of(expr)` | The qualified name a name or attribute refers to: local → module definition → import (following re-exports) → builtin; `a.b` through a module, a class, or a typed value | `getattr`, `*` imports, names built at runtime |
+| `type_of(expr)` | The type of a value: `self`, parameter annotations, `x: T`, `x = Cls()` / `x = f()` (return annotation), `with … as x` (a context manager's yielded type), `self.x`, library return hints | Types that depend on arguments (`session.get(Job, …)`), untyped parameters, generics |
+| `class_of(expr)` | The class an expression names (repository classes, and library names that look like classes) | Classes chosen at runtime |
+| `value_of(expr)` | The constant a value holds: literals, f-strings, `+`, single assignments, module constants across imports, class defaults, `os.getenv(key, default)`; a parameter inside a string becomes `{name}` | Values that exist only at runtime |
+| `is_subclass(type, targets)` | Whether a type is, or inherits from, one of the targets (repository bases walked; library bases by name) | Inheritance inside libraries that aren't read |
+| `invocations(fn)` | Every first-party call in a function, closures included, in execution order, flagged conditional or in-loop: the call graph | Runtime dispatch, calls through base classes |
+
+**One resolver per language.** Each language gets its own resolver behind these same questions. The engine today builds only the Python resolver, so a repository mixing languages needs a resolver per language, chosen by each rule's `language` (Open). Links between languages go through shared interface nodes in the graph, not through a resolver.
+
 ### 5.2 DI rules are per-framework plugins
 
 Step 4 above is Spring's set of rules. Other frameworks (Guice, Dagger, .NET DI) are separate plugins with their own rules for registration and selection, so the pipeline stays agnostic.
