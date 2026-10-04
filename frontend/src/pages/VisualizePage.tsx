@@ -115,7 +115,7 @@ function rememberHues(view: GraphView) {
 }
 const hueOf = (crumbs: Crumb[]) => crumbs.map((c) => hues.get(c.id)).find((h) => h !== undefined)
 
-const FIT_PADDING: NonNullable<FitViewOptions['padding']> = { top: '96px', left: '84px', right: '40px', bottom: '64px' }
+const FIT_PADDING: NonNullable<FitViewOptions['padding']> = { top: '96px', left: '84px', right: '40px', bottom: '96px' }
 
 // -------------------------------------------------------------------- page
 
@@ -360,7 +360,7 @@ function Visualizer({ onExit }: { onExit: () => void }) {
   }, [baseEdges])
   const empty = !loading && view && (view.empty || view.nodes.length === 0) && route.view === 'organization'
   const hue = view ? (view.container?.hue ?? hueOf([...crumbs].reverse())) : undefined
-  const dense = baseEdges.length > 40
+  const dense = baseEdges.length > 40 && view?.view !== 'application'
 
   return (
     <div className={`viz-full hue-${hue ?? 'none'}`}>
@@ -476,7 +476,7 @@ function Visualizer({ onExit }: { onExit: () => void }) {
 
 // What each kind of line means, in the legend
 const LEGEND: Record<string, string> = {
-  CALLS: 'calls endpoints',
+  CALLS: 'calls',
   READS_FROM: 'reads tables',
   WRITES_TO: 'writes tables',
   INVOKES: 'function calls',
@@ -492,11 +492,11 @@ function hint(view: GraphView): string {
     case 'space':
       return 'What lives in this space, and what outside it talks to it. Click a tile to zoom in; Esc to go back up.'
     case 'application':
-      return 'Flows grouped by resource, and what they touch. Click a flow to follow it.'
+      return 'Each flow shows what it writes, reads, and calls. Hover a flow or table to draw its lines; click a flow to follow it.'
     case 'code':
       return 'Files grouped by folder; lines are calls between files.'
     default:
-      return `${s.shown} of ${s.functions} functions${s.significant_only ? ', the ones with effects' : ''}. Click one for its details.`
+      return `Steps in the order they run (${s.shown} of ${s.functions} functions${s.significant_only ? ', the ones that touch data' : ''}); indented steps are called by the one above. Writes point into tables, reads point back into the step.`
   }
 }
 

@@ -300,58 +300,29 @@ class GraphViews:
             MATCH (fl:Flow)-[:BELONGS_TO]->(:Application {id: $id})
             MATCH (fl)-[r]->(t) WHERE r.rollup AND type(r) IN $types
             OPTIONAL MATCH (t)-[:BELONGS_TO]->(d:DataStore)
-            OPTIONAL MATCH (e:Entity)-[:MAPS_TO]->(t)
             OPTIONAL MATCH (owner:Application)-[:EXPOSES]->(t)
-            RETURN fl.id AS src, t, type(r) AS type, d, owner,
-                   collect(DISTINCT e.short_name)[0] AS entity
+            RETURN fl.id AS src, t, type(r) AS type, d, owner
             """,
             id=app_id,
             types=EFFECT_TYPES,
         ):
             t, d, owner = row["t"], row["d"], row["owner"]
             if t["id"] not in targets:
-                parent = None
-                if owner is not None:  # another application's interface, grouped under it
-                    parent = owner["id"]
-                    if not any(g["id"] == parent for g in groups):
-                        groups.append(
-                            {
-                                "id": parent,
-                                "kind": "application",
-                                "label": owner.get("name"),
-                                "parent": None,
-                            }
-                        )
-                elif d is not None:
-                    parent = d["id"]
-                    if not any(g["id"] == parent for g in groups):
-                        groups.append(
-                            {
-                                "id": parent,
-                                "kind": "datastore",
-                                "label": d.get("name"),
-                                "parent": None,
-                                "stub": bool(d.get("stub")),
-                            }
-                        )
-                elif kind_of(list(t.labels)) == "external":
-                    parent = "group:external"
-                    if not any(g["id"] == parent for g in groups):
-                        groups.append(
-                            {
-                                "id": parent,
-                                "kind": "externals",
-                                "label": "External systems",
-                                "parent": None,
-                            }
-                        )
-                sub = (
-                    f"entity {row['entity']}"
-                    if row["entity"]
-                    else (t.get("host") or t.get("vendor"))
-                )
+                parent, sub = _place_target(t, d, owner, groups)
                 targets[t["id"]] = _node(t, sub, parent=parent)
             edges.append({"src": row["src"], "dst": t["id"], "type": row["type"], "n": 1})
+
+        # What each flow does and who uses each target, so reads and writes show without lines
+        verbs = {"WRITES_TO": "writes", "READS_FROM": "reads", "CALLS": "calls"}
+        for e in edges:
+            verb = verbs.get(e["type"])
+            if not verb:
+                continue
+            flow_node = next(n for n in nodes if n["id"] == e["src"])
+            flow_node.setdefault("effects", {}).setdefault(verb, 0)
+            flow_node["effects"][verb] += 1
+            usage = targets[e["dst"]].setdefault("usage", {})
+            usage[verb] = usage.get(verb, 0) + 1
         nodes += list(targets.values())
         return {
             "view": "application",
@@ -423,7 +394,13 @@ class GraphViews:
     # ------------------------------------------------------------------ flow
 
     def flow(self, flow_id: str, significant_only: bool = True) -> dict[str, Any]:
-        """A flow: its trigger, the call tree from its entry, and each function's effects."""
+        """A flow as a sequence: a header (its trigger and what it does overall), its steps in
+        the order they run, and the data each step reads and writes.
+
+        Steps are the functions reached from the entry, depth-first in source order, so the
+        list reads top to bottom as the code runs. With `significant_only`, functions with no
+        effect at or below them are skipped, but their calls are still followed.
+        """
         rows = self._read(
             """
             MATCH (fl:Flow {id: $id})-[:ENTRY]->(entry:Function)
@@ -446,78 +423,112 @@ class GraphViews:
             entry=entry["id"],
         )
         funcs = {row["f"]["id"]: (row["f"], row["file"]) for row in reach}
-        calls = defaultdict(list)
-        call_props = {}
+        calls: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for row in self._read(
             "MATCH (a:Function)-[r:INVOKES]->(b:Function) WHERE a.id IN $ids AND b.id IN $ids "
             "RETURN a.id AS a, b.id AS b, r.seq AS seq, r.conditional AS cond, r.async AS async",
             ids=list(funcs),
         ):
-            calls[row["a"]].append(row["b"])
-            call_props[(row["a"], row["b"])] = row.data()
+            calls[row["a"]].append(row.data())
+        for out in calls.values():
+            out.sort(key=lambda c: c["seq"] if c["seq"] is not None else 1_000_000)
 
         keep = set(funcs)
         if significant_only:
             keep = {
                 fid for fid, (f, _) in funcs.items() if f.get("significant") or fid == entry["id"]
             }
-        nodes, edges = [], []
-        if trigger is not None:
-            nodes.append(_node(trigger, "trigger"))
-            edges.append({"src": trigger["id"], "dst": fl["id"], "type": "STARTS", "n": 1})
-        nodes.append(_node(fl, f"{fl.get('functions')} functions reached", drill=None))
-        edges.append({"src": fl["id"], "dst": entry["id"], "type": "ENTRY", "n": 1})
-        for fid in keep:
-            f, file = funcs[fid]
-            nodes.append(
-                _node(
-                    f,
-                    file,
-                    container=f.get("container"),
-                    significant=bool(f.get("significant")),
-                    is_async=bool(f.get("is_async")),
+
+        # Execution order: depth-first from the entry; hidden helpers pass their calls through
+        steps: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        def walk(fid: str, depth: int, conditional: bool, is_async: bool) -> None:
+            if fid in seen:
+                return
+            seen.add(fid)
+            shown = fid in keep
+            if shown:
+                f, file = funcs[fid]
+                steps.append(
+                    _node(
+                        f,
+                        file,
+                        container=f.get("container"),
+                        order=len(steps) + 1,
+                        depth=depth,
+                        conditional=conditional,
+                        is_async=is_async or bool(f.get("is_async")),
+                        significant=bool(f.get("significant")),
+                    )
                 )
-            )
-        # Calls between kept functions; hidden ones in between are skipped over
-        for src in keep:
-            for dst in _next_kept(src, calls, keep):
-                p = call_props.get((src, dst), {})
-                edges.append(
-                    {
-                        "src": src,
-                        "dst": dst,
-                        "type": "INVOKES",
-                        "n": 1,
-                        "async": bool(p.get("async")),
-                        "conditional": bool(p.get("cond")),
-                        "direct": (src, dst) in call_props,
-                    }
+            for c in calls.get(fid, []):
+                walk(
+                    c["b"],
+                    depth + 1 if shown else depth,
+                    conditional or bool(c["cond"]),
+                    bool(c["async"]),
                 )
-        targets = {}
+
+        walk(entry["id"], 0, False, False)
+
+        groups: list[dict[str, Any]] = []
+        targets: dict[str, dict[str, Any]] = {}
+        edges = []
+        by_id = {st["id"]: st for st in steps}
         for row in self._read(
             """
             MATCH (f:Function)-[r]->(t) WHERE f.id IN $ids AND type(r) IN $types
-            RETURN f.id AS src, t, type(r) AS type, r.operation AS op
+            OPTIONAL MATCH (t)-[:BELONGS_TO]->(d:DataStore)
+            OPTIONAL MATCH (owner:Application)-[:EXPOSES]->(t)
+            RETURN f.id AS src, t, d, owner, type(r) AS type, r.operation AS op
             """,
-            ids=list(keep),
+            ids=list(by_id),
             types=EFFECT_TYPES,
         ):
             t = row["t"]
-            targets.setdefault(t["id"], _node(t, t.get("host") or t.get("vendor")))
+            if t["id"] not in targets:
+                parent, sub = _place_target(t, row["d"], row["owner"], groups)
+                targets[t["id"]] = _node(t, sub, parent=parent)
             edges.append(
                 {"src": row["src"], "dst": t["id"], "type": row["type"], "n": 1, "op": row["op"]}
             )
-        nodes += list(targets.values())
+            by_id[row["src"]].setdefault("does", []).append(
+                {"type": row["type"], "op": row["op"], "target": targets[t["id"]]["label"]}
+            )
+
+        # Each target sits next to the first step that uses it
+        first_use: dict[str, int] = {}
+        for e in edges:
+            first_use[e["dst"]] = min(first_use.get(e["dst"], 10**6), by_id[e["src"]]["order"])
+        for tid, target in targets.items():
+            target["first_use"] = first_use.get(tid)
+
+        summary = {
+            "writes": len({e["dst"] for e in edges if e["type"] == "WRITES_TO"}),
+            "reads": len({e["dst"] for e in edges if e["type"] == "READS_FROM"}),
+            "calls": len({e["dst"] for e in edges if e["type"] == "CALLS"}),
+        }
+        method, _, path = (fl.get("name") or "").partition(" ")
+        head = _node(
+            fl,
+            entry.get("name"),
+            method=method,
+            path=path,
+            trigger=_node(trigger)["kind"] if trigger is not None else None,
+            effects=summary,
+            purpose=fl.get("purpose"),
+        )
         return {
             "view": "flow",
             "focus": flow_id,
-            "nodes": nodes,
-            "groups": [],
+            "nodes": [head, *steps, *targets.values()],
+            "groups": groups,
             "edges": _merge_edges(edges),
             "breadcrumbs": self._breadcrumbs(flow_id),
             "summary": {
                 "functions": len(funcs),
-                "shown": len(keep),
+                "shown": len(steps),
                 "significant_only": significant_only,
             },
         }
@@ -748,26 +759,32 @@ class _Links(list):
         self.externals: dict[str, dict[str, Any]] = {}
 
 
+def _place_target(
+    t: Any, d: Any, owner: Any, groups: list[dict[str, Any]]
+) -> tuple[str, str | None]:
+    """The card a flow's target goes in (its data store, the application that exposes it, or
+    External systems), created on first use, and the target's subtitle."""
+
+    def group(gid: str, kind: str, label: str | None, stub: bool = False) -> str:
+        if not any(g["id"] == gid for g in groups):
+            groups.append({"id": gid, "kind": kind, "label": label, "parent": None, "stub": stub})
+        return gid
+
+    if owner is not None:  # another application's interface
+        return group(f"group:{owner['id']}", "application", owner.get("name")), None
+    if d is not None:  # a table
+        return group(f"group:{d['id']}", "datastore", d.get("name"), bool(d.get("stub"))), None
+    if kind_of(list(t.labels)) == "datastore":  # the store as a whole, not one of its tables
+        whole = group(f"group:{t['id']}", "datastore", t.get("name"), bool(t.get("stub")))
+        return whole, "the whole store"
+    return group("group:external", "externals", "External systems"), t.get("host")
+
+
 def _resource(path: str) -> str:
     """`/api/jobs/projects/{project_id}` → `/api/jobs`: the router a route belongs to."""
     parts = [p for p in path.split("/") if p]
     head = [p for p in parts[:2] if not p.startswith("{")]
     return "/" + "/".join(head) if head else "/"
-
-
-def _next_kept(src: str, calls: dict[str, list[str]], keep: set[str]) -> set[str]:
-    """The nearest kept functions below `src`, skipping hidden helpers in between."""
-    found, seen, todo = set(), {src}, list(calls.get(src, []))
-    while todo:
-        f = todo.pop()
-        if f in seen:
-            continue
-        seen.add(f)
-        if f in keep:
-            found.add(f)
-        else:
-            todo.extend(calls.get(f, []))
-    return found
 
 
 def _merge_edges(

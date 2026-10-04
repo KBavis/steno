@@ -70,6 +70,11 @@ function levelShape(n: GraphNode, view: GraphView): { type: string; size: [numbe
   return { type: 'entity', size: n.kind === 'datastore' ? [250, 64] : sizeOf(n.kind) }
 }
 
+/** Application view: flows and what they touch are compact rows in cards */
+function rowShape(n: GraphNode): { type: string; size: [number, number] } {
+  return n.kind === 'flow' ? { type: 'flowrow', size: [340, 50] } : { type: 'targetrow', size: [270, 38] }
+}
+
 const PADDING = '[top=44,left=18,bottom=18,right=18]'
 const GROUP_OPTIONS = { 'elk.padding': PADDING }
 // Organization and space levels: room between tiles for curves and their labels. ELK takes
@@ -87,22 +92,25 @@ function packedOptions(kind: string, size: number): Record<string, string> {
   if (kind === 'lane') {
     return {
       'elk.algorithm': 'rectpacking',
-      'elk.aspectRatio': '1.0',
-      'elk.spacing.nodeNode': '20',
+      'elk.aspectRatio': '1.1',
+      'elk.spacing.nodeNode': '24',
       'elk.padding': '[top=40,left=0,bottom=0,right=0]',
     }
   }
-  if (kind !== 'resource' && size > 8) {
-    return { 'elk.algorithm': 'box', 'elk.aspectRatio': '0.9', 'elk.spacing.nodeNode': '12', 'elk.padding': PADDING }
+  if (kind !== 'resource' && size > 30) {
+    return { 'elk.algorithm': 'box', 'elk.aspectRatio': '1.2', 'elk.spacing.nodeNode': '6', 'elk.padding': CARD_PADDING }
   }
   return {
     'elk.algorithm': 'layered',
     'elk.direction': 'RIGHT',
-    'elk.spacing.nodeNode': '12',
+    'elk.spacing.nodeNode': '6',
     'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
-    'elk.padding': PADDING,
+    // Rows have no lines between them; without this ELK packs them side by side as separate pieces
+    'elk.separateConnectedComponents': 'false',
+    'elk.padding': CARD_PADDING,
   }
 }
+const CARD_PADDING = '[top=46,left=10,bottom=10,right=10]'
 
 /** Split an application view into two lanes: its flows, and everything they touch. */
 function withLanes(view: GraphView): GraphView {
@@ -174,6 +182,7 @@ export async function layoutView(
   direction: Direction | 'AUTO',
   window: { width: number; height: number },
 ): Promise<{ nodes: Node[]; edges: Edge[] }> {
+  if (view.view === 'flow') return layoutFlow(view)
   if (direction !== 'AUTO') return (await layoutOnce(view, direction)).result
   const [right, down] = await Promise.all([layoutOnce(view, 'RIGHT'), layoutOnce(view, 'DOWN')])
   const scale = (size: { width: number; height: number }) => Math.min(window.width / size.width, window.height / size.height)
@@ -191,7 +200,9 @@ async function layoutOnce(
   const ids = new Set(view.nodes.map((n) => n.id))
   const groupIds = new Set(view.groups.map((g) => g.id))
   const groupKind = new Map(view.groups.map((g) => [g.id, g.kind]))
-  const shapes = new Map(view.nodes.map((n) => [n.id, level ? levelShape(n, view) : { type: 'entity', size: sizeOf(n.kind) }]))
+  const shapes = new Map(
+    view.nodes.map((n) => [n.id, level ? levelShape(n, view) : packed ? rowShape(n) : { type: 'entity', size: sizeOf(n.kind) }]),
+  )
   const children = new Map<string | null, ElkNode[]>()
   const push = (parent: string | null, child: ElkNode) => {
     const key = parent && groupIds.has(parent) ? parent : null
@@ -244,7 +255,7 @@ async function layoutOnce(
       ? {
           'elk.algorithm': 'layered',
           'elk.direction': 'RIGHT',
-          'elk.layered.spacing.nodeNodeBetweenLayers': '220',
+          'elk.layered.spacing.nodeNodeBetweenLayers': '200',
         }
       : {
           'elk.algorithm': 'layered',
@@ -388,4 +399,90 @@ function toEdge(e: GraphEdge, level: boolean, widest: number, route: Route | und
 
 function countLeaves(node: ElkNode): number {
   return (node.children ?? []).reduce((sum, c) => sum + (c.children?.length ? countLeaves(c) : 1), 0)
+}
+
+// ------------------------------------------------------------------ flow view
+
+const HEAD = { w: 600, h: 150 }
+const STEP = { w: 540, h: 54, gap: 10, indent: 30 }
+const CARD = { w: 290, head: 42, row: 38, gap: 6, pad: 10 }
+
+/**
+ * A flow reads top to bottom: its header, then its steps in the order they run (indented by
+ * call depth), with the data it touches to the right. Each card sits beside the first step
+ * that uses it, so lines run mostly across, not up and down.
+ */
+function layoutFlow(view: GraphView): { nodes: Node[]; edges: Edge[] } {
+  const head = view.nodes.find((n) => n.kind === 'flow')
+  const steps = view.nodes.filter((n) => n.kind === 'function').sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+  const targets = view.nodes.filter((n) => n.kind !== 'flow' && n.kind !== 'function')
+  const stepTop = HEAD.h + 48
+  const stepY = (order: number) => stepTop + (order - 1) * (STEP.h + STEP.gap)
+  const nodes: Node[] = []
+  const at = (id: string, type: string, x: number, y: number, w: number, h: number, node: GraphNode, parentId?: string): Node => ({
+    id,
+    type,
+    position: { x, y },
+    parentId,
+    extent: parentId ? 'parent' : undefined,
+    style: { width: w, height: h },
+    width: w,
+    height: h,
+    data: { node, direction: 'RIGHT' } satisfies EntityData,
+  })
+
+  if (head) nodes.push(at(head.id, 'flowhead', 0, 0, HEAD.w, HEAD.h, head))
+  let right = HEAD.w
+  for (const st of steps) {
+    const x = (st.depth ?? 0) * STEP.indent
+    nodes.push(at(st.id, 'steprow', x, stepY(st.order ?? 1), STEP.w, STEP.h, st))
+    right = Math.max(right, x + STEP.w)
+  }
+
+  // Cards in order of first use, each as close as it can get to the step that first uses it
+  const cardX = right + 170
+  const byGroup = new Map<string, GraphNode[]>()
+  for (const t of targets) byGroup.set(t.parent ?? 'group:other', [...(byGroup.get(t.parent ?? 'group:other') ?? []), t])
+  const firstOf = (list: GraphNode[]) => Math.min(...list.map((t) => t.first_use ?? 1))
+  const cards = [...byGroup.entries()].sort((a, b) => firstOf(a[1]) - firstOf(b[1]))
+  let floor = stepTop - CARD.head
+  for (const [gid, list] of cards) {
+    list.sort((a, b) => (a.first_use ?? 0) - (b.first_use ?? 0))
+    const group = view.groups.find((g) => g.id === gid)
+    const height = CARD.head + list.length * (CARD.row + CARD.gap) - CARD.gap + CARD.pad
+    const y = Math.max(floor, stepY(firstOf(list)) - CARD.head + (STEP.h - CARD.row) / 2)
+    nodes.push({
+      id: gid,
+      type: 'cluster',
+      position: { x: cardX, y },
+      style: { width: CARD.w, height },
+      width: CARD.w,
+      height,
+      selectable: false,
+      zIndex: -1,
+      data: { label: group?.label ?? 'Other', kind: group?.kind ?? 'externals', stub: group?.stub, count: list.length } satisfies ClusterData,
+    })
+    list.forEach((t, i) => nodes.push(at(t.id, 'targetrow', CARD.pad, CARD.head + i * (CARD.row + CARD.gap), CARD.w - 2 * CARD.pad, CARD.row, t, gid)))
+    floor = y + height + 22
+  }
+
+  const edges: Edge[] = view.edges.map((e) => {
+    const type = e.type.toLowerCase()
+    const color = `var(--e-${type}, var(--muted))`
+    const marker = { type: MarkerType.ArrowClosed, width: 14, height: 14, color }
+    // Arrows follow the data: a write points into the table, a read points back into the step
+    const reads = e.type === 'READS_FROM'
+    return {
+      id: e.id,
+      source: e.src,
+      target: e.dst,
+      type: 'routed',
+      className: ['edge', `edge-${type}`].join(' '),
+      label: e.op ? (e.type === 'CALLS' ? `calls ${e.op}` : e.op) : undefined,
+      markerEnd: reads ? undefined : marker,
+      markerStart: reads ? marker : undefined,
+      data: { type: e.type, n: e.n } satisfies RoutedData,
+    } as Edge
+  })
+  return { nodes, edges }
 }

@@ -99,6 +99,23 @@ export interface GraphNode {
   stats?: Record<string, number>
   /** A space's largest applications */
   preview?: string[]
+  /** Application view: what a flow does (tables written and read, calls made) */
+  effects?: { writes?: number; reads?: number; calls?: number }
+  /** Application view: how many flows write, read, or call a target */
+  usage?: { writes?: number; reads?: number; calls?: number }
+  /** Flow view: a step's place in execution order and call depth */
+  order?: number
+  depth?: number
+  conditional?: boolean
+  container?: string | null
+  /** Flow view: what a step does, in words (operation and target) */
+  does?: { type: string; op?: string | null; target: string }[]
+  /** Flow view: the first step that uses a target */
+  first_use?: number | null
+  /** Flow view header */
+  path?: string
+  trigger?: string | null
+  purpose?: string | null
   method?: string
   significant?: boolean
   is_async?: boolean

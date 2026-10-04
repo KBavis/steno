@@ -1609,6 +1609,318 @@
 .edge-chip.e-starts,
 .edge-chip.e-entry { --c: var(--e-starts); }
 
+/* ------------------------------------------------- application view rows */
+
+.row {
+  --ink: var(--k-code);
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px 0 12px;
+  border-radius: 9px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  transition:
+    opacity 0.15s,
+    border-color 0.15s,
+    box-shadow 0.15s,
+    background 0.15s;
+}
+
+.react-flow__node:hover .row {
+  border-color: color-mix(in srgb, var(--hue) 50%, var(--border));
+  box-shadow: 0 6px 16px -10px color-mix(in srgb, var(--hue) 70%, transparent);
+}
+
+.row.is-selected {
+  border-color: var(--hue);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--hue) 22%, transparent);
+}
+
+.row.is-dimmed {
+  opacity: 0.25;
+}
+
+.row.is-stub {
+  border-style: dashed;
+}
+
+.row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.row-title {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+
+.row-sub {
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+
+.row-icon {
+  flex: none;
+  color: var(--ink);
+}
+
+.row-badges {
+  flex: none;
+  display: flex;
+  gap: 4px;
+}
+
+.row-go {
+  flex: none;
+  color: var(--muted);
+  opacity: 0.5;
+  transition:
+    opacity 0.15s,
+    transform 0.15s;
+}
+
+.react-flow__node:hover .row-go {
+  opacity: 1;
+  color: var(--hue);
+  transform: translateX(2px);
+}
+
+.badge {
+  --c: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 30px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--c) 75%, var(--text));
+  background: color-mix(in srgb, var(--c) 13%, transparent);
+}
+
+.badge svg {
+  color: var(--c);
+}
+
+.badge-writes { --c: var(--e-writes_to); }
+.badge-reads { --c: var(--e-reads_from); }
+.badge-calls { --c: var(--e-calls); }
+
+/* Cards that hold rows: resources, data stores, other applications */
+.view-application .gcluster {
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 28px -22px rgb(0 0 0 / 0.35);
+}
+
+.view-application .gcluster.kind-lane {
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.view-application .gcluster-head {
+  padding: 13px 14px 0;
+  font-size: 12.5px;
+}
+
+.view-application .gcluster.kind-resource .gcluster-label {
+  font-family: var(--mono);
+}
+
+/* Lines only for what's hovered or selected; badges carry the rest */
+.view-application .react-flow__edge {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.view-application .react-flow__edge.is-live {
+  opacity: 1;
+}
+
+.view-application .edge-reads_from .react-flow__edge-path,
+.view-flow .edge-reads_from .react-flow__edge-path {
+  stroke-dasharray: 6 4;
+}
+
+/* ------------------------------------------------------- flow view (sequence) */
+
+.fhead {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 20px;
+  border-radius: 16px;
+  background:
+    radial-gradient(500px 200px at 0% 0%, color-mix(in srgb, var(--hue) 11%, transparent), transparent 70%),
+    var(--surface);
+  border: 1px solid color-mix(in srgb, var(--hue) 30%, var(--border));
+  box-shadow: 0 14px 34px -22px color-mix(in srgb, var(--hue) 70%, transparent);
+  cursor: default;
+}
+
+.fhead > * {
+  flex: none;
+}
+
+.fhead-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--text);
+}
+
+.fhead-title > span:last-child {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fhead-title .method {
+  font-size: 11.5px;
+  padding: 2px 7px;
+}
+
+.fhead-sub {
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+.fhead-sub code {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.fhead-effects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fhead-effects .badge {
+  font-size: 12px;
+  padding: 2px 9px;
+}
+
+.fhead-purpose {
+  margin: 2px 0 0;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--muted);
+}
+
+.step {
+  position: relative;
+  overflow: visible;
+}
+
+.step-num {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--hue) 14%, var(--surface));
+  color: var(--hue);
+  font-size: 11.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.step.is-quiet .step-num {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.step-name {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  /* room below the baseline, so underscores aren't clipped */
+  line-height: 1.5;
+}
+
+.step-tag {
+  margin-right: 5px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-family: var(--font);
+  font-size: 10px;
+  font-weight: 650;
+  color: var(--text-2);
+}
+
+/* A nested step hangs off the one that calls it */
+.step.is-nested::before {
+  content: '';
+  position: absolute;
+  left: -18px;
+  top: -16px;
+  width: 13px;
+  height: calc(50% + 16px);
+  border-left: 1.5px solid var(--border-strong);
+  border-bottom: 1.5px solid var(--border-strong);
+  border-bottom-left-radius: 7px;
+}
+
+.badge-wide {
+  max-width: 180px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.view-flow .gcluster {
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  border: 1px solid var(--border);
+}
+
+.view-flow .gcluster-head {
+  padding: 12px 14px 0;
+}
+
+/* Operation names on lines only for what's hovered */
+.view-flow .elabel:not(.is-live) {
+  display: none;
+}
+
+.view-flow .react-flow__edge-path {
+  opacity: 0.75;
+}
+
+.view-flow .react-flow__edge.is-live .react-flow__edge-path {
+  opacity: 1;
+  stroke-width: 2.2;
+}
+
 /* ------------------------------------------------- lanes and dense views */
 
 .gcluster.kind-lane {
