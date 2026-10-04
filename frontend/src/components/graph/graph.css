@@ -118,11 +118,34 @@
 .viz-stage {
   position: absolute;
   inset: 0;
-  transition: opacity 0.26s ease;
 }
 
-.viz-stage.is-hidden {
-  opacity: 0;
+/* The view being left, animated away during a zoom-through (transition.ts) */
+.viz-ghost-host {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.viz-ghost {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+  will-change: transform, opacity;
+}
+
+.viz-ghost-flow {
+  position: absolute;
+  inset: 0;
+  background: transparent !important;
+}
+
+/* Labels always draw above lines, including lit ones */
+.viz-stage .react-flow__edgelabel-renderer,
+.viz-ghost .react-flow__edgelabel-renderer {
+  z-index: 5;
 }
 
 .viz-stage .react-flow {
@@ -1016,6 +1039,67 @@
 
 .viz-stage.is-dense .elabel:not(.is-live) {
   display: none;
+}
+
+/* Level labels: one colored row per kind of link; the full sentence on hover */
+.elabel-parts {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 4px 9px;
+  border-radius: 10px;
+  pointer-events: all;
+  cursor: default;
+}
+
+.epart {
+  --c: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--c) 70%, var(--text));
+}
+
+.epart svg {
+  color: var(--c);
+}
+
+.epart.e-calls { --c: var(--e-calls); }
+.epart.e-writes_to { --c: var(--e-writes_to); }
+.epart.e-reads_from { --c: var(--e-reads_from); }
+
+.elabel-sentence {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 6px);
+  width: max-content;
+  max-width: 260px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--text);
+  color: var(--surface);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: normal;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -3px);
+  transition:
+    opacity 0.15s,
+    transform 0.15s;
+}
+
+.elabel-parts:hover {
+  z-index: 10;
+  border-color: var(--text-2);
+}
+
+.elabel-parts:hover .elabel-sentence {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }
 
 /* ----------------------------------------------------------------- legend */

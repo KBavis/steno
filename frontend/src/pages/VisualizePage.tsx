@@ -12,7 +12,6 @@ import {
   type Node,
   type FitViewOptions,
   type NodeChange,
-  type Viewport,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { ArrowLeft, Check, ChevronRight, Network, RotateCcw, Search, SlidersHorizontal } from 'lucide-react'
@@ -23,6 +22,7 @@ import { FocusContext, InspectContext } from '../components/graph/focus'
 import '../components/graph/graph.css'
 import { DEFAULT_OPTIONS, filterView, layoutView, type EntityData, type ViewOptions } from '../components/graph/layout'
 import { edgeTypes, nodeTypes } from '../components/graph/nodeTypes'
+import { play, snapshot, type Move, type Rect } from '../components/graph/transition'
 import { EmptyState, ErrorAlert, Logo } from '../components/ui'
 import { EDGE_TYPES, kindStyle } from '../lib/graphStyle'
 
@@ -115,8 +115,6 @@ function rememberHues(view: GraphView) {
 }
 const hueOf = (crumbs: Crumb[]) => crumbs.map((c) => hues.get(c.id)).find((h) => h !== undefined)
 
-const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
-const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 const FIT_PADDING: NonNullable<FitViewOptions['padding']> = { top: '96px', left: '84px', right: '40px', bottom: '64px' }
 
 // -------------------------------------------------------------------- page
@@ -129,6 +127,21 @@ export function VisualizePage({ onExit }: { onExit: () => void }) {
   )
 }
 
+type Laid = { view: GraphView; nodes: Node[]; edges: Edge[] }
+
+function fetchView(r: Route): Promise<GraphView> {
+  if (r.view === 'space') return api.graph.space(r.id)
+  if (r.view === 'application') return api.graph.application(r.id, r.layer)
+  if (r.view === 'flow') return api.graph.flow(r.id, !r.all)
+  return api.graph.overview()
+}
+
+const rectOf = (n: { internals: { positionAbsolute: { x: number; y: number } }; measured: { width?: number; height?: number } }): Rect => ({
+  ...n.internals.positionAbsolute,
+  width: n.measured.width ?? 200,
+  height: n.measured.height ?? 100,
+})
+
 function Visualizer({ onExit }: { onExit: () => void }) {
   const [route, setRoute] = useState<Route>(parseRoute)
   const [view, setView] = useState<GraphView>()
@@ -136,16 +149,19 @@ function Visualizer({ onExit }: { onExit: () => void }) {
   const [baseEdges, setBaseEdges] = useState<Edge[]>([])
   const [error, setError] = useState<string>()
   const [loading, setLoading] = useState(true)
-  const [hidden, setHidden] = useState(true)
   const [selected, setSelected] = useState<string>()
   const [hovered, setHovered] = useState<string>()
   const [options, setOptions] = useState<ViewOptions>(loadOptions)
   const [arrangement, setArrangement] = useState(0)
   const flow = useReactFlow()
   const initialized = useNodesInitialized()
-  // How to bring the next view in: the previous view's depth and focus decide in or out
-  const previous = useRef<{ depth: number; focus?: string } | null>(null)
-  const entering = useRef(false)
+  const stageRef = useRef<HTMLDivElement>(null)
+  const ghostHost = useRef<HTMLDivElement>(null)
+  // The move to play once the new view has rendered, and the one playing now
+  const pending = useRef<{ move: Move; ghost: HTMLElement | null; anchorOut?: string; from?: Rect } | null>(null)
+  const cancel = useRef<() => void>(() => {})
+  // Laid-out views by route and settings; hovering a tile fills this so a click starts at once
+  const cache = useRef(new Map<string, { at: number; laid: Promise<Laid> }>())
 
   useEffect(() => {
     const onHash = () => setRoute(parseRoute())
@@ -155,45 +171,66 @@ function Visualizer({ onExit }: { onExit: () => void }) {
 
   const routeKey = formatRoute(route)
 
-  const loadedKey = useRef<string>(undefined)
-  useEffect(() => {
-    let live = true
-    // A new place fades through; a changed setting on the same view swaps in place
-    if (loadedKey.current !== routeKey) setHidden(true)
-    loadedKey.current = routeKey
-    setError(undefined)
-    setSelected(undefined)
-    setHovered(undefined)
-    setLoading(true)
-    const load =
-      route.view === 'space'
-        ? api.graph.space(route.id)
-        : route.view === 'application'
-          ? api.graph.application(route.id, route.layer)
-          : route.view === 'flow'
-            ? api.graph.flow(route.id, !route.all)
-            : api.graph.overview()
-    load
-      .then(async (v) => {
+  const prepare = useCallback(
+    (r: Route): Promise<Laid> => {
+      const key = `${formatRoute(r)}|${JSON.stringify(options)}`
+      const hit = cache.current.get(key)
+      if (hit && Date.now() - hit.at < 30_000) return hit.laid
+      const laid = fetchView(r).then(async (v) => {
         rememberHues(v)
-        const stage = document.querySelector('.viz-stage')
+        const stage = stageRef.current
         const room = { width: (stage?.clientWidth ?? 1400) - 124, height: (stage?.clientHeight ?? 900) - 160 }
         // Only the organization and space levels choose a direction; other views have their own
         const direction = v.view === 'flow' ? 'DOWN' : v.view === 'organization' || v.view === 'space' ? options.direction : 'RIGHT'
-        const laid = await layoutView(filterView(v, options), direction, room)
+        const out = await layoutView(filterView(v, options), direction, room)
+        return { view: v, ...out }
+      })
+      laid.catch(() => cache.current.delete(key))
+      cache.current.set(key, { at: Date.now(), laid })
+      return laid
+    },
+    [options],
+  )
+
+  const shownKey = useRef<string>(undefined)
+  useEffect(() => {
+    let live = true
+    setError(undefined)
+    setLoading(true)
+    prepare(route)
+      .then(({ view: next, nodes: laidNodes, edges: laidEdges }) => {
         if (!live) return
+        const stage = stageRef.current
+        const moving = shownKey.current !== routeKey
+        shownKey.current = routeKey
+        if (moving && stage && ghostHost.current) {
+          // Work out how the two views relate before the old one goes away
+          cancel.current()
+          const vp = flow.getViewport()
+          const toScreen = (r: Rect): Rect => ({ x: r.x * vp.zoom + vp.x, y: r.y * vp.zoom + vp.y, width: r.width * vp.zoom, height: r.height * vp.zoom })
+          const old = flow.getNodes()
+          const into = next.focus ? flow.getInternalNode(next.focus) : undefined
+          let move: Move = { kind: 'fade' }
+          let anchorOut: string | undefined
+          if (into && into.type !== 'cluster') move = { kind: 'in', tile: toScreen(rectOf(into)) }
+          else if (view?.focus && laidNodes.some((n) => n.id === view.focus)) anchorOut = view.focus
+          const ghost = old.length ? snapshot(stage, ghostHost.current) : null
+          pending.current = { move, ghost, anchorOut, from: old.length ? toScreen(flow.getNodesBounds(old)) : undefined }
+          stage.style.opacity = '0'
+          setSelected(undefined)
+          setHovered(undefined)
+        }
         const saved = loadPositions(routeKey)
-        setView(v)
-        setNodes(laid.nodes.map((n) => (saved[n.id] ? { ...n, position: saved[n.id] } : n)))
-        setBaseEdges(laid.edges)
+        setView(next)
+        setNodes(laidNodes.map((n) => (saved[n.id] ? { ...n, position: saved[n.id] } : n)))
+        setBaseEdges(laidEdges)
         setLoading(false)
-        entering.current = true
       })
       .catch((e: Error) => {
         if (!live) return
         setError(e.message)
         setLoading(false)
-        setHidden(false)
+        if (stageRef.current) stageRef.current.style.opacity = ''
       })
     return () => {
       live = false
@@ -201,75 +238,31 @@ function Visualizer({ onExit }: { onExit: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeKey, options, arrangement])
 
-  // Bring a freshly laid-out view in: from slightly far when going deeper, from the tile we
-  // came out of when going up, so moving between levels feels like one continuous canvas.
+  // Once the new view has rendered, play the move into it
   useEffect(() => {
-    if (!initialized || !entering.current || !view) return
-    entering.current = false
-    const depth = view.breadcrumbs.length
-    const before = previous.current
-    previous.current = { depth, focus: view.focus }
+    const p = pending.current
+    const stage = stageRef.current
+    if (!initialized || !p || !stage) return
+    pending.current = null
+    const all = flow.getNodes()
+    const world = flow.getNodesBounds(all)
     // Computed rather than read back: fitView applies asynchronously
-    const stage = document.querySelector('.viz-stage')
-    const width = stage?.clientWidth ?? 1200
-    const height = stage?.clientHeight ?? 800
-    const fit = getViewportForBounds(flow.getNodesBounds(flow.getNodes()), width, height, 0.06, 1.1, FIT_PADDING)
-    let start: Viewport = fit
-    if (before && !reducedMotion()) {
-      const focus = before.focus ? flow.getInternalNode(before.focus) : undefined
-      if (depth < before.depth && focus) {
-        const { x, y } = focus.internals.positionAbsolute
-        const box = { x, y, width: focus.measured.width ?? 200, height: focus.measured.height ?? 100 }
-        start = getViewportForBounds(box, width, height, 0.06, 4, 0.05)
-      } else {
-        const cx = width / 2
-        const cy = height / 2
-        const k = depth > before.depth ? 0.82 : depth < before.depth ? 1.18 : before.focus === view.focus ? 1 : 0.94
-        start = { zoom: fit.zoom * k, x: cx - (cx - fit.x) * k, y: cy - (cy - fit.y) * k }
-      }
+    const fit = getViewportForBounds(world, stage.clientWidth, stage.clientHeight, 0.06, 1.1, FIT_PADDING)
+    let move = p.move
+    if (move.kind === 'fade' && p.anchorOut && p.from) {
+      const tile = flow.getInternalNode(p.anchorOut)
+      if (tile) move = { kind: 'out', from: p.from, tile: rectOf(tile) }
     }
-    flow.setViewport(start)
-    setHidden(false)
-    requestAnimationFrame(() => flow.setViewport(fit, { duration: reducedMotion() ? 0 : 700 }))
-  }, [initialized, view, flow])
-
-  /** Zoom the camera into a tile, then open the level inside it */
-  const enter = useCallback(
-    async (target: Route, nodeId?: string) => {
-      setSelected(undefined)
-      if (formatRoute(target) === window.location.hash.slice(1)) return
-      const n = nodeId ? flow.getInternalNode(nodeId) : undefined
-      if (n && !reducedMotion()) {
-        const { x, y } = n.internals.positionAbsolute
-        flow.fitBounds({ x, y, width: n.measured.width ?? 200, height: n.measured.height ?? 100 }, { duration: 480, padding: 0.04 })
-        await wait(300)
-        setHidden(true)
-        await wait(160)
-      } else {
-        setHidden(true)
-      }
-      go(target)
-    },
-    [flow],
-  )
-
-  /** Pull the camera back, then open the level above */
-  const ascend = useCallback(
-    async (target: Route) => {
-      setSelected(undefined)
-      if (formatRoute(target) === window.location.hash.slice(1)) return
-      if (!reducedMotion()) {
-        flow.zoomTo(flow.getZoom() * 0.5, { duration: 360 })
-        await wait(200)
-        setHidden(true)
-        await wait(160)
-      } else {
-        setHidden(true)
-      }
-      go(target)
-    },
-    [flow],
-  )
+    cancel.current = play(move, {
+      world,
+      fit,
+      stage,
+      ghost: p.ghost,
+      setViewport: (v) => void flow.setViewport(v),
+      maxZoom: 4,
+      onDone: () => {},
+    })
+  }, [initialized, nodes, flow])
 
   const crumbs = useMemo(() => view?.breadcrumbs ?? [], [view])
   const parentRoute = useMemo((): Route | null => {
@@ -285,14 +278,15 @@ function Visualizer({ onExit }: { onExit: () => void }) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || (e.target as HTMLElement)?.closest?.('input, [role="dialog"]')) return
       if (selected) setSelected(undefined)
-      else if (parentRoute) void ascend(parentRoute)
+      else if (parentRoute) go(parentRoute)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selected, parentRoute, ascend])
+  }, [selected, parentRoute])
 
   // Hover or selection lights up a node's connections and dims the rest. Nodes read the focus
   // from context so they keep their identity; rebuilding them mid-hover swallows clicks.
+  // Live edges stay at their own depth so their labels remain on top of every line.
   const { near, edges } = useMemo(() => {
     const focus = hovered ?? selected
     const plain = baseEdges.map((e) => (options.labels ? e : { ...e, label: undefined }))
@@ -313,7 +307,6 @@ function Visualizer({ onExit }: { onExit: () => void }) {
         ...e,
         label: live.has(e.id) ? e.label : options.labels ? e.label : undefined,
         className: `${e.className ?? ''} ${live.has(e.id) ? 'is-live' : 'is-dimmed'}`,
-        zIndex: live.has(e.id) ? 10 : 0,
         data: { ...e.data, state: live.has(e.id) ? 'live' : 'dimmed' },
       })),
     }
@@ -334,10 +327,22 @@ function Visualizer({ onExit }: { onExit: () => void }) {
       if (n.type === 'cluster') return
       const node = (n.data as EntityData).node
       const target = node.drill || node.outside ? routeFor(node.kind, node.id) : null
-      if (target && formatRoute(target) !== routeKey) void enter(target, n.id)
+      if (target && formatRoute(target) !== routeKey) go(target)
       else setSelected(n.id)
     },
-    [enter, routeKey],
+    [routeKey],
+  )
+
+  // Start loading a level while the pointer is over its tile
+  const onNodeMouseEnter = useCallback(
+    (_: unknown, n: Node) => {
+      if (n.type === 'cluster') return
+      setHovered(n.id)
+      const node = (n.data as EntityData).node
+      const target = node.drill || node.outside ? routeFor(node.kind, node.id) : null
+      if (target) prepare(target).catch(() => {})
+    },
+    [prepare],
   )
 
   const updateOptions = (o: ViewOptions) => {
@@ -345,7 +350,14 @@ function Visualizer({ onExit }: { onExit: () => void }) {
     saveOptions(o)
   }
 
-  const legend = useMemo(() => [...new Set(baseEdges.map((e) => (e.data as { type: string }).type))].filter((t) => EDGE_TYPES[t]), [baseEdges])
+  // Every kind of link on screen, including the ones that share a line with another
+  const legend = useMemo(() => {
+    const types = baseEdges.flatMap((e) => {
+      const d = e.data as { type: string; parts?: { type: string }[] }
+      return d.parts?.map((p) => p.type) ?? [d.type]
+    })
+    return [...new Set(types)].filter((t) => EDGE_TYPES[t])
+  }, [baseEdges])
   const empty = !loading && view && (view.empty || view.nodes.length === 0) && route.view === 'organization'
   const hue = view ? (view.container?.hue ?? hueOf([...crumbs].reverse())) : undefined
   const dense = baseEdges.length > 40
@@ -360,9 +372,9 @@ function Visualizer({ onExit }: { onExit: () => void }) {
         onCrumb={(c, i) => {
           const r = routeFor(c.kind, c.id)
           if (!r || i === crumbs.length - 1) return
-          void ascend(r)
+          go(r)
         }}
-        onPick={(hit) => pick(hit, enter, setSelected)}
+        onPick={(hit) => pick(hit, setSelected)}
         options={options}
         onOptions={updateOptions}
         onResetArrangement={() => {
@@ -375,11 +387,11 @@ function Visualizer({ onExit }: { onExit: () => void }) {
         current={levelIndex(route)}
         crumbs={crumbs}
         onGo={(r) => {
-          if (formatRoute(r) !== routeKey) void ascend(r)
+          if (formatRoute(r) !== routeKey) go(r)
         }}
       />
 
-      <div className={`viz-stage ${hidden ? 'is-hidden' : ''} ${dense ? 'is-dense' : ''} view-${view?.view ?? 'loading'}`}>
+      <div ref={stageRef} className={`viz-stage ${dense ? 'is-dense' : ''} view-${view?.view ?? 'loading'}`}>
         <InspectContext.Provider value={setSelected}>
           <FocusContext.Provider value={near}>
             <ReactFlow
@@ -390,13 +402,13 @@ function Visualizer({ onExit }: { onExit: () => void }) {
               onNodesChange={onNodesChange}
               onNodeDragStop={onDragStop}
               colorMode="system"
-              minZoom={0.06}
-              maxZoom={2.5}
+              minZoom={0.02}
+              maxZoom={4}
               nodesConnectable={false}
               nodesDraggable
               elementsSelectable
               onNodeClick={onNodeClick}
-              onNodeMouseEnter={(_, n) => n.type !== 'cluster' && setHovered(n.id)}
+              onNodeMouseEnter={onNodeMouseEnter}
               onNodeMouseLeave={() => setHovered(undefined)}
               onPaneClick={() => setSelected(undefined)}
               zoomOnDoubleClick={false}
@@ -408,7 +420,9 @@ function Visualizer({ onExit }: { onExit: () => void }) {
         </InspectContext.Provider>
       </div>
 
-      {loading && <div className="viz-loading">Laying out the graph…</div>}
+      <div ref={ghostHost} className="viz-ghost-host" aria-hidden="true" />
+
+      {loading && !view && <div className="viz-loading">Laying out the graph…</div>}
       {error && (
         <div className="viz-error">
           <ErrorAlert message={error} />
@@ -430,7 +444,7 @@ function Visualizer({ onExit }: { onExit: () => void }) {
               {legend.map((t) => (
                 <span key={t} className="legend-edge">
                   <span className={`legend-line e-${t.toLowerCase()}`} />
-                  {EDGE_TYPES[t].label}
+                  {LEGEND[t] ?? EDGE_TYPES[t].label}
                 </span>
               ))}
             </div>
@@ -452,7 +466,7 @@ function Visualizer({ onExit }: { onExit: () => void }) {
           }}
           onOpen={(kind, id) => {
             const r = routeFor(kind, id)
-            if (r) void enter(r, flow.getInternalNode(id) ? id : undefined)
+            if (r) go(r)
           }}
         />
       )}
@@ -460,11 +474,21 @@ function Visualizer({ onExit }: { onExit: () => void }) {
   )
 }
 
+// What each kind of line means, in the legend
+const LEGEND: Record<string, string> = {
+  CALLS: 'calls endpoints',
+  READS_FROM: 'reads tables',
+  WRITES_TO: 'writes tables',
+  INVOKES: 'function calls',
+  STARTS: 'starts the flow',
+  ENTRY: 'enters the code',
+}
+
 function hint(view: GraphView): string {
   const s = view.summary ?? {}
   switch (view.view) {
     case 'organization':
-      return 'Each space and how it talks to the others. Click a space to zoom in.'
+      return 'Each space and how it talks to the others. Hover a label for the full story; click a space to zoom in.'
     case 'space':
       return 'What lives in this space, and what outside it talks to it. Click a tile to zoom in; Esc to go back up.'
     case 'application':
@@ -726,15 +750,15 @@ function GraphSearch({ onPick }: { onPick: (hit: SearchHit) => void }) {
 }
 
 /** Open the natural level for a search hit: its own if it has one, else its application's. */
-async function pick(hit: SearchHit, enter: (r: Route) => Promise<void>, select: (id: string) => void) {
+async function pick(hit: SearchHit, select: (id: string) => void) {
   const own = routeFor(hit.kind, hit.id)
-  if (own) return enter(own)
+  if (own) return go(own)
   try {
     const detail = await api.graph.node(hit.id)
     const app = detail.breadcrumbs.find((c) => c.kind === 'application')
     if (app && hit.kind !== 'function') {
-      await enter({ view: 'application', id: app.id, layer: 'architecture' })
-      window.setTimeout(() => select(hit.id), 900)
+      go({ view: 'application', id: app.id, layer: 'architecture' })
+      window.setTimeout(() => select(hit.id), 1200)
       return
     }
   } catch {

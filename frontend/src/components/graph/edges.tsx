@@ -1,4 +1,7 @@
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, useInternalNode, type Edge, type EdgeProps } from '@xyflow/react'
+import { ArrowUpRight } from 'lucide-react'
+import { PARTS, partText, sentence, type LabelPart } from './labels'
+import type { EntityData } from './layout'
 
 export interface Point {
   x: number
@@ -16,6 +19,8 @@ export interface RoutedData extends Record<string, unknown> {
   /** Where both ends sat when routed; if either moved (dragged), fall back to a plain curve */
   at?: { src: Point; dst: Point }
   state?: 'live' | 'dimmed'
+  /** Organization and space levels: the kinds of link this line stands for */
+  parts?: LabelPart[]
 }
 
 const moved = (a: Point | undefined, b: Point | undefined) => !a || !b || Math.abs(a.x - b.x) > 1 || Math.abs(a.y - b.y) > 1
@@ -41,13 +46,34 @@ export function RoutedEdge(props: EdgeProps<Edge<RoutedData>>) {
     ;[path, lx, ly] = getBezierPath(props)
   }
   const type = (data?.type ?? '').toLowerCase()
+  const state = data?.state ? `is-${data.state}` : ''
+  const parts = data?.parts
+  const srcNode = (s?.data as EntityData | undefined)?.node
+  const dstNode = (t?.data as EntityData | undefined)?.node
   return (
     <>
       <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} interactionWidth={18} />
-      {label ? (
+      {label && parts?.length ? (
+        <EdgeLabelRenderer>
+          <div className={['elabel', 'elabel-parts', 'nopan', state].join(' ')} style={{ transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)` }}>
+            {parts.map((p) => {
+              const Icon = PARTS[p.type]?.icon ?? ArrowUpRight
+              return (
+                <span key={p.type} className={`epart e-${p.type.toLowerCase()}`}>
+                  <Icon size={11} strokeWidth={2.4} aria-hidden="true" />
+                  {partText(p)}
+                </span>
+              )
+            })}
+            <span className="elabel-sentence" role="tooltip">
+              {parts.map((p) => sentence(p, srcNode?.label ?? 'This', dstNode?.label ?? 'that', dstNode?.kind ?? '')).join(' ')}
+            </span>
+          </div>
+        </EdgeLabelRenderer>
+      ) : label ? (
         <EdgeLabelRenderer>
           <div
-            className={['elabel', `e-${type}`, data?.state ? `is-${data.state}` : ''].join(' ')}
+            className={['elabel', `e-${type}`, state].join(' ')}
             style={{ transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)` }}
           >
             {label}

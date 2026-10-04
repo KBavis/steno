@@ -4,6 +4,7 @@ import type { Edge, Node } from '@xyflow/react'
 import { MarkerType } from '@xyflow/react'
 import type { GraphEdge, GraphNode, GraphView } from '../../api/client'
 import type { Point, RoutedData } from './edges'
+import { partText, type LabelPart } from './labels'
 
 const elk = new ELK()
 
@@ -143,7 +144,7 @@ function withFrame(view: GraphView): GraphView {
  * At the organization and space levels, every connection between the same two tiles becomes one
  * edge: "4 calls · reads 2 tables". Its color follows the strongest kind (calls, then writes, then reads).
  */
-function mergePairs(edges: GraphEdge[]): GraphEdge[] {
+function mergePairs(edges: GraphEdge[]): (GraphEdge & { parts: LabelPart[] })[] {
   const rank = ['CALLS', 'WRITES_TO', 'READS_FROM', 'PRODUCES', 'CONSUMES']
   const byPair = new Map<string, GraphEdge[]>()
   for (const e of edges) byPair.set(`${e.src}|${e.dst}`, [...(byPair.get(`${e.src}|${e.dst}`) ?? []), e])
@@ -155,17 +156,11 @@ function mergePairs(edges: GraphEdge[]): GraphEdge[] {
       dst: list[0].dst,
       type: list[0].type,
       n: list.reduce((sum, e) => sum + e.n, 0),
-      label: list.map(levelLabel).join(' · '),
+      // The label itself is drawn from the parts (edges.tsx); this text only reserves room
+      label: list.map((e) => partText(e)).sort((a, b) => b.length - a.length)[0],
+      parts: list.map((e) => ({ type: e.type, n: e.n })),
     }
   })
-}
-
-function levelLabel(e: GraphEdge): string {
-  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
-  if (e.type === 'CALLS') return e.n > 1 ? plural(e.n, 'call') : 'calls'
-  if (e.type === 'READS_FROM') return `reads ${plural(e.n, 'table')}`
-  if (e.type === 'WRITES_TO') return `writes ${plural(e.n, 'table')}`
-  return e.type.toLowerCase()
 }
 
 /**
@@ -209,7 +204,7 @@ async function layoutOnce(
   }
   // Level labels sit midway between columns, so each gap is as wide as the longest label
   const longest = Math.max(0, ...view.edges.map((e) => (e.label ?? '').length))
-  const levelSpacing = { ...LEVEL_SPACING, 'elk.layered.spacing.nodeNodeBetweenLayers': String(Math.max(130, longest * 6.8 + 56)) }
+  const levelSpacing = { ...LEVEL_SPACING, 'elk.layered.spacing.nodeNodeBetweenLayers': String(Math.max(130, longest * 7 + 70)) }
   const groupNode = (id: string): ElkNode => {
     const kids = (children.get(id) ?? []).map((c) => (groupIds.has(c.id) ? groupNode(c.id) : c))
     const kind = groupKind.get(id)!
@@ -372,7 +367,7 @@ function toEdge(e: GraphEdge, level: boolean, widest: number, route: Route | und
     className: ['edge', `edge-${type}`, level ? 'edge-level' : '', e.async ? 'edge-async' : '', e.conditional ? 'edge-cond' : '']
       .filter(Boolean)
       .join(' '),
-    label: e.label ?? (e.op ? e.op : undefined),
+    label: e.label ?? (e.op ? (e.type === 'CALLS' ? `calls ${e.op}` : e.op) : undefined),
     labelClassName: 'edge-label',
     pathOptions: level ? undefined : { borderRadius: 10 },
     style: level ? { strokeWidth: 1.6 + 3.4 * (Math.log1p(e.n) / Math.log1p(widest)) } : undefined,
@@ -382,6 +377,7 @@ function toEdge(e: GraphEdge, level: boolean, widest: number, route: Route | und
     data: {
       type: e.type,
       n: e.n,
+      parts: (e as { parts?: LabelPart[] }).parts,
       points: route?.points,
       spline: level,
       labelAt: route?.labelAt,
