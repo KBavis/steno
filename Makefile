@@ -4,7 +4,8 @@ STENO   := cd backend && uv run steno
 
 .PHONY: dev up down setup migrate graph-init api worker web dry-run test lint resolver
 
-dev:           ## Databases + API/MCP + worker + UI in one terminal (Ctrl+C to stop)
+dev:           ## Install missing prerequisites, then start everything in one terminal (Ctrl+C to stop)
+	./scripts/bootstrap.sh
 	./scripts/dev.sh
 
 up:            ## Start Postgres and Neo4j
@@ -13,9 +14,8 @@ up:            ## Start Postgres and Neo4j
 down:          ## Stop Postgres and Neo4j (data is kept in volumes)
 	$(COMPOSE) down
 
-setup:         ## Install backend and frontend dependencies
-	cd backend && uv sync
-	cd frontend && npm install
+setup:         ## Install prerequisites (uv, Node 20) and backend/frontend dependencies
+	./scripts/bootstrap.sh
 
 migrate:       ## Apply Postgres migrations
 	$(STENO) db upgrade

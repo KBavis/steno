@@ -4,8 +4,15 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# bootstrap.sh installs Node 20 with nvm; load it so the UI doesn't pick up an older system Node.
+if [ -s "$HOME/.nvm/nvm.sh" ]; then
+  # shellcheck disable=SC1091
+  . "$HOME/.nvm/nvm.sh" && nvm use --silent 20 >/dev/null
+fi
+
 MAKE="make --no-print-directory -s"
 $MAKE up
+$MAKE migrate graph-init  # both are idempotent; no-ops after the first run
 
 pids=()
 run() {  # run NAME CMD...: start in the background, prefixing output with [NAME]
