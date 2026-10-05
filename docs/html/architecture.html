@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Steno System Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+/* Steno docs: sticky contents rail on the left, one reading column on the right.
+   Color encodes where something lives: blue Postgres, green Neo4j, amber in memory, slate code/disk. */
+:root {
+  --bg: #f1f3f2;
+  --surface: #ffffff;
+  --surface-2: #f7f8f7;
+  --ink: #17201c;
+  --muted: #5a6661;
+  --line: #d3d9d6;
+  --line-strong: #9aa6a0;
+  --pg: #2b5e8f;
+  --pg-soft: #e5eef7;
+  --neo: #157560;
+  --neo-soft: #e2f2ec;
+  --mem: #9c6610;
+  --mem-soft: #f6eedd;
+  --code: #4f5b75;
+  --code-soft: #e9ecf3;
+  --warn: #a3402a;
+  --warn-soft: #f8e7e2;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101412; --surface: #171c1a; --surface-2: #1c2220; --ink: #e1e7e4; --muted: #97a39e;
+    --line: #2c3532; --line-strong: #56625d; --pg: #82b2e2; --pg-soft: #1a2633; --neo: #52c4a2;
+    --neo-soft: #14281f; --mem: #e2ab4f; --mem-soft: #2b2314; --code: #a9b4d0; --code-soft: #1f2330;
+    --warn: #ec8c74; --warn-soft: #2e1a15;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #101412; --surface: #171c1a; --surface-2: #1c2220; --ink: #e1e7e4; --muted: #97a39e;
+  --line: #2c3532; --line-strong: #56625d; --pg: #82b2e2; --pg-soft: #1a2633; --neo: #52c4a2;
+  --neo-soft: #14281f; --mem: #e2ab4f; --mem-soft: #2b2314; --code: #a9b4d0; --code-soft: #1f2330;
+  --warn: #ec8c74; --warn-soft: #2e1a15;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15.5px/1.6 var(--sans); -webkit-font-smoothing: antialiased; }
+.wrap { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; max-width: 1240px; margin: 0 auto; padding-inline: 24px; padding-block: 40px 96px; }
+nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; font-size: 13.5px; }
+.toc .brand { font-family: var(--display); font-weight: 700; font-size: 20px; letter-spacing: -0.01em; }
+.toc .brand-sub { color: var(--muted); font-size: 12.5px; margin-bottom: 20px; }
+.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; counter-reset: toc; }
+.toc li { counter-increment: toc; }
+.toc a { display: grid; grid-template-columns: 22px 1fr; padding: 5px 8px; border-radius: 6px; color: var(--muted); text-decoration: none; }
+.toc a::before { content: counter(toc); font-family: var(--mono); font-size: 11.5px; padding-top: 2px; }
+.toc a:hover, .toc a:focus-visible { background: var(--surface); color: var(--ink); outline: none; }
+.toc .legend { margin-top: 24px; display: grid; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.toc .sibling { margin-top: 24px; font-size: 13px; border-top: 1px solid var(--line); padding-top: 14px; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 8px; vertical-align: -1px; }
+main { min-width: 0; }
+header.intro { max-width: 70ch; margin-bottom: 56px; }
+.eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--neo); }
+h1 { font-family: var(--display); font-weight: 700; font-size: clamp(34px, 5vw, 52px); line-height: 1.05; letter-spacing: -0.025em; margin: 10px 0 16px; text-wrap: balance; }
+header.intro p { font-size: 17px; color: var(--muted); margin: 0 0 10px; }
+section { margin-top: 72px; scroll-margin-top: 24px; }
+h2 { font-family: var(--display); font-weight: 700; font-size: 30px; letter-spacing: -0.015em; line-height: 1.15; margin: 0 0 6px; text-wrap: balance; display: flex; gap: 14px; align-items: baseline; }
+h2 .num { font-family: var(--mono); font-size: 14px; font-weight: 500; color: var(--neo); }
+h3 { font-family: var(--display); font-weight: 600; font-size: 20px; margin: 36px 0 8px; letter-spacing: -0.01em; text-wrap: balance; }
+.lede { color: var(--muted); font-size: 16.5px; max-width: 68ch; margin: 0 0 24px; }
+p, li { max-width: 70ch; }
+p { margin: 0 0 14px; }
+code, .mono { font-family: var(--mono); font-size: 0.88em; }
+:not(pre) > code { background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; overflow-wrap: anywhere; }
+a { color: var(--pg); }
+a:focus-visible { outline: 2px solid var(--pg); outline-offset: 2px; }
+strong { font-weight: 600; }
+figure { margin: 24px 0 28px; }
+.diagram { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 20px; color: var(--ink); }
+.diagram svg { display: block; width: 100%; height: auto; min-width: 760px; }
+figcaption { font-size: 13.5px; color: var(--muted); margin-top: 10px; max-width: 75ch; }
+figcaption b { color: var(--ink); font-weight: 600; }
+svg text { fill: currentColor; font-family: var(--sans); font-size: 12.5px; }
+svg .t { font-weight: 600; font-size: 13px; }
+svg .s { fill: var(--muted); font-size: 11.5px; }
+svg .m { font-family: var(--mono); font-size: 11.5px; }
+svg .ms { font-family: var(--mono); font-size: 11px; fill: var(--muted); }
+svg .lbl { font-size: 11.5px; fill: var(--muted); }
+svg .box { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1.2; }
+svg .box.pg { fill: var(--pg-soft); stroke: var(--pg); }
+svg .box.neo { fill: var(--neo-soft); stroke: var(--neo); }
+svg .box.mem { fill: var(--mem-soft); stroke: var(--mem); }
+svg .box.code { fill: var(--code-soft); stroke: var(--code); }
+svg .box.off { fill: var(--surface-2); stroke: var(--line-strong); stroke-dasharray: 4 3; }
+svg .panel { fill: var(--surface-2); stroke: var(--line); stroke-width: 1; }
+svg .ln { stroke: var(--ink); stroke-width: 1.3; fill: none; }
+svg .ln.soft { stroke: var(--line-strong); }
+svg .ln.dash { stroke-dasharray: 5 4; }
+svg .ln.neo { stroke: var(--neo); stroke-width: 1.6; }
+svg .ln.pg { stroke: var(--pg); stroke-width: 1.6; }
+svg .ln.mem { stroke: var(--mem); stroke-width: 1.6; }
+svg .life { stroke: var(--line-strong); stroke-dasharray: 3 4; stroke-width: 1; }
+svg .head { fill: var(--ink); }
+svg .head.neo { fill: var(--neo); }
+svg .head.pg { fill: var(--pg); }
+svg .head.mem { fill: var(--mem); }
+svg .pgt { fill: var(--pg); font-weight: 600; }
+svg .neot { fill: var(--neo); font-weight: 600; }
+svg .memt { fill: var(--mem); font-weight: 600; }
+svg .codet { fill: var(--code); font-weight: 600; }
+.table-wrap { overflow-x: auto; margin: 16px 0 24px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+th { font-weight: 600; font-size: 12.5px; color: var(--muted); background: var(--surface-2); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 600; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 13px; }
+.tag { font-family: var(--mono); font-size: 11.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; font-weight: 400; }
+.tag.yes { color: var(--neo); border-color: var(--neo); }
+.tag.part { color: var(--mem); border-color: var(--mem); }
+.tag.no { color: var(--muted); border-style: dashed; }
+.tag.pg { color: var(--pg); border-color: var(--pg); }
+.tag.neo { color: var(--neo); border-color: var(--neo); }
+.tag.mem { color: var(--mem); border-color: var(--mem); }
+.tag.code { color: var(--code); border-color: var(--code); }
+pre { font-family: var(--mono); font-size: 13px; line-height: 1.55; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; overflow-x: auto; margin: 16px 0 20px; }
+pre .c { color: var(--muted); }
+.callout { border: 1px solid var(--line); border-left: 3px solid var(--mem); background: var(--surface); border-radius: 8px; padding: 14px 18px; margin: 20px 0; max-width: 78ch; }
+.callout.warn { border-left-color: var(--warn); }
+.callout h4 { margin: 0 0 6px; font-size: 14.5px; font-weight: 600; }
+.callout p:last-child, .callout ul:last-child { margin-bottom: 0; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 16px 0 24px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 16px 0 24px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.card h4 { margin: 0 0 4px; font-size: 14.5px; display: flex; justify-content: space-between; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.card p { font-size: 14px; color: var(--muted); margin: 0 0 8px; }
+.card p:last-child { margin-bottom: 0; }
+.card .where { font-family: var(--mono); font-size: 12px; color: var(--ink); display: block; margin-top: 6px; overflow-wrap: anywhere; }
+.card.pg { border-top: 3px solid var(--pg); }
+.card.neo { border-top: 3px solid var(--neo); }
+.card.mem { border-top: 3px solid var(--mem); }
+.card.code { border-top: 3px solid var(--code); }
+.card.off { border-style: dashed; }
+/* the debugging ladder */
+.ladder { list-style: none; padding: 0; margin: 16px 0 24px; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; counter-reset: rung; }
+.ladder li { counter-increment: rung; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 13px; position: relative; max-width: none; }
+.ladder li::before { content: counter(rung); font-family: var(--mono); font-size: 11px; color: var(--mem); display: block; }
+.ladder b { display: block; font-size: 13.5px; margin-bottom: 4px; }
+.ladder span { color: var(--muted); display: block; }
+.ladder code { font-size: 11.5px; }
+/* stage timing bars */
+.bars { display: grid; grid-template-columns: 90px minmax(0, 1fr) 64px; gap: 6px 12px; align-items: center; font-size: 13.5px; margin: 16px 0 8px; max-width: 760px; }
+.bars .name { font-family: var(--mono); font-size: 12.5px; }
+.bars .track { height: 14px; position: relative; border-left: 1px solid var(--line-strong); }
+.bars .fill { height: 100%; background: var(--neo); border-radius: 0 4px 4px 0; min-width: 2px; }
+.bars .fill.skip { background: transparent; border: 1px dashed var(--line-strong); border-left: 0; width: 22px; }
+.bars .val { font-family: var(--mono); font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; }
+.bars .row:hover .fill:not(.skip) { filter: brightness(1.12); }
+.bars .row { display: contents; }
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: 1fr; gap: 24px; padding-inline: 16px; }
+  nav.toc { position: static; }
+  .toc ol { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+  .grid2, .grid3 { grid-template-columns: 1fr; }
+  .ladder { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav class="toc" aria-label="Contents">
+    <div class="brand">Steno System Map</div>
+    <div class="brand-sub">The processes, stores, and how a job moves through them</div>
+    <ol>
+      <li><a href="#map">The map</a></li>
+      <li><a href="#parts">Each part</a></li>
+      <li><a href="#data">Where data lives</a></li>
+      <li><a href="#job">A job, end to end</a></li>
+      <li><a href="#stages">The seven stages</a></li>
+      <li><a href="#read">Reading the graph back</a></li>
+      <li><a href="#debug">When the graph looks wrong</a></li>
+      <li><a href="#status">Built and not built</a></li>
+    </ol>
+    <div class="legend" aria-label="Color key">
+      <div><span class="swatch" style="background:var(--pg)"></span>Postgres</div>
+      <div><span class="swatch" style="background:var(--neo)"></span>Neo4j</div>
+      <div><span class="swatch" style="background:var(--mem)"></span>In memory, during a job</div>
+      <div><span class="swatch" style="background:var(--code)"></span>Files on disk</div>
+    </div>
+    <div class="sibling">Next: <a href="ingestion.html">Ingestion Internals</a>, which opens up the stages.</div>
+  </nav>
+
+  <main>
+    <header class="intro">
+      <div class="eyebrow">Steno · how it fits together · October 2026</div>
+      <h1>Two processes, two databases, one queue</h1>
+      <p>Steno runs as an <strong>API process</strong> that people and agents talk to, and a <strong>worker process</strong> that does ingestion. They never call each other. They meet in Postgres, where the API leaves a job row and the worker picks it up, and in Neo4j, where the worker writes the graph and the API reads it back.</p>
+      <p>This page describes the code as it is on <code>main</code> today, not the full design. Numbers come from job 1 in the local database (Steno ingesting its own repository, commit <code>ff59ac5</code>).</p>
+    </header>
+
+    <!-- 1 -->
+    <section id="map">
+      <h2><span class="num">01</span>The map</h2>
+      <p class="lede">Everything that runs, and every line that carries data between the parts.</p>
+      <figure>
+        <div class="diagram">
+          <svg viewBox="0 0 1000 540" role="img" aria-label="System map. A browser talks HTTP to the API process through the Vite proxy, and an agent talks MCP to the same process. The API process reads and writes Postgres for configuration and jobs, and reads Neo4j for graph views and projects the declared organization and spaces into it. The worker process claims jobs from Postgres, clones from the git host into a temporary workspace, reads rule packs from disk, writes stage rows to Postgres and the graph to Neo4j. Jev and the LLM are not built.">
+            <defs>
+              <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker>
+              <marker id="a1pg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head pg" d="M0,0 L10,5 L0,10 z"/></marker>
+              <marker id="a1neo" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head neo" d="M0,0 L10,5 L0,10 z"/></marker>
+            </defs>
+
+            <!-- column headings -->
+            <text class="ms" x="20" y="18">CLIENTS</text>
+            <text class="ms" x="250" y="18">API PROCESS · steno api</text>
+            <text class="ms" x="560" y="18">STORES</text>
+            <text class="ms" x="800" y="18">WORKER PROCESS · steno worker</text>
+
+            <!-- clients -->
+            <rect class="box" x="20" y="40" width="170" height="70" rx="8"/>
+            <text class="t" x="36" y="64">Browser UI</text>
+            <text class="s" x="36" y="82">Vite + React, :5173</text>
+            <text class="s" x="36" y="98">onboarding · jobs · visualize</text>
+
+            <rect class="box" x="20" y="170" width="170" height="70" rx="8"/>
+            <text class="t" x="36" y="194">Agent</text>
+            <text class="s" x="36" y="212">Claude Code, any MCP client</text>
+            <text class="s" x="36" y="228">Streamable HTTP</text>
+
+            <rect class="box" x="20" y="300" width="170" height="84" rx="8"/>
+            <text class="t" x="36" y="324">steno CLI</text>
+            <text class="s" x="36" y="342">job enqueue · db upgrade</text>
+            <text class="s" x="36" y="358">graph init · rules test</text>
+            <text class="s" x="36" y="374">extract (no DB)</text>
+
+            <!-- API process -->
+            <rect class="panel" x="250" y="30" width="230" height="270" rx="10"/>
+            <text class="ms" x="266" y="50">uvicorn on :8000</text>
+            <rect class="box" x="266" y="62" width="198" height="56" rx="6"/>
+            <text class="t" x="280" y="84">Admin API  /api</text>
+            <text class="s" x="280" y="102">org · spaces · connectors · repos · jobs</text>
+            <rect class="box" x="266" y="128" width="198" height="56" rx="6"/>
+            <text class="t" x="280" y="150">Graph views  /api/graph</text>
+            <text class="s" x="280" y="168">GraphViews: Cypher → view JSON</text>
+            <rect class="box" x="266" y="194" width="198" height="56" rx="6"/>
+            <text class="t" x="280" y="216">MCP server  /mcp</text>
+            <text class="s" x="280" y="234">one tool so far: ping</text>
+            <text class="s" x="266" y="280">stateless; safe to run several</text>
+
+            <!-- stores -->
+            <rect class="box pg" x="560" y="40" width="170" height="130" rx="10"/>
+            <text class="t pgt" x="576" y="64">Postgres  :5434</text>
+            <text class="s" x="576" y="84">what Steno is told</text>
+            <text class="s" x="576" y="100">and what it did</text>
+            <text class="m" x="576" y="124">organization · space</text>
+            <text class="m" x="576" y="140">connector · repository</text>
+            <text class="m" x="576" y="156">ingestion_job · _stage</text>
+
+            <rect class="box neo" x="560" y="290" width="170" height="130" rx="10"/>
+            <text class="t neot" x="576" y="314">Neo4j  :7687</text>
+            <text class="s" x="576" y="334">what Steno knows</text>
+            <text class="m" x="576" y="358">architecture nodes</text>
+            <text class="m" x="576" y="374">code nodes</text>
+            <text class="s" x="576" y="398">rebuildable from PG + git</text>
+
+            <rect class="box code" x="560" y="466" width="170" height="54" rx="8"/>
+            <text class="t codet" x="576" y="488">rule-packs/</text>
+            <text class="s" x="576" y="506">YAML in this repo</text>
+
+            <rect class="box off" x="250" y="330" width="230" height="54" rx="8"/>
+            <text class="t" x="266" y="352">Jev · LLM</text>
+            <text class="s" x="266" y="370">not built; the cards stage will use them</text>
+
+            <!-- worker side -->
+            <rect class="box" x="800" y="40" width="180" height="54" rx="8"/>
+            <text class="t" x="816" y="62">Git host</text>
+            <text class="s" x="816" y="80">GitHub, Bitbucket, GitLab</text>
+
+            <rect class="box mem" x="800" y="140" width="180" height="220" rx="10"/>
+            <text class="t memt" x="816" y="164">Worker</text>
+            <text class="s" x="816" y="182">polls the queue every 2 s</text>
+            <line class="ln soft" x1="800" y1="196" x2="980" y2="196"/>
+            <text class="m" x="816" y="220">clone</text>
+            <text class="m" x="816" y="240">deps      (skipped)</text>
+            <text class="m" x="816" y="260">parse</text>
+            <text class="m" x="816" y="280">resolve</text>
+            <text class="m" x="816" y="300">flows</text>
+            <text class="m" x="816" y="320">write</text>
+            <text class="m" x="816" y="340">cards     (skipped)</text>
+
+            <rect class="box code" x="800" y="410" width="180" height="62" rx="8"/>
+            <text class="t codet" x="816" y="432">Workspace</text>
+            <text class="ms" x="816" y="450">/tmp/steno-workspaces/</text>
+            <text class="s" x="816" y="464">clone deleted; facts JSON kept</text>
+
+            <!-- client → API -->
+            <line class="ln" x1="190" y1="80" x2="264" y2="90" marker-end="url(#a1)"/>
+            <text class="lbl" x="196" y="70">HTTP /api</text>
+            <line class="ln" x1="190" y1="205" x2="264" y2="222" marker-end="url(#a1)"/>
+            <text class="lbl" x="196" y="196">MCP /mcp</text>
+
+            <!-- API → stores -->
+            <line class="ln pg" x1="464" y1="90" x2="558" y2="90" marker-end="url(#a1pg)" marker-start="url(#a1pg)"/>
+            <text class="lbl" x="476" y="82">config, jobs</text>
+            <line class="ln neo" x1="464" y1="156" x2="558" y2="320" marker-end="url(#a1neo)"/>
+            <text class="lbl" x="500" y="232" text-anchor="start">reads</text>
+            <text class="lbl" x="500" y="246" text-anchor="start">views</text>
+            <line class="ln neo dash" x1="464" y1="100" x2="566" y2="288" marker-end="url(#a1neo)"/>
+            <text class="lbl" x="524" y="196" text-anchor="start">org +</text>
+            <text class="lbl" x="524" y="210" text-anchor="start">spaces</text>
+
+            <!-- worker ↔ stores -->
+            <line class="ln pg" x1="798" y1="180" x2="732" y2="140" marker-end="url(#a1pg)" marker-start="url(#a1pg)"/>
+            <text class="lbl" x="744" y="192">claim job,</text>
+            <text class="lbl" x="744" y="206">stage rows</text>
+            <line class="ln neo" x1="798" y1="320" x2="732" y2="350" marker-end="url(#a1neo)"/>
+            <text class="lbl" x="742" y="312">MERGE</text>
+            <line class="ln" x1="890" y1="138" x2="890" y2="96" marker-end="url(#a1)"/>
+            <text class="lbl" x="898" y="122">git clone --depth 1</text>
+            <line class="ln" x1="890" y1="362" x2="890" y2="408" marker-end="url(#a1)"/>
+            <text class="lbl" x="898" y="390">writes</text>
+            <line class="ln" x1="732" y1="486" x2="810" y2="362" marker-end="url(#a1)"/>
+            <text class="lbl" x="770" y="500">reads rules</text>
+          </svg>
+        </div>
+        <figcaption><b>The API and the worker never call each other.</b> The only path from "ingest this" to "it's done" goes through a row in <code>ingestion_job</code>. The dashed green line is the projection: each time the organization or a space changes, the API copies them from Postgres into Neo4j so the graph has an Organization → Space tree for ingested repositories to hang off.</figcaption>
+      </figure>
+    </section>
+
+    <!-- 2 -->
+    <section id="parts">
+      <h2><span class="num">02</span>Each part</h2>
+      <p class="lede">What each one is responsible for, where it lives, and how much of it exists.</p>
+      <div class="grid2">
+        <div class="card">
+          <h4>Browser UI <span class="tag yes">built</span></h4>
+          <p>Onboarding (organization → spaces → connectors → repositories), a Jobs list that polls job status, and the Visualize tab that zooms from organization to flow.</p>
+          <span class="where">frontend/src/pages/*  ·  /api proxied to :8000</span>
+        </div>
+        <div class="card">
+          <h4>Admin API <span class="tag yes">built</span></h4>
+          <p>CRUD for the declared structure, and <code>POST /api/jobs</code>, which only inserts a queued row. It never runs ingestion itself.</p>
+          <span class="where">backend/src/steno/api/routes/*</span>
+        </div>
+        <div class="card">
+          <h4>Graph views <span class="tag yes">built</span></h4>
+          <p>Turns Neo4j into one layer at a time: overview, space, application (architecture or code), flow, node detail, search. The same views are meant to back MCP <code>get_node</code>.</p>
+          <span class="where">backend/src/steno/graph/views.py</span>
+        </div>
+        <div class="card">
+          <h4>MCP server <span class="tag part">ping only</span></h4>
+          <p>Mounted in the API process at <code>/mcp</code>, stateless. The first real tools (D54: <code>get_node</code>, <code>get_flow</code>, <code>find_dependents</code>, <code>search</code>, <code>view_flow_code</code>) aren't written yet.</p>
+          <span class="where">backend/src/steno/mcp/server.py</span>
+        </div>
+        <div class="card mem">
+          <h4>Worker <span class="tag yes">built</span></h4>
+          <p>A loop: claim the oldest queued job, run seven stages in order, mark the job succeeded or failed. One job at a time per process; run more processes for parallelism.</p>
+          <span class="where">ingestion/worker.py · queue.py · pipeline.py</span>
+        </div>
+        <div class="card mem">
+          <h4>Extractor engine + resolver <span class="tag yes">built</span></h4>
+          <p>Runs rule packs over the clone (ast-grep), asks the Python symbol resolver what names and types mean, and joins clues. Everything stays in memory for the job.</p>
+          <span class="where">extractors/*  ·  resolvers/python.py</span>
+        </div>
+        <div class="card mem">
+          <h4>Graph builder + writer <span class="tag yes">built</span></h4>
+          <p>Builds a plan of nodes and edges with stable IDs (structure, call graph, one flow per entry point, rollups), then MERGEs it into Neo4j and deletes this repository's stale facts.</p>
+          <span class="where">graph/build.py · graph/writer.py · graph/ids.py</span>
+        </div>
+        <div class="card code">
+          <h4>Rule packs <span class="tag part">Python only</span></h4>
+          <p>9 Python packs, 22 rules, each with test cases. The three Java packs have a <code>pack.yaml</code> but no rules yet.</p>
+          <span class="where">rule-packs/python/* · rule-packs/java/*</span>
+        </div>
+        <div class="card pg">
+          <h4>Postgres <span class="tag yes">built</span></h4>
+          <p>Holds the declared structure and the job log, and acts as the work queue (<code>SELECT … FOR UPDATE SKIP LOCKED</code>, no broker). Schema via Alembic.</p>
+          <span class="where">db/models.py · db/migrations/</span>
+        </div>
+        <div class="card neo">
+          <h4>Neo4j <span class="tag yes">built</span></h4>
+          <p>One database: architecture nodes and code nodes. A uniqueness constraint on <code>id</code> per label and a full-text index on <code>:Searchable</code>. No vector index yet (the embedding model is still Open).</p>
+          <span class="where">graph/schema.py  ·  make graph-init</span>
+        </div>
+        <div class="card off">
+          <h4>resolver-jvm <span class="tag no">not wired</span></h4>
+          <p>The JavaParser helper builds with Gradle, but nothing in the pipeline calls it yet. The <code>deps</code> stage, which would fetch JARs for it, always skips.</p>
+          <span class="where">resolver-jvm/</span>
+        </div>
+        <div class="card off">
+          <h4>Jev and the LLM <span class="tag no">not built</span></h4>
+          <p>Stand-ins and LiteLLM are the plan (D52). Today no decision model or LLM is called anywhere, so every dry run is fully deterministic.</p>
+          <span class="where">decisions/base.py (interface only) · llm/</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3 -->
+    <section id="data">
+      <h2><span class="num">03</span>Where data lives</h2>
+      <p class="lede">Four places, with very different lifetimes. Knowing which one holds a thing is most of debugging.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Place</th><th>Holds</th><th>Lives</th><th>Written by</th></tr></thead>
+          <tbody>
+            <tr><td><span class="tag pg">Postgres</span></td><td>The organization, spaces, connectors, repositories (with clone URL and space), every job and one row per stage with its timings and counts</td><td>Permanent</td><td>API (config, new jobs), worker (claims, stages, status)</td></tr>
+            <tr><td><span class="tag neo">Neo4j</span></td><td>The graph: Organization, Space, Repository, Module, File, Function, Application, Interface, Flow, Entity, Table, DataStore, ExternalSystem, and the edges between them</td><td>Until the next run of the same repository replaces its facts</td><td>Worker (write stage); API (org and space projection)</td></tr>
+            <tr><td><span class="tag mem">Memory</span></td><td>The resolver index, every extracted fact, the call graph, the graph plan</td><td>One job</td><td>Worker</td></tr>
+            <tr><td><span class="tag code">Disk</span></td><td>The clone at <code>/tmp/steno-workspaces/job-N/</code> and the facts file <code>job-N-facts.json</code></td><td>Clone: one job. Facts file: until you delete it</td><td>Worker</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Postgres defines more tables than the code uses. <code>coverage_item</code>, <code>fact_change</code>, <code>job_commit</code>, <code>llm_call</code>, <code>llm_output</code>, <code>jev_decision</code>, <code>tool_call</code>, <code>glossary_term</code>, <code>rule_pack</code> and <code>repository_rule_pack</code> exist in the schema, but nothing reads or writes them yet. Which packs ran is decided fresh in every job and recorded only in the parse stage's metrics.</p>
+      <div class="callout">
+        <h4>No facts go to Postgres</h4>
+        <p>The graph lives only in Neo4j and the review copy only in the facts JSON file. Postgres gets counts and timings. That matches D36 (Neo4j is rebuildable from Postgres plus git): rerunning the job rebuilds it.</p>
+      </div>
+    </section>
+
+    <!-- 4 -->
+    <section id="job">
+      <h2><span class="num">04</span>A job, end to end</h2>
+      <p class="lede">From clicking "dry run" to seeing the graph. Read down; each arrow is one real call.</p>
+      <figure>
+        <div class="diagram">
+          <svg viewBox="0 0 1000 640" role="img" aria-label="Sequence of a dry run. Setup: the UI saves the organization and spaces through the API into Postgres, and the API projects them into Neo4j. Then the UI posts a job, the API inserts a queued row, the worker claims it with SKIP LOCKED, clones from the git host, runs parse, resolve and flows in memory, writes a stage row after each stage, merges the plan into Neo4j, and marks the job succeeded. The UI polls the job, then asks graph views, which run Cypher against Neo4j.">
+            <defs>
+              <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker>
+              <marker id="a2pg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head pg" d="M0,0 L10,5 L0,10 z"/></marker>
+              <marker id="a2neo" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head neo" d="M0,0 L10,5 L0,10 z"/></marker>
+            </defs>
+            <!-- lane heads: UI 80, API 250, PG 420, Worker 600, Git 780, Neo 920 -->
+            <rect class="box" x="30" y="16" width="100" height="32" rx="6"/><text class="t" x="80" y="37" text-anchor="middle">UI</text>
+            <rect class="box" x="200" y="16" width="100" height="32" rx="6"/><text class="t" x="250" y="37" text-anchor="middle">API</text>
+            <rect class="box pg" x="370" y="16" width="100" height="32" rx="6"/><text class="t pgt" x="420" y="37" text-anchor="middle">Postgres</text>
+            <rect class="box mem" x="550" y="16" width="100" height="32" rx="6"/><text class="t memt" x="600" y="37" text-anchor="middle">Worker</text>
+            <rect class="box" x="730" y="16" width="100" height="32" rx="6"/><text class="t" x="780" y="37" text-anchor="middle">Git host</text>
+            <rect class="box neo" x="870" y="16" width="100" height="32" rx="6"/><text class="t neot" x="920" y="37" text-anchor="middle">Neo4j</text>
+            <line class="life" x1="80" y1="48" x2="80" y2="630"/>
+            <line class="life" x1="250" y1="48" x2="250" y2="630"/>
+            <line class="life" x1="420" y1="48" x2="420" y2="630"/>
+            <line class="life" x1="600" y1="48" x2="600" y2="630"/>
+            <line class="life" x1="780" y1="48" x2="780" y2="630"/>
+            <line class="life" x1="920" y1="48" x2="920" y2="630"/>
+
+            <!-- setup band -->
+            <text class="ms" x="10" y="74">ONCE</text>
+            <line class="ln" x1="80" y1="86" x2="248" y2="86" marker-end="url(#a2)"/>
+            <text class="lbl" x="88" y="80">PUT org, POST space</text>
+            <line class="ln pg" x1="250" y1="104" x2="418" y2="104" marker-end="url(#a2pg)"/>
+            <text class="lbl" x="258" y="98">INSERT / UPDATE</text>
+            <line class="ln neo dash" x1="250" y1="122" x2="918" y2="122" marker-end="url(#a2neo)"/>
+            <text class="lbl" x="440" y="116">sync_declared: MERGE Organization, Space, BELONGS_TO</text>
+
+            <line class="ln soft" x1="10" y1="142" x2="990" y2="142"/>
+            <text class="ms" x="10" y="164">ENQUEUE</text>
+            <line class="ln" x1="80" y1="178" x2="248" y2="178" marker-end="url(#a2)"/>
+            <text class="lbl" x="88" y="172">POST /api/jobs {mode: dry_run}</text>
+            <line class="ln pg" x1="250" y1="196" x2="418" y2="196" marker-end="url(#a2pg)"/>
+            <text class="lbl" x="258" y="190">INSERT status = queued</text>
+
+            <line class="ln soft" x1="10" y1="216" x2="990" y2="216"/>
+            <text class="ms" x="10" y="238">RUN</text>
+            <line class="ln pg" x1="600" y1="252" x2="422" y2="252" marker-end="url(#a2pg)"/>
+            <text class="lbl" x="440" y="246">claim: FOR UPDATE SKIP LOCKED → running</text>
+            <line class="ln" x1="600" y1="276" x2="778" y2="276" marker-end="url(#a2)"/>
+            <text class="lbl" x="608" y="270">clone: git clone --depth 1</text>
+            <rect class="box mem" x="560" y="292" width="80" height="94" rx="6"/>
+            <text class="m" x="600" y="314" text-anchor="middle">parse</text>
+            <text class="m" x="600" y="334" text-anchor="middle">resolve</text>
+            <text class="m" x="600" y="354" text-anchor="middle">flows</text>
+            <text class="s" x="600" y="374" text-anchor="middle">in memory</text>
+            <line class="ln pg dash" x1="558" y1="340" x2="422" y2="340" marker-end="url(#a2pg)"/>
+            <text class="lbl" x="440" y="334">ingestion_stage row</text>
+            <text class="lbl" x="440" y="356">after every stage</text>
+            <line class="ln neo" x1="600" y1="410" x2="918" y2="410" marker-end="url(#a2neo)"/>
+            <text class="lbl" x="660" y="404">write: MERGE nodes and edges, delete stale</text>
+            <line class="ln pg" x1="600" y1="436" x2="422" y2="436" marker-end="url(#a2pg)"/>
+            <text class="lbl" x="440" y="430">status = succeeded</text>
+
+            <line class="ln soft" x1="10" y1="458" x2="990" y2="458"/>
+            <text class="ms" x="10" y="480">WATCH</text>
+            <line class="ln" x1="80" y1="494" x2="248" y2="494" marker-end="url(#a2)"/>
+            <text class="lbl" x="88" y="488">GET /api/jobs/{id} (polls)</text>
+            <line class="ln pg" x1="250" y1="512" x2="418" y2="512" marker-end="url(#a2pg)"/>
+            <text class="lbl" x="258" y="506">job + stage rows</text>
+
+            <line class="ln soft" x1="10" y1="532" x2="990" y2="532"/>
+            <text class="ms" x="10" y="554">VIEW</text>
+            <line class="ln" x1="80" y1="568" x2="248" y2="568" marker-end="url(#a2)"/>
+            <text class="lbl" x="88" y="562">GET /api/graph/flow?id=…</text>
+            <line class="ln neo" x1="250" y1="590" x2="918" y2="590" marker-end="url(#a2neo)"/>
+            <text class="lbl" x="440" y="584">GraphViews: Cypher, then summarized into view JSON</text>
+            <line class="ln" x1="248" y1="612" x2="82" y2="612" marker-end="url(#a2)"/>
+            <text class="lbl" x="96" y="606">nodes, edges, groups</text>
+          </svg>
+        </div>
+        <figcaption><b>The worker owns the RUN band alone.</b> Stage rows are committed one at a time, so the Jobs page shows progress mid-run. If a stage raises, its row is marked failed with the error, the job is marked failed, and the clone is deleted either way. A dry run still writes the graph: the only thing "dry" skips is LLM text (D26).</figcaption>
+      </figure>
+    </section>
+
+    <!-- 5 -->
+    <section id="stages">
+      <h2><span class="num">05</span>The seven stages</h2>
+      <p class="lede">The worker's whole job is this list, in this order. Each stage is a function in <code>ingestion/pipeline.py</code> that returns its metrics.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Stage</th><th>Does</th><th>Hands on</th></tr></thead>
+          <tbody>
+            <tr><td><code>clone</code></td><td>Shallow clone of the default branch; records the commit SHA</td><td>the workspace folder</td></tr>
+            <tr><td><code>deps</code></td><td>Skipped: dependency JARs are only for Java</td><td>nothing</td></tr>
+            <tr><td><code>parse</code></td><td>Picks the rule packs that apply, indexes every Python file, runs every rule on every file</td><td>the engine, holding the resolver and the raw facts</td></tr>
+            <tr><td><code>resolve</code></td><td>Joins clues across files: URL prefix chains, entity → table, SDK clients, partial references; writes the facts JSON</td><td>completed facts</td></tr>
+            <tr><td><code>flows</code></td><td>Finds modules and applications, builds the call graph, one Flow per entry point, rolls effects up onto flows</td><td>the graph plan</td></tr>
+            <tr><td><code>write</code></td><td>MERGE the plan into Neo4j by stable ID, then delete what earlier runs of this repository left</td><td>the graph</td></tr>
+            <tr><td><code>cards</code></td><td>Skipped: LLM purposes and narratives aren't built</td><td>nothing</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>Where the time goes</h3>
+      <p>Seconds per stage in job 1, Steno ingesting itself (255 files, 55 Python modules, 25 flows):</p>
+      <figure>
+        <div class="bars" role="img" aria-label="Seconds per stage in job 1: clone 0.50, deps skipped, parse 2.46, resolve 0.01, flows 8.48, write 4.60, cards skipped. Flows takes the longest.">
+          <div class="row" title="clone: 0.501 s"><span class="name">clone</span><span class="track"><span class="fill" style="display:block;width:5.9%"></span></span><span class="val">0.50 s</span></div>
+          <div class="row" title="deps: skipped"><span class="name">deps</span><span class="track"><span class="fill skip" style="display:block"></span></span><span class="val">skip</span></div>
+          <div class="row" title="parse: 2.461 s"><span class="name">parse</span><span class="track"><span class="fill" style="display:block;width:29%"></span></span><span class="val">2.46 s</span></div>
+          <div class="row" title="resolve: 0.012 s"><span class="name">resolve</span><span class="track"><span class="fill" style="display:block;width:0.2%"></span></span><span class="val">0.01 s</span></div>
+          <div class="row" title="flows: 8.477 s"><span class="name">flows</span><span class="track"><span class="fill" style="display:block;width:100%"></span></span><span class="val">8.48 s</span></div>
+          <div class="row" title="write: 4.596 s"><span class="name">write</span><span class="track"><span class="fill" style="display:block;width:54.2%"></span></span><span class="val">4.60 s</span></div>
+          <div class="row" title="cards: skipped"><span class="name">cards</span><span class="track"><span class="fill skip" style="display:block"></span></span><span class="val">skip</span></div>
+        </div>
+        <figcaption><b>Flows is the slow stage</b>, because it asks the resolver for every call in every function, not only the reachable ones. On a clean clone of Contextualized (112 modules, 486 functions) the same stages took parse 4.8 s, resolve 3.4 s, flows 8.5 s.</figcaption>
+      </figure>
+      <p>The internals of parse, resolve, flows and write are on the <a href="ingestion.html">Ingestion Internals</a> page.</p>
+    </section>
+
+    <!-- 6 -->
+    <section id="read">
+      <h2><span class="num">06</span>Reading the graph back</h2>
+      <p class="lede">The Visualize tab never shows Neo4j directly. Every screen is a view computed by <code>GraphViews</code> and laid out in the browser.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Endpoint</th><th>Shows</th><th>How it's computed</th></tr></thead>
+          <tbody>
+            <tr><td><code>/graph/overview</code>, <code>/graph/space</code></td><td>One level of the containment tree and the links between its children</td><td>Loads the whole containment tree and every effect edge, then rolls each deep node up to the child of this level that contains it</td></tr>
+            <tr><td><code>/graph/application</code></td><td>An application's interfaces, flows, tables, outbound targets (or, with <code>layer=code</code>, its modules and files)</td><td>Queries around one Application node; groups endpoints by resource such as <code>/api/jobs</code></td></tr>
+            <tr><td><code>/graph/flow</code></td><td>A flow as steps, in the order they run, with what each step reads and writes</td><td>Re-walks <code>INVOKES</code> from the entry function (up to 12 hops), sorts calls by <code>seq</code>, hides non-significant helpers but follows their calls</td></tr>
+            <tr><td><code>/graph/node</code></td><td>One node's properties, provenance, and a link to the source line at the ingested commit</td><td>One node plus its edges; the link is built from the repository's clone URL</td></tr>
+            <tr><td><code>/graph/search</code></td><td>Name matches</td><td>The <code>searchable_text</code> full-text index</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>So a flow on screen is <em>two</em> computations: the builder decided which functions belong to a flow (and stored a <code>functions</code> count on it), and the flow view walks the call graph again to draw it. Steps aren't stored as <code>Step</code> nodes yet; the view derives them from <code>INVOKES</code> every time.</p>
+    </section>
+
+    <!-- 7 -->
+    <section id="debug">
+      <h2><span class="num">07</span>When the graph looks wrong</h2>
+      <p class="lede">Something odd on screen came from one of six places. Walk down the list and stop at the first one where it's already wrong.</p>
+      <ol class="ladder">
+        <li><b>Source</b><span>Is it really in the code at that commit?</span><code>/graph/node</code> source link</li>
+        <li><b>Facts</b><span>Did a rule match, or get dropped, and why?</span><code>job-N-facts.json</code></li>
+        <li><b>Stage counts</b><span>Did the numbers jump between parse, resolve, flows, write?</span><code>ingestion_stage.metrics</code></li>
+        <li><b>Graph</b><span>Is the node or edge in Neo4j, with the right ID?</span>Neo4j Browser :7474</li>
+        <li><b>View JSON</b><span>Did the view roll it up, hide it, or merge it?</span><code>/api/graph/*</code></li>
+        <li><b>Layout</b><span>Is it in the JSON but drawn badly?</span><code>components/graph/</code></li>
+      </ol>
+      <p>Steps 1–4 are ingestion problems. Steps 5–6 are visualization problems. The facts file is the most useful single artifact: every node, edge, clue and entry point with the rule and line that produced it, plus every match that was dropped and the reason. You can produce it without a database:</p>
+<pre>cd backend
+uv run steno extract ~/projects/contextualized --json out.json   <span class="c"># parse + resolve only</span></pre>
+      <div class="callout">
+        <h4>Run <code>extract</code> on a clean clone</h4>
+        <p>File discovery walks every directory and filters afterwards, once per rule. On a working copy with <code>node_modules</code> and <code>.venv</code> (59,000 files for Contextualized) <code>extract</code> took 3.5 minutes; on a fresh <code>git clone</code> of the same commit, about 8 seconds. The worker always uses a fresh clone, so jobs aren't affected.</p>
+      </div>
+    </section>
+
+    <!-- 8 -->
+    <section id="status">
+      <h2><span class="num">08</span>Built and not built</h2>
+      <p class="lede">The parts of the design that the running system doesn't do yet, so missing things in the graph aren't mistaken for bugs.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Design piece</th><th>Today</th><th>What you'll see</th></tr></thead>
+          <tbody>
+            <tr><td>Step nodes (D31 L2)</td><td><span class="tag no">not built</span></td><td>Flows have <code>ENTRY</code> into a Function; steps are derived by the flow view</td></tr>
+            <tr><td>Cards, flow purposes and narratives</td><td><span class="tag no">not built</span></td><td>No <code>card</code> property; search matches names only</td></tr>
+            <tr><td>Coverage report</td><td><span class="tag no">not built</span></td><td>Dropped matches are only in the facts file</td></tr>
+            <tr><td>Incremental updates, delta</td><td><span class="tag no">not built</span></td><td>Every job is a full re-ingest; <code>fact_change</code> stays empty</td></tr>
+            <tr><td>Config property clues</td><td><span class="tag part">partial</span></td><td>The engine can run config rules, but no pack has one, so no YAML or .env value feeds resolution</td></tr>
+            <tr><td>Java (rules, resolver, deps)</td><td><span class="tag no">not built</span></td><td>Java packs never enable; no Java functions or flows</td></tr>
+            <tr><td>Entry points other than HTTP</td><td><span class="tag part">FastAPI only</span></td><td>Schedules, consumers and CLI commands aren't flows. Steno's own worker loop, for example, isn't a flow</td></tr>
+            <tr><td>Identifying the database</td><td><span class="tag part">placeholder</span></td><td>Every table hangs off one "Every table hangs off one "Relational store (not identified yet)" per spacelt;repoEvery table hangs off one "Relational store (not identified yet)" per spacegt; relational store (not identified yet)" per repository</td></tr>
+            <tr><td>Jev, LLM, MCP tools</td><td><span class="tag no">not built</span></td><td>MCP answers <code>ping</code> only</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,955 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Steno Ingestion Internals</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+/* Steno docs: sticky contents rail on the left, one reading column on the right.
+   Color encodes where something lives: blue Postgres, green Neo4j, amber in memory, slate code/disk. */
+:root {
+  --bg: #f1f3f2;
+  --surface: #ffffff;
+  --surface-2: #f7f8f7;
+  --ink: #17201c;
+  --muted: #5a6661;
+  --line: #d3d9d6;
+  --line-strong: #9aa6a0;
+  --pg: #2b5e8f;
+  --pg-soft: #e5eef7;
+  --neo: #157560;
+  --neo-soft: #e2f2ec;
+  --mem: #9c6610;
+  --mem-soft: #f6eedd;
+  --code: #4f5b75;
+  --code-soft: #e9ecf3;
+  --warn: #a3402a;
+  --warn-soft: #f8e7e2;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101412; --surface: #171c1a; --surface-2: #1c2220; --ink: #e1e7e4; --muted: #97a39e;
+    --line: #2c3532; --line-strong: #56625d; --pg: #82b2e2; --pg-soft: #1a2633; --neo: #52c4a2;
+    --neo-soft: #14281f; --mem: #e2ab4f; --mem-soft: #2b2314; --code: #a9b4d0; --code-soft: #1f2330;
+    --warn: #ec8c74; --warn-soft: #2e1a15;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #101412; --surface: #171c1a; --surface-2: #1c2220; --ink: #e1e7e4; --muted: #97a39e;
+  --line: #2c3532; --line-strong: #56625d; --pg: #82b2e2; --pg-soft: #1a2633; --neo: #52c4a2;
+  --neo-soft: #14281f; --mem: #e2ab4f; --mem-soft: #2b2314; --code: #a9b4d0; --code-soft: #1f2330;
+  --warn: #ec8c74; --warn-soft: #2e1a15;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15.5px/1.6 var(--sans); -webkit-font-smoothing: antialiased; }
+.wrap { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; max-width: 1240px; margin: 0 auto; padding-inline: 24px; padding-block: 40px 96px; }
+nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; font-size: 13.5px; max-height: calc(100vh - 48px); overflow-y: auto; }
+.toc .brand { font-family: var(--display); font-weight: 700; font-size: 20px; letter-spacing: -0.01em; }
+.toc .brand-sub { color: var(--muted); font-size: 12.5px; margin-bottom: 20px; }
+.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; counter-reset: toc; }
+.toc li { counter-increment: toc; }
+.toc a { display: grid; grid-template-columns: 22px 1fr; padding: 5px 8px; border-radius: 6px; color: var(--muted); text-decoration: none; }
+.toc a::before { content: counter(toc); font-family: var(--mono); font-size: 11.5px; padding-top: 2px; }
+.toc a:hover, .toc a:focus-visible { background: var(--surface); color: var(--ink); outline: none; }
+.toc .legend { margin-top: 24px; display: grid; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.toc .sibling { margin-top: 24px; font-size: 13px; border-top: 1px solid var(--line); padding-top: 14px; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 8px; vertical-align: -1px; }
+main { min-width: 0; }
+header.intro { max-width: 70ch; margin-bottom: 56px; }
+.eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--neo); }
+h1 { font-family: var(--display); font-weight: 700; font-size: clamp(34px, 5vw, 52px); line-height: 1.05; letter-spacing: -0.025em; margin: 10px 0 16px; text-wrap: balance; }
+header.intro p { font-size: 17px; color: var(--muted); margin: 0 0 10px; }
+section { margin-top: 72px; scroll-margin-top: 24px; }
+h2 { font-family: var(--display); font-weight: 700; font-size: 30px; letter-spacing: -0.015em; line-height: 1.15; margin: 0 0 6px; text-wrap: balance; display: flex; gap: 14px; align-items: baseline; }
+h2 .num { font-family: var(--mono); font-size: 14px; font-weight: 500; color: var(--neo); }
+h3 { font-family: var(--display); font-weight: 600; font-size: 20px; margin: 36px 0 8px; letter-spacing: -0.01em; text-wrap: balance; }
+.lede { color: var(--muted); font-size: 16.5px; max-width: 68ch; margin: 0 0 24px; }
+p, li { max-width: 70ch; }
+p { margin: 0 0 14px; }
+code, .mono { font-family: var(--mono); font-size: 0.88em; }
+:not(pre) > code { background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; overflow-wrap: anywhere; }
+a { color: var(--pg); }
+a:focus-visible { outline: 2px solid var(--pg); outline-offset: 2px; }
+strong { font-weight: 600; }
+figure { margin: 24px 0 28px; }
+.diagram { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 20px; color: var(--ink); }
+.diagram svg { display: block; width: 100%; height: auto; min-width: 760px; }
+figcaption { font-size: 13.5px; color: var(--muted); margin-top: 10px; max-width: 75ch; }
+figcaption b { color: var(--ink); font-weight: 600; }
+svg text { fill: currentColor; font-family: var(--sans); font-size: 12.5px; }
+svg .t { font-weight: 600; font-size: 13px; }
+svg .s { fill: var(--muted); font-size: 11.5px; }
+svg .m { font-family: var(--mono); font-size: 11.5px; }
+svg .ms { font-family: var(--mono); font-size: 11px; fill: var(--muted); }
+svg .lbl { font-size: 11.5px; fill: var(--muted); }
+svg .box { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1.2; }
+svg .box.pg { fill: var(--pg-soft); stroke: var(--pg); }
+svg .box.neo { fill: var(--neo-soft); stroke: var(--neo); }
+svg .box.mem { fill: var(--mem-soft); stroke: var(--mem); }
+svg .box.code { fill: var(--code-soft); stroke: var(--code); }
+svg .box.off { fill: var(--surface-2); stroke: var(--line-strong); stroke-dasharray: 4 3; }
+svg .box.warn { fill: var(--warn-soft); stroke: var(--warn); }
+svg .bar { stroke: none; }
+svg .bar.mem { fill: var(--mem); }
+svg .bar.code { fill: var(--code); }
+svg .bar.neo { fill: var(--neo); }
+svg .bar.pg { fill: var(--pg); }
+svg .panel { fill: var(--surface-2); stroke: var(--line); stroke-width: 1; }
+svg .ln { stroke: var(--ink); stroke-width: 1.3; fill: none; }
+svg .ln.soft { stroke: var(--line-strong); }
+svg .ln.dash { stroke-dasharray: 5 4; }
+svg .ln.neo { stroke: var(--neo); stroke-width: 1.6; }
+svg .ln.pg { stroke: var(--pg); stroke-width: 1.6; }
+svg .ln.mem { stroke: var(--mem); stroke-width: 1.6; }
+svg .ln.code { stroke: var(--code); stroke-width: 1.4; }
+svg .ln.warn { stroke: var(--warn); stroke-width: 1.4; }
+svg .head { fill: var(--ink); }
+svg .head.neo { fill: var(--neo); }
+svg .head.pg { fill: var(--pg); }
+svg .head.mem { fill: var(--mem); }
+svg .head.code { fill: var(--code); }
+svg .head.warn { fill: var(--warn); }
+svg .pgt { fill: var(--pg); font-weight: 600; }
+svg .neot { fill: var(--neo); font-weight: 600; }
+svg .memt { fill: var(--mem); font-weight: 600; }
+svg .codet { fill: var(--code); font-weight: 600; }
+svg .warnt { fill: var(--warn); font-weight: 600; }
+.table-wrap { overflow-x: auto; margin: 16px 0 24px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+th { font-weight: 600; font-size: 12.5px; color: var(--muted); background: var(--surface-2); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 600; }
+.tag { font-family: var(--mono); font-size: 11.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; font-weight: 400; }
+.tag.yes { color: var(--neo); border-color: var(--neo); }
+.tag.part { color: var(--mem); border-color: var(--mem); }
+.tag.no { color: var(--muted); border-style: dashed; }
+.tag.warn { color: var(--warn); border-color: var(--warn); }
+pre { font-family: var(--mono); font-size: 13px; line-height: 1.55; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; overflow-x: auto; margin: 16px 0 20px; }
+pre .c { color: var(--muted); }
+pre .cap { background: var(--mem-soft); outline: 1px solid var(--mem); border-radius: 3px; }
+pre .k-match { color: var(--code); font-weight: 500; }
+pre .k-where { color: var(--mem); font-weight: 500; }
+pre .k-emit { color: var(--neo); font-weight: 500; }
+.callout { border: 1px solid var(--line); border-left: 3px solid var(--mem); background: var(--surface); border-radius: 8px; padding: 14px 18px; margin: 20px 0; max-width: 78ch; }
+.callout.warn { border-left-color: var(--warn); }
+.callout h4 { margin: 0 0 6px; font-size: 14.5px; font-weight: 600; }
+.callout p:last-child, .callout ul:last-child, .callout ol:last-child { margin-bottom: 0; }
+.callout ol, .callout ul { padding-left: 20px; margin: 6px 0 0; }
+.steps { counter-reset: step; list-style: none; padding: 0; margin: 16px 0 24px; display: grid; gap: 8px; max-width: 78ch; }
+.steps li { counter-increment: step; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; max-width: none; }
+.steps li::before { content: counter(step); font-family: var(--mono); font-size: 12px; color: var(--mem); padding-top: 3px; }
+.stage { font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; margin-right: 6px; border: 1px solid var(--line-strong); color: var(--muted); }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 16px 0 24px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 16px 0 24px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.card h4 { margin: 0 0 4px; font-size: 14.5px; }
+.card .kind { font-family: var(--mono); font-size: 11.5px; color: var(--muted); display: block; margin-bottom: 8px; }
+.card p { font-size: 14px; color: var(--muted); margin: 0 0 8px; }
+.card p:last-child { margin-bottom: 0; }
+.card .where { font-family: var(--mono); font-size: 12px; color: var(--ink); display: block; margin-top: 6px; overflow-wrap: anywhere; }
+.card.code { border-top: 3px solid var(--code); }
+.card.mem { border-top: 3px solid var(--mem); }
+.card.neo { border-top: 3px solid var(--neo); }
+/* who-answers matrix */
+.matrix td, .matrix th { text-align: center; vertical-align: middle; }
+.matrix td:first-child, .matrix th:first-child { text-align: left; font-weight: 400; }
+.dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: var(--mem); }
+.dot.ask { background: transparent; border: 2px solid var(--line-strong); width: 10px; height: 10px; }
+/* resolver questions */
+.q { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; margin: 14px 0; }
+.q h4 { font-family: var(--mono); font-size: 15px; font-weight: 500; margin: 0 0 2px; color: var(--neo); }
+.q .sig { font-size: 13.5px; color: var(--muted); margin: 0 0 10px; }
+.q .rows { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px 16px; font-size: 14.5px; }
+.q .rows > div:nth-child(odd) { font-size: 11.5px; font-family: var(--mono); color: var(--muted); padding-top: 3px; letter-spacing: 0.03em; text-transform: uppercase; }
+.q .rows p { margin: 0; }
+.qa { font-family: var(--mono); font-size: 12.5px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 3px; overflow-x: auto; min-width: 0; }
+.qa .ask { white-space: pre; }
+.qa .ans { color: var(--neo); white-space: pre; }
+.qa .ans.none { color: var(--warn); }
+.qa .why { color: var(--muted); font-family: var(--sans); font-size: 12.5px; margin-bottom: 4px; }
+/* findings */
+.finding { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; margin: 12px 0; display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 4px 16px; }
+.finding .sev { padding-top: 2px; }
+.finding h4 { margin: 0 0 4px; font-size: 15px; }
+.finding p { margin: 0 0 6px; font-size: 14.5px; }
+.finding p:last-child { margin-bottom: 0; }
+.finding .where { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: 1fr; gap: 24px; padding-inline: 16px; }
+  nav.toc { position: static; max-height: none; }
+  .toc ol { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+  .grid2, .grid3 { grid-template-columns: 1fr; }
+  .q .rows { grid-template-columns: 1fr; }
+  .finding { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav class="toc" aria-label="Contents">
+    <div class="brand">Ingestion Internals</div>
+    <div class="brand-sub">From a clone to a graph, one stage at a time</div>
+    <ol>
+      <li><a href="#cast">Who does what</a></li>
+      <li><a href="#order">The stages, in order</a></li>
+      <li><a href="#packs">Which packs run</a></li>
+      <li><a href="#astgrep">What ast-grep sees</a></li>
+      <li><a href="#rule">Anatomy of a rule</a></li>
+      <li><a href="#match">Life of one match</a></li>
+      <li><a href="#versus">Rules, resolver, clue resolvers</a></li>
+      <li><a href="#resolver">The resolver's questions</a></li>
+      <li><a href="#resolve">The resolve stage</a></li>
+      <li><a href="#flows">The flows stage</a></li>
+      <li><a href="#write">The write stage</a></li>
+      <li><a href="#trace">One endpoint, end to end</a></li>
+      <li><a href="#noticed">What I noticed</a></li>
+    </ol>
+    <div class="legend" aria-label="Color key">
+      <div><span class="swatch" style="background:var(--code)"></span>YAML and files on disk</div>
+      <div><span class="swatch" style="background:var(--mem)"></span>In memory, during a job</div>
+      <div><span class="swatch" style="background:var(--neo)"></span>Neo4j · a resolved answer</div>
+      <div><span class="swatch" style="background:var(--warn)"></span>Unknown or dropped</div>
+    </div>
+    <div class="sibling">Before this: <a href="architecture.html">Steno System Map</a>, the processes and stores.</div>
+  </nav>
+
+  <main>
+    <header class="intro">
+      <div class="eyebrow">Steno · ingestion · as built on main, October 2026</div>
+      <h1>How a repository becomes a graph</h1>
+      <p>This page follows one ingestion job through every stage, and separates the parts that are easy to blur together: ast-grep, rules, rule packs, the extractor engine, the symbol resolver, and the clue resolvers.</p>
+      <p>Every example is real output from running Steno on <a href="https://github.com/KBavis/contextualized">Contextualized</a> at commit <code>ac93a3b</code>: 112 Python modules, 486 functions, 9 rule packs, 33 endpoints, 33 flows.</p>
+    </header>
+
+    <!-- 1 -->
+    <section id="cast">
+      <h2><span class="num">01</span>Who does what</h2>
+      <p class="lede">Eight parts. The first three are data you write; the rest are code that runs.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Part</th><th>Its one job</th><th>Think of it as</th><th>Code</th></tr></thead>
+          <tbody>
+            <tr><td>Rule pack</td><td>A folder of rules for one library, plus <code>enabled_when</code>: which repositories it applies to</td><td>A phrasebook for one dialect</td><td><code>rule-packs/python/steno-pack-*/</code></td></tr>
+            <tr><td>Rule</td><td>One code shape and what it means: <code>match</code>, optional <code>where</code>, <code>emit</code></td><td>One phrasebook entry</td><td><code>rules/&lt;id&gt;.yaml</code></td></tr>
+            <tr><td>Test case</td><td>A trimmed copy of real code and the facts it must produce</td><td>The entry's worked example</td><td><code>tests/&lt;rule&gt;/&lt;case&gt;/</code></td></tr>
+            <tr><td>ast-grep</td><td>Finds code with a given shape in a syntax tree, and captures the pieces you named</td><td>Ctrl+F that understands code structure</td><td><code>ast_grep_py</code> (a library)</td></tr>
+            <tr><td>Extractor engine</td><td>Runs every enabled rule on every file, asks the resolver about each match, records facts</td><td>The clerk reading every page with the phrasebook</td><td><code>extractors/engine.py</code></td></tr>
+            <tr><td>Symbol resolver</td><td>Knows what every name means and what type every value has, by reading imports, annotations and assignments</td><td>The directory of who's who</td><td><code>resolvers/python.py</code></td></tr>
+            <tr><td>Clue resolvers</td><td>Join facts that were found in different files: URL prefixes, entity tables, SDK clients</td><td>Pinning together index cards that belong together</td><td><code>extractors/resolve.py</code></td></tr>
+            <tr><td>Graph builder, writer</td><td>Turn facts and the call graph into nodes and edges with stable IDs, then save them in Neo4j</td><td>Filing the cards into the archive</td><td><code>graph/build.py</code>, <code>graph/writer.py</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout">
+        <h4>Three different things are called "resolver"</h4>
+        <ol>
+          <li><strong>The symbol resolver</strong> (<code>PythonResolver</code>). One per language. Answers questions about names, types and values. Built once at the start of parse and asked questions until flows ends.</li>
+          <li><strong>The clue resolvers</strong> (<code>resolve.py</code>, the <em>resolve</em> stage). One per clue type, the same for every language. They join facts; for the hard parts they ask the symbol resolver.</li>
+          <li><strong>The "Resolver" box</strong> in DESIGN_DOC §9 and ingestion.md §6: config placeholders, DI, stubs, internal vs vendor hosts. Mostly not built. The pieces that exist live inside the other two and the graph builder.</li>
+        </ol>
+        <p>On this page, "the resolver" always means the first one.</p>
+      </div>
+      <p>"Extractor" is the umbrella word for rules plus the engine that runs them. The symbol resolver isn't part of the extractor: it's a service the engine, the clue resolvers and the graph builder all ask.</p>
+    </section>
+
+    <!-- 2 -->
+    <section id="order">
+      <h2><span class="num">02</span>The stages, in order</h2>
+      <p class="lede">Seven stages run one after another. What makes them fit together is what each one leaves in memory for the next.</p>
+      <figure>
+        <div class="diagram">
+          <svg viewBox="0 0 1000 380" role="img" aria-label="Seven stages left to right: clone, deps (skipped), parse, resolve, flows, write, cards (skipped). Below, how long each in-memory object lives: the workspace clone lives from clone through cards; the resolver index and the extraction of facts live from parse through flows; the structure lives in flows; the graph plan lives from flows through write. Outputs: the facts JSON is written at the end of resolve, Neo4j is written in write, and every stage writes a row to Postgres.">
+            <!-- stage heads: x = 20 + i*140, w = 124 -->
+            <rect class="box" x="20" y="20" width="124" height="46" rx="7"/><text class="t" x="82" y="40" text-anchor="middle">clone</text><text class="s" x="82" y="56" text-anchor="middle">git clone</text>
+            <rect class="box off" x="160" y="20" width="124" height="46" rx="7"/><text class="t" x="222" y="40" text-anchor="middle">deps</text><text class="s" x="222" y="56" text-anchor="middle">skipped (Java)</text>
+            <rect class="box mem" x="300" y="20" width="124" height="46" rx="7"/><text class="t" x="362" y="40" text-anchor="middle">parse</text><text class="s" x="362" y="56" text-anchor="middle">rules × files</text>
+            <rect class="box mem" x="440" y="20" width="124" height="46" rx="7"/><text class="t" x="502" y="40" text-anchor="middle">resolve</text><text class="s" x="502" y="56" text-anchor="middle">join clues</text>
+            <rect class="box mem" x="580" y="20" width="124" height="46" rx="7"/><text class="t" x="642" y="40" text-anchor="middle">flows</text><text class="s" x="642" y="56" text-anchor="middle">call graph, plan</text>
+            <rect class="box neo" x="720" y="20" width="124" height="46" rx="7"/><text class="t" x="782" y="40" text-anchor="middle">write</text><text class="s" x="782" y="56" text-anchor="middle">MERGE</text>
+            <rect class="box off" x="860" y="20" width="124" height="46" rx="7"/><text class="t" x="922" y="40" text-anchor="middle">cards</text><text class="s" x="922" y="56" text-anchor="middle">skipped (LLM)</text>
+
+            <text class="ms" x="20" y="98">LIVES IN MEMORY OR ON DISK</text>
+            <!-- lifetimes -->
+            <rect class="bar code" x="20" y="108" width="964" height="10" rx="5"/>
+            <text class="m" x="20" y="134">workspace clone  /tmp/steno-workspaces/job-N/  (deleted when the job ends)</text>
+
+            <rect class="bar mem" x="300" y="150" width="404" height="10" rx="5"/>
+            <text class="m" x="300" y="176">resolver index  (PythonResolver)</text>
+
+            <rect class="bar mem" x="300" y="192" width="404" height="10" rx="5"/>
+            <text class="m" x="300" y="218">Extraction: nodes · edges · clues · entry points · dropped</text>
+            <text class="s" x="306" y="234">filled</text>
+            <text class="s" x="446" y="234">completed</text>
+            <text class="s" x="586" y="234">read</text>
+
+            <rect class="bar mem" x="580" y="250" width="124" height="10" rx="5"/>
+            <text class="m" x="580" y="276">Structure (modules)</text>
+
+            <rect class="bar mem" x="580" y="292" width="264" height="10" rx="5"/>
+            <text class="m" x="580" y="318">GraphPlan (nodes, edges, IDs)</text>
+
+            <line class="ln soft" x1="20" y1="334" x2="984" y2="334"/>
+            <text class="ms" x="20" y="352">WRITES</text>
+            <rect class="box code" x="440" y="340" width="124" height="30" rx="6"/><text class="m" x="502" y="360" text-anchor="middle">facts JSON</text>
+            <rect class="box neo" x="720" y="340" width="124" height="30" rx="6"/><text class="m" x="782" y="360" text-anchor="middle">Neo4j</text>
+            <text class="lbl" x="90" y="360">every stage → one ingestion_stage row in Postgres</text>
+          </svg>
+        </div>
+        <figcaption><b>The resolver and the facts are built once and shared.</b> Parse builds both; resolve completes the facts; flows reads the facts and asks the resolver for the call graph. Nothing is re-read from disk after parse except to build the structure.</figcaption>
+      </figure>
+      <div class="callout">
+        <h4>Why the docs say "pass 3" before "pass 2"</h4>
+        <p>The design numbers the passes by what they are: 1 per file, 2 whole application (call graph and flows), 3 resolve, 4 write. The code runs them in the order they need each other: parse (pass 1), resolve (pass 3), flows (pass 2), write (pass 4). Flows must run after resolve because it needs completed facts, such as an endpoint's full path, to name each flow.</p>
+      </div>
+    </section>
+
+    <!-- 3 -->
+    <section id="packs">
+      <h2><span class="num">03</span>Which packs run</h2>
+      <p class="lede">The first thing parse does is decide which rule packs apply. Packs are never configured per repository; each pack says when it applies, and every job checks again.</p>
+<pre><span class="c"># rule-packs/python/steno-pack-httpx/pack.yaml</span>
+name: steno-pack-httpx
+language: python
+enabled_when:              <span class="c"># any one condition is enough</span>
+  dependencies: [httpx]    <span class="c"># named in a requirements*.txt or pyproject.toml</span>
+  imports: [httpx]         <span class="c"># or imported by any .py file</span>
+  <span class="c"># always: true           # for standard-library packs</span></pre>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Pack</th><th>Rules</th><th>On for Contextualized?</th><th>Because</th></tr></thead>
+          <tbody>
+            <tr><td>steno-pack-fastapi</td><td>4</td><td><span class="tag yes">on</span></td><td>dependency <code>fastapi</code>, and imported</td></tr>
+            <tr><td>steno-pack-sqlalchemy</td><td>7</td><td><span class="tag yes">on</span></td><td>dependency <code>sqlalchemy</code>, and imported</td></tr>
+            <tr><td>steno-pack-llama-index</td><td>4</td><td><span class="tag yes">on</span></td><td>dependency <code>llama-index-core</code>, and imported</td></tr>
+            <tr><td>steno-pack-llama-index-chroma</td><td>2</td><td><span class="tag yes">on</span></td><td>dependency <code>llama-index-vector-stores-chroma</code>, and imported</td></tr>
+            <tr><td>steno-pack-chromadb</td><td>1</td><td><span class="tag yes">on</span></td><td>dependency <code>chromadb</code>, and imported</td></tr>
+            <tr><td>steno-pack-pydantic-settings</td><td>1</td><td><span class="tag yes">on</span></td><td>dependency <code>pydantic-settings</code>, and imported</td></tr>
+            <tr><td>steno-pack-httpx</td><td>1</td><td><span class="tag yes">on</span></td><td>imported only: not in <code>requirements.txt</code></td></tr>
+            <tr><td>steno-pack-requests</td><td>1</td><td><span class="tag yes">on</span></td><td>imported only: not in <code>requirements.txt</code></td></tr>
+            <tr><td>steno-pack-python-stdlib</td><td>1</td><td><span class="tag yes">on</span></td><td><code>always</code>, and the repository has <code>.py</code> files</td></tr>
+            <tr><td>steno-pack-spring-web, -spring-kafka, -jpa</td><td>0</td><td><span class="tag no">off</span></td><td>No rules yet, and only Python manifests are read, so a Java dependency can never switch them on</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The import check is why <code>httpx</code> and <code>requests</code> are covered: Contextualized uses both without declaring them. A pack's language also decides which files its code rules see: a <code>python</code> pack runs on <code>.py</code> files, skipping tests (<code>tests/</code>, <code>test_*.py</code>, <code>conftest.py</code>).</p>
+    </section>
+
+    <!-- 4 -->
+    <section id="astgrep">
+      <h2><span class="num">04</span>What ast-grep sees</h2>
+      <p class="lede">ast-grep parses a file into a syntax tree and finds the subtrees that fit a pattern. It knows shape. It knows nothing about meaning.</p>
+      <p>The pattern <code>$TASKS.add_task($FN $$$)</code> means: an attribute call named <code>add_task</code> on anything (call it TASKS), whose first argument is anything (call it FN), followed by any other arguments. On <code>apps/backend/app/api/routers/job.py</code> it finds this, with the captures highlighted:</p>
+<pre><span class="c"># job.py, line 28</span>
+<span class="cap">background_tasks</span>.add_task(<span class="cap">svc.run_project_jobs</span>, project_id)
+<span class="c">#      $TASKS                     $FN                   $$$</span></pre>
+      <div class="grid2">
+        <div class="card code">
+          <h4>What ast-grep hands over</h4>
+          <p>The match's file and line, and each capture as a piece of source text: <code>TASKS = "background_tasks"</code>, <code>FN = "svc.run_project_jobs"</code>.</p>
+        </div>
+        <div class="card code">
+          <h4>What it can't tell you</h4>
+          <p>Whether <code>background_tasks</code> is FastAPI's <code>BackgroundTasks</code> or some other object with an <code>add_task</code> method, and which function <code>svc.run_project_jobs</code> is. Those words get their meaning from a parameter annotation and an import elsewhere. That's the resolver's job.</p>
+        </div>
+      </div>
+      <p>Patterns can be broad on purpose. <code>httpx-client-call</code>'s pattern <code>$CLIENT.$VERB($URL $$$)</code> matches 246 places in Contextualized, every <code>.get(…)</code> on a dict included. Only 24 are httpx calls. The rule's <code>where</code> clause, checked by the resolver, throws the other 222 away.</p>
+    </section>
+
+    <!-- 5 -->
+    <section id="rule">
+      <h2><span class="num">05</span>Anatomy of a rule</h2>
+      <p class="lede">Three blocks, each handled by a different part. Reading a rule is knowing who reads which block.</p>
+<pre><span class="c"># rule-packs/python/steno-pack-fastapi/rules/fastapi-endpoint.yaml</span>
+id: fastapi-endpoint
+<span class="k-match">match:                                 # read by ast-grep: the shape</span>
+  rule:
+    kind: decorated_definition
+    has:
+      kind: decorator
+      has:
+        pattern: $ROUTER.$METHOD($PATH $$$)
+  constraints:
+    METHOD: { regex: "^(get|post|put|patch|delete)$" }
+    PATH: { kind: string }
+<span class="k-where">where:                                 # read by the engine, answered by the resolver</span>
+  $ROUTER: { type: [fastapi.APIRouter, fastapi.FastAPI] }
+<span class="k-emit">emit:                                  # read by the engine: what it means</span>
+  - node: [Interface, HttpEndpoint]
+    as: endpoint
+    method: $METHOD                    <span class="c"># a value → its text ("post", uppercased)</span>
+    path: $PATH                        <span class="c"># a value → value_of → "/projects/{project_id}"</span>
+    prefixed_by: $ROUTER               <span class="c"># a symbol → symbol_of → app.api.routers.job.router</span>
+  - edge: EXPOSES
+    from: "@app"                       <span class="c"># an anchor: the application being ingested</span>
+    to: endpoint                       <span class="c"># the node named by `as:` above</span>
+  - entry_point:
+      trigger: endpoint
+      function: "@function"            <span class="c"># an anchor: enclosing() of the match</span></pre>
+      <h3>How the engine reads each field in <code>emit</code></h3>
+      <p>The engine decides by the field's role, not by what you wrote. The same <code>$ROUTER</code> becomes a qualified name in <code>prefixed_by</code> but would become a constant if it sat in <code>path</code>.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>You write</th><th>Where</th><th>The engine turns it into</th><th>By asking</th></tr></thead>
+          <tbody>
+            <tr><td><code>$X</code></td><td>an ordinary property (<code>path</code>, <code>method</code>, <code>url</code>, clue <code>value</code>)</td><td>the constant it holds, or <code>&lt;unresolved&gt;</code>. A method name like the <code>post</code> in <code>router.post</code> stays as text</td><td><code>value_of</code></td></tr>
+            <tr><td><code>$X</code></td><td><code>prefixed_by</code>, clue <code>owner</code> / <code>parent</code> / <code>child</code>, <code>{Function: {symbol: $X}}</code></td><td>a qualified name, the same everywhere the object is used. If it can't be found, the whole emit is <strong>dropped</strong></td><td><code>symbol_of</code></td></tr>
+            <tr><td><code>$X</code></td><td>clue <code>type</code></td><td>the class it names; dropped if it isn't a class</td><td><code>class_of</code></td></tr>
+            <tr><td><code>"@function"</code>, <code>"@class"</code>, <code>"@file"</code></td><td>anywhere</td><td>the function, class or file the match sits in</td><td><code>enclosing</code></td></tr>
+            <tr><td><code>"@app"</code></td><td>edge end</td><td>the application whose module contains the file, decided later in flows</td><td>the graph builder</td></tr>
+            <tr><td><code>{table_of: $X}</code></td><td>edge end</td><td>a placeholder resolved in the resolve stage to the table the entity maps to, or dropped</td><td>clue resolver + <code>class_of</code> / <code>type_of</code></td></tr>
+            <tr><td><code>{http: {method, url}}</code></td><td>edge end</td><td>an outbound target, later an <code>ExternalSystem</code> keyed by the URL's host</td><td><code>value_of</code> for the URL</td></tr>
+            <tr><td><code>{DataStore: {vendor: chroma}}</code></td><td>edge end</td><td>a partial reference, matched in resolve to the app's one node that fits</td><td>clue resolver</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 6 -->
+    <section id="match">
+      <h2><span class="num">06</span>Life of one match</h2>
+      <p class="lede">Inside parse, the engine runs each rule over each file. For every match ast-grep finds, five things happen.</p>
+      <figure>
+        <div class="diagram">
+          <svg viewBox="0 0 1000 300" role="img" aria-label="A match goes through five steps: ast-grep finds it, enclosing sets its scope, captures are parsed into Python expressions, the where check runs, and the emit fields are filled in. The where step and the emit step ask the resolver. A failed where check skips the match silently; an emit field that can't be resolved drops the fact and records the reason. Otherwise the facts go into the Extraction.">
+            <defs>
+              <marker id="m6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker>
+              <marker id="m6w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head warn" d="M0,0 L10,5 L0,10 z"/></marker>
+              <marker id="m6m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head mem" d="M0,0 L10,5 L0,10 z"/></marker>
+            </defs>
+            <!-- steps: x = 10 + i*166, w = 146 -->
+            <rect class="box code" x="10" y="30" width="146" height="66" rx="7"/>
+            <text class="ms" x="22" y="48">1</text><text class="t" x="83" y="62" text-anchor="middle">ast-grep</text><text class="s" x="83" y="80" text-anchor="middle">find_all(match)</text>
+            <rect class="box mem" x="176" y="30" width="146" height="66" rx="7"/>
+            <text class="ms" x="188" y="48">2</text><text class="t" x="249" y="62" text-anchor="middle">Scope</text><text class="s" x="249" y="80" text-anchor="middle">which function?</text>
+            <rect class="box mem" x="342" y="30" width="146" height="66" rx="7"/>
+            <text class="ms" x="354" y="48">3</text><text class="t" x="415" y="62" text-anchor="middle">Captures</text><text class="s" x="415" y="80" text-anchor="middle">text → Python ast</text>
+            <rect class="box mem" x="508" y="30" width="146" height="66" rx="7"/>
+            <text class="ms" x="520" y="48">4</text><text class="t" x="581" y="62" text-anchor="middle">where</text><text class="s" x="581" y="80" text-anchor="middle">right type?</text>
+            <rect class="box mem" x="674" y="30" width="146" height="66" rx="7"/>
+            <text class="ms" x="686" y="48">5</text><text class="t" x="747" y="62" text-anchor="middle">emit</text><text class="s" x="747" y="80" text-anchor="middle">fill every field</text>
+            <rect class="box neo" x="850" y="30" width="140" height="66" rx="7"/>
+            <text class="t neot" x="920" y="58" text-anchor="middle">Extraction</text><text class="s" x="920" y="76" text-anchor="middle">facts, in memory</text>
+
+            <line class="ln" x1="156" y1="63" x2="174" y2="63" marker-end="url(#m6)"/>
+            <line class="ln" x1="322" y1="63" x2="340" y2="63" marker-end="url(#m6)"/>
+            <line class="ln" x1="488" y1="63" x2="506" y2="63" marker-end="url(#m6)"/>
+            <line class="ln" x1="654" y1="63" x2="672" y2="63" marker-end="url(#m6)"/>
+            <line class="ln" x1="820" y1="63" x2="848" y2="63" marker-end="url(#m6)"/>
+
+            <!-- failure exits -->
+            <line class="ln warn" x1="581" y1="96" x2="581" y2="132" marker-end="url(#m6w)"/>
+            <rect class="box warn" x="508" y="134" width="146" height="44" rx="6"/>
+            <text class="t warnt" x="581" y="152" text-anchor="middle">skipped</text>
+            <text class="s" x="581" y="168" text-anchor="middle">not recorded</text>
+            <line class="ln warn" x1="747" y1="96" x2="747" y2="132" marker-end="url(#m6w)"/>
+            <rect class="box warn" x="674" y="134" width="146" height="44" rx="6"/>
+            <text class="t warnt" x="747" y="152" text-anchor="middle">dropped</text>
+            <text class="s" x="747" y="168" text-anchor="middle">recorded with reason</text>
+
+            <!-- resolver -->
+            <rect class="box mem" x="176" y="226" width="644" height="54" rx="8"/>
+            <text class="t memt" x="192" y="248">Symbol resolver</text>
+            <text class="s" x="192" y="266">index built at the start of parse</text>
+            <line class="ln mem" x1="249" y1="224" x2="249" y2="98" marker-end="url(#m6m)"/>
+            <text class="lbl" x="257" y="210">enclosing</text>
+            <line class="ln mem" x1="560" y1="224" x2="560" y2="98" marker-end="url(#m6m)"/>
+            <text class="lbl" x="436" y="210">type_of · class_of</text>
+            <text class="lbl" x="436" y="196">is_subclass</text>
+            <line class="ln mem" x1="770" y1="224" x2="770" y2="98" marker-end="url(#m6m)"/>
+            <text class="lbl" x="778" y="210">symbol_of</text>
+            <text class="lbl" x="778" y="196">value_of</text>
+          </svg>
+        </div>
+        <figcaption><b>The two ways out are different on purpose.</b> A <code>where</code> that fails is an expected non-match (a dict's <code>.get</code>), so nothing is recorded. An emit that can't be completed means the rule <em>did</em> apply but a piece is unknown, so it's kept in <code>dropped</code> with the reason, where the facts JSON shows it.</figcaption>
+      </figure>
+      <h3>The same five steps, on <code>fastapi-background-task</code></h3>
+      <ol class="steps">
+        <li><span><strong>ast-grep</strong> matches <code>job.py</code> line 28, capturing <code>TASKS = background_tasks</code> and <code>FN = svc.run_project_jobs</code>.</span></li>
+        <li><span><strong>Scope.</strong> <code>enclosing(job.py, 28)</code> → function <code>app.api.routers.job.run_project_jobs</code>, no class. The scope is that module plus that function.</span></li>
+        <li><span><strong>Captures.</strong> Each capture's text is parsed by Python's <code>ast</code>: <code>Name("background_tasks")</code>, and <code>Attribute(value=Name("svc"), attr="run_project_jobs")</code>.</span></li>
+        <li><span><strong>where</strong> <code>$TASKS: {type: [fastapi.BackgroundTasks, …]}</code>. <code>type_of(background_tasks)</code> → <code>fastapi.BackgroundTasks</code>, from the parameter annotation through the import. It passes.</span></li>
+        <li><span><strong>emit</strong> an <code>INVOKES</code> edge. <code>from: "@function"</code> → <code>run_project_jobs</code>. <code>to: {Function: {symbol: $FN}}</code> → <code>symbol_of(svc.run_project_jobs)</code>: <code>svc</code> isn't a module or class, so the resolver asks <code>type_of(svc)</code> → <code>app.services.job.JobService</code> and finds the method → <code>app.services.job.JobService.run_project_jobs</code>. Property <code>async: true</code> is a literal.</span></li>
+      </ol>
+      <p>Config rules run before all code rules, so their <code>property</code> clues can feed <code>value_of</code>. No pack ships a config rule today, so that step does nothing yet (see <a href="#noticed">What I noticed</a>).</p>
+    </section>
+
+    <!-- 7 -->
+    <section id="versus">
+      <h2><span class="num">07</span>Rules, resolver, clue resolvers</h2>
+      <p class="lede">They all work on the same code, but each answers a different kind of question. The fastest way to keep them apart is to ask who answers what.</p>
+      <div class="grid3">
+        <div class="card code">
+          <h4>A rule</h4>
+          <span class="kind">YAML · one per framework pattern · you write it</span>
+          <p>Knows that a shape means something: "<code>@router.post(path)</code> on a function is an endpoint and the start of a flow."</p>
+          <p>Doesn't know what any name refers to. It names what it needs (a type, a symbol, a value) and lets the engine ask.</p>
+        </div>
+        <div class="card mem">
+          <h4>The symbol resolver</h4>
+          <span class="kind">Python code · one per language · Steno core</span>
+          <p>Knows what names mean: imports, annotations, assignments, <code>self.x</code>, base classes, call sites.</p>
+          <p>Knows nothing about FastAPI or SQLAlchemy. It answers questions about any code and never decides what a fact is.</p>
+        </div>
+        <div class="card neo">
+          <h4>The clue resolvers</h4>
+          <span class="kind">Python code · one per clue type · Steno core</span>
+          <p>Know how to join facts that no single match could see: a prefix in one file, a mount in another, an endpoint in a third.</p>
+          <p>Language-agnostic: they join on the qualified names the resolver produced.</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="matrix">
+          <thead><tr><th>Question</th><th>ast-grep</th><th>Rule</th><th>Symbol resolver</th><th>Clue resolver</th><th>Graph builder</th></tr></thead>
+          <tbody>
+            <tr><td>Is there code shaped like <code>x.add_task(f, …)</code> here?</td><td><span class="dot" title="answers"></span></td><td><span class="dot ask" title="asks"></span></td><td></td><td></td><td></td></tr>
+            <tr><td>What does that shape mean in graph terms?</td><td></td><td><span class="dot" title="answers"></span></td><td></td><td></td><td></td></tr>
+            <tr><td>Which function is line 28 inside?</td><td></td><td><span class="dot ask" title="asks"></span></td><td><span class="dot" title="answers"></span></td><td></td><td></td></tr>
+            <tr><td>Is <code>background_tasks</code> really a <code>BackgroundTasks</code>?</td><td></td><td><span class="dot ask" title="asks"></span></td><td><span class="dot" title="answers"></span></td><td></td><td></td></tr>
+            <tr><td>Which function is <code>svc.run_project_jobs</code>?</td><td></td><td><span class="dot ask" title="asks"></span></td><td><span class="dot" title="answers"></span></td><td></td><td></td></tr>
+            <tr><td>What string does <code>settings.VECTOR_DB_HOST</code> hold?</td><td></td><td><span class="dot ask" title="asks"></span></td><td><span class="dot" title="answers"></span></td><td></td><td></td></tr>
+            <tr><td>What's this endpoint's full path, prefixes included?</td><td></td><td></td><td></td><td><span class="dot" title="answers"></span></td><td></td></tr>
+            <tr><td>Which table does <code>session.add(job)</code> write to?</td><td></td><td></td><td><span class="dot ask" title="asked"></span></td><td><span class="dot" title="answers"></span></td><td></td></tr>
+            <tr><td>Which method calls on a Chroma collection are reads?</td><td></td><td></td><td><span class="dot ask" title="asked"></span></td><td><span class="dot" title="answers"></span></td><td></td></tr>
+            <tr><td>What does <code>JobService.run_project_jobs</code> call next?</td><td></td><td></td><td><span class="dot" title="answers"></span></td><td></td><td><span class="dot ask" title="asks"></span></td></tr>
+            <tr><td>Which application does this file belong to?</td><td></td><td></td><td></td><td></td><td><span class="dot" title="answers"></span></td></tr>
+            <tr><td>Which tables does a whole flow touch?</td><td></td><td></td><td></td><td></td><td><span class="dot" title="answers"></span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p><span class="dot" style="vertical-align:-1px"></span> answers the question &nbsp; <span class="dot ask" style="vertical-align:-1px"></span> asks it, or is asked as part of the answer</p>
+      <div class="callout">
+        <h4>Why the split matters</h4>
+        <p>Adding a framework means writing rules, never touching the resolver. Adding a language means writing a resolver (Java's will be the JVM helper) and rules, never touching the clue resolvers or the graph. That's how the graph stays language-agnostic.</p>
+      </div>
+    </section>
+
+    <!-- 8 -->
+    <section id="resolver">
+      <h2><span class="num">08</span>The resolver's questions</h2>
+      <p class="lede">At the start of parse the resolver reads every non-test <code>.py</code> file once into an index: modules, their imports, classes, functions, parameters and annotations, and module values kept as unevaluated code. Nothing is resolved up front. Each question is answered when asked, by asking smaller ones.</p>
+      <p>Module names come from source roots: every folder with a <code>pyproject.toml</code>, <code>setup.py</code>, <code>setup.cfg</code> or <code>requirements*.txt</code>. Contextualized's are the repository root and <code>apps/backend</code>, so <code>apps/backend/app/api/routers/job.py</code> is <code>app.api.routers.job</code>, the same name its own imports use. Most questions take an expression and a <strong>scope</strong> (the module and function it appears in), because the same name means different things in different functions. All outputs below are real.</p>
+
+      <div class="q">
+        <h4>enclosing(file, line)</h4>
+        <p class="sig">→ the function and class that contain a line</p>
+        <div class="rows">
+          <div>Asked by</div><p>The engine, once per match. Supplies the scope and the <code>@function</code> / <code>@class</code> anchors.</p>
+          <div>Examples</div>
+          <div class="qa">
+            <span class="ask">enclosing(api/routers/job.py, 16)</span>
+            <span class="ans">→ app.api.routers.job.run_project_jobs, no class</span>
+            <span class="why">Line 16 is the <code>@router.post</code> decorator; a function's span starts at its first decorator.</span>
+            <span class="ask">enclosing(api/routers/job.py, 13)</span>
+            <span class="ans none">→ no function, no class</span>
+            <span class="why"><code>router = APIRouter(prefix="/jobs")</code> is module-level code.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="q">
+        <h4>symbol_of(expr, scope)</h4>
+        <p class="sig">→ the qualified name an expression refers to</p>
+        <div class="rows">
+          <div>Asked by</div><p>The engine for symbol fields; the call graph for every call. Clue labels and stable IDs depend on it.</p>
+          <div>How</div><p>A name: a local or parameter → this module's definitions → imports (through re-exports) → builtins. <code>a.b</code>: through a module, a class, or the type of <code>a</code>.</p>
+          <div>Examples</div>
+          <div class="qa">
+            <span class="ask">symbol_of(job_router)              in app.api.routers</span>
+            <span class="ans">→ app.api.routers.job.router</span>
+            <span class="why">An import alias: <code>from .job import router as job_router</code>.</span>
+            <span class="ask">symbol_of(svc.run_project_jobs)    in job.run_project_jobs</span>
+            <span class="ans">→ app.services.job.JobService.run_project_jobs</span>
+            <span class="ask">symbol_of(project_id)              in job.run_project_jobs</span>
+            <span class="ans">→ app.api.routers.job.run_project_jobs.&lt;locals&gt;.project_id</span>
+            <span class="why">A parameter gets a local name, so it never collides with anything elsewhere.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="q">
+        <h4>type_of(expr, scope)</h4>
+        <p class="sig">→ the type of the value an expression produces, or nothing</p>
+        <div class="rows">
+          <div>Asked by</div><p><code>where: type</code> checks, <code>symbol_of</code> on attributes, <code>table_of</code>, the client resolver.</p>
+          <div>How</div><p><code>self</code> → its class; a parameter → its annotation; <code>x = Cls()</code> → <code>Cls</code>; <code>x = f()</code> → <code>f</code>'s return annotation; <code>with f() as x</code> → what <code>f</code> yields; <code>self.x</code> → how the class set it; a library method → a <code>returns</code> hint from a client clue.</p>
+          <div>Examples</div>
+          <div class="qa">
+            <span class="ask">type_of(svc)        in job.run_project_jobs</span>
+            <span class="ans">→ app.services.job.JobService</span>
+            <span class="ask">type_of(router)     in app.api.routers.job</span>
+            <span class="ans">→ fastapi.APIRouter</span>
+            <span class="ask">type_of(session)    in JobService.create_job</span>
+            <span class="ans">→ sqlalchemy.ext.asyncio.AsyncSession</span>
+            <span class="why">From <code>async with get_async_db_session_context() as session</code>, annotated <code>-&gt; AsyncGenerator[AsyncSession, None]</code>.</span>
+            <span class="ask">type_of(job)        in DiffTaskService (job = await session.get(DiffTask, id))</span>
+            <span class="ans none">→ None</span>
+            <span class="why">The type depends on an argument, which the resolver doesn't follow. A known gap, with real cost (section 13).</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="q">
+        <h4>class_of(expr, scope)</h4>
+        <p class="sig">→ the class an expression names (a class, not an instance)</p>
+        <div class="rows">
+          <div>Asked by</div><p><code>where: class</code> checks on constructors, clue <code>type</code> fields, <code>table_of</code>.</p>
+          <div>Examples</div>
+          <div class="qa">
+            <span class="ask">class_of(JobService)   in job.run_project_jobs</span>
+            <span class="ans">→ app.services.job.JobService</span>
+            <span class="ask">class_of(svc)          in job.run_project_jobs</span>
+            <span class="ans none">→ None</span>
+            <span class="why"><code>svc</code> is an instance. Use <code>type_of</code> for that.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="q">
+        <h4>value_of(expr, scope)</h4>
+        <p class="sig">→ the constant an expression evaluates to, or UNRESOLVED</p>
+        <div class="rows">
+          <div>Asked by</div><p>The engine, for every ordinary value field in an emit.</p>
+          <div>How</div><p>Literals; f-strings and <code>+</code>; a local assigned once; module constants, also through imports; class defaults; <code>os.getenv(key, default)</code>. A function parameter inside a string becomes <code>{name}</code>.</p>
+          <div>Examples</div>
+          <div class="qa">
+            <span class="ask">value_of(os.getenv("OLLAMA_BASE_URL", settings.OLLAMA_LOCAL_HOST_URL) + "/api/tags")</span>
+            <span class="ans">→ "http://localhost:11434/api/tags"</span>
+            <span class="why">No config sets the key, so the default is used: the <code>Settings</code> class declares the attribute with that default.</span>
+            <span class="ask">value_of(detail_url)   in JiraDataProvider.get_linked_pull_requests</span>
+            <span class="ans none">→ UNRESOLVED</span>
+            <span class="why">Built from <code>self.url</code>, which comes from a database row: known only at runtime.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="q">
+        <h4>is_subclass(type, targets)</h4>
+        <p class="sig">→ true if the type is a target or inherits from one</p>
+        <div class="rows">
+          <div>Asked by</div><p>Every <code>where</code> check and the client resolver.</p>
+          <div>Why</div><p>So a rule about a library class also catches the app's own subclass of it. Repository base classes are walked; library bases are compared by name only.</p>
+        </div>
+      </div>
+
+      <div class="q">
+        <h4>invocations(function)</h4>
+        <p class="sig">→ every first-party call in a function, in source order</p>
+        <div class="rows">
+          <div>Asked by</div><p>The graph builder, once for every function in the repository.</p>
+          <div>How</div><p>Walks the body including closures, resolves each call target with <code>symbol_of</code>, keeps calls into repository functions (a class call counts as its <code>__init__</code>), and flags calls inside <code>if</code>/<code>try</code> as conditional and inside loops as in-loop.</p>
+          <div>Examples</div>
+          <div class="qa">
+            <span class="ask">invocations(app.services.job.JobService.run_project_jobs)</span>
+            <span class="ans">→ app.core.relational_db.get_async_db_session_context               line 88
+→ app.services.data_source.DataSourceService.aget_project_data_sources line 91
+→ app.services.job.JobService.run_data_source_job                     line 99</span>
+            <span class="ask">invocations(app.api.routers.job.run_project_jobs)</span>
+            <span class="ans none">→ none</span>
+            <span class="why">The handler passes <code>svc.run_project_jobs</code> to <code>add_task</code>; it never calls it. Only the background-task rule connects them.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 9 -->
+    <section id="resolve">
+      <h2><span class="num">09</span>The resolve stage</h2>
+      <p class="lede">After parse, the Extraction holds facts that are only partly known. Resolve runs six steps over it, always in this order, then writes the facts JSON.</p>
+      <ol class="steps">
+        <li><span><strong>Deduplicate clues.</strong> The same prefix seen twice counts once.</span></li>
+        <li><span><strong>Prefix chains.</strong> For each node with a pending <code>prefixed_by</code>, walk its owner's <code>prefix</code> and <code>mount</code> clues up to the top and prepend them to <code>path</code>.</span></li>
+        <li><span><strong><code>table_of</code>.</strong> Collect every <code>Entity -MAPS_TO-&gt; Table</code> the model rule emitted. For each placeholder, find the entity behind the expression (<code>class_of</code>, else <code>type_of</code>) and swap in its table; if there is none, drop the edge.</span></li>
+        <li><span><strong>Clients.</strong> Register each client clue's <code>returns</code> hints with the resolver, then visit <em>every</em> <code>receiver.method(…)</code> call in the repository: if <code>type_of(receiver)</code> is a subclass of a clue's <code>type</code>, the method becomes <code>CALLS</code> (for an ExternalSystem) or <code>READS_FROM</code>/<code>WRITES_TO</code> per <code>operations</code>.</span></li>
+        <li><span><strong>Partial references.</strong> A reference like <code>{DataStore: {vendor: chroma}}</code> becomes the app's one node that matches; several matches mark the edge <code>ambiguous</code>; none leaves it to become a stub.</span></li>
+        <li><span><strong>Deduplicate edges.</strong> Same type, same ends, same properties: kept once.</span></li>
+      </ol>
+      <h3>A prefix chain, drawn</h3>
+      <figure>
+        <div class="diagram">
+          <svg viewBox="0 0 1000 250" role="img" aria-label="The endpoint POST /projects/{project_id} is prefixed by app.api.routers.job.router, which has prefix /jobs and is mounted in app.api.routers.app_router, which has prefix /api and is mounted in the application created in create_app, which has no prefix. Joined: /api/jobs/projects/{project_id}.">
+            <defs>
+              <marker id="m9" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker>
+            </defs>
+            <rect class="box" x="20" y="40" width="210" height="70" rx="8"/>
+            <text class="ms" x="34" y="60">base.py:60</text>
+            <text class="t" x="34" y="80">create_app.&lt;locals&gt;.app</text>
+            <text class="s" x="34" y="98">no prefix clue</text>
+
+            <rect class="box mem" x="270" y="40" width="210" height="70" rx="8"/>
+            <text class="ms" x="284" y="60">routers/__init__.py:12</text>
+            <text class="t" x="284" y="80">app.api.routers.app_router</text>
+            <text class="m" x="284" y="98">prefix "/api"</text>
+
+            <rect class="box mem" x="520" y="40" width="210" height="70" rx="8"/>
+            <text class="ms" x="534" y="60">routers/job.py:13</text>
+            <text class="t" x="534" y="80">app.api.routers.job.router</text>
+            <text class="m" x="534" y="98">prefix "/jobs"</text>
+
+            <rect class="box" x="770" y="40" width="210" height="70" rx="8"/>
+            <text class="ms" x="784" y="60">routers/job.py:16</text>
+            <text class="t" x="784" y="80">HttpEndpoint POST</text>
+            <text class="m" x="784" y="98">path "/projects/{project_id}"</text>
+
+            <line class="ln" x1="268" y1="75" x2="232" y2="75" marker-end="url(#m9)"/>
+            <text class="lbl" x="250" y="30" text-anchor="middle">mount</text>
+            <line class="ln" x1="518" y1="75" x2="482" y2="75" marker-end="url(#m9)"/>
+            <text class="lbl" x="500" y="30" text-anchor="middle">mount</text>
+            <line class="ln" x1="768" y1="75" x2="732" y2="75" marker-end="url(#m9)"/>
+            <text class="lbl" x="750" y="30" text-anchor="middle">prefixed_by</text>
+
+            <line class="ln soft" x1="125" y1="112" x2="125" y2="164"/>
+            <line class="ln soft" x1="375" y1="112" x2="375" y2="164"/>
+            <line class="ln soft" x1="625" y1="112" x2="625" y2="164"/>
+            <line class="ln soft" x1="875" y1="112" x2="875" y2="164"/>
+            <rect class="box neo" x="20" y="166" width="960" height="54" rx="8"/>
+            <text class="m" x="125" y="198" text-anchor="middle">""</text>
+            <text class="m" x="375" y="198" text-anchor="middle">+ "/api"</text>
+            <text class="m" x="625" y="198" text-anchor="middle">+ "/jobs"</text>
+            <text class="m" x="875" y="198" text-anchor="middle">+ "/projects/{project_id}"</text>
+            <text class="t neot" x="500" y="240" text-anchor="middle">POST /api/jobs/projects/{project_id}</text>
+          </svg>
+        </div>
+        <figcaption><b>Three rules, three files, no rule knows about another.</b> <code>fastapi-router-prefix</code> pinned the two prefixes, <code>fastapi-include-router</code> pinned the two mounts, <code>fastapi-endpoint</code> pinned the endpoint. They line up only because the resolver gave <code>router</code> in <code>job.py</code> and <code>job_router</code> in <code>__init__.py</code> the same name.</figcaption>
+      </figure>
+      <h3>What resolve produced for Contextualized</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Kind</th><th>Count</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>Nodes</td><td>75</td><td>33 HttpEndpoint, 20 Entity, 20 Table, 2 DataStore (the same Chroma store, seen at two constructors; they merge by ID)</td></tr>
+            <tr><td>Edges</td><td>199</td><td>79 READS_FROM, 35 WRITES_TO, 33 EXPOSES, 24 CALLS, 20 MAPS_TO, 8 async INVOKES</td></tr>
+            <tr><td>Clues</td><td>87</td><td>62 property, 9 client, 8 prefix, 8 mount</td></tr>
+            <tr><td>Entry points</td><td>33</td><td>One per endpoint</td></tr>
+            <tr><td>Dropped</td><td>37</td><td>All <code>table_of: not a mapped entity</code>: 24 are <code>", ".join(…)</code> string joins (correct), 12 are real writes the resolver couldn't type (section 13)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 10 -->
+    <section id="flows">
+      <h2><span class="num">10</span>The flows stage</h2>
+      <p class="lede">Facts become a graph plan here. The builder runs five steps, each adding to one in-memory plan keyed by stable ID.</p>
+      <ol class="steps">
+        <li><span><strong>Structure.</strong> Every folder with a build file is a Module. A module containing an entry point is a <code>:Service</code> and gets an Application. Contextualized: <code>.</code>, <code>apps/backend</code> (Service → application <code>contextualized-backend</code>), <code>apps/frontend/app</code>.</span></li>
+        <li><span><strong>Fact nodes.</strong> Each extracted node gets its ID: endpoints and entities under their application, tables under a placeholder relational store for the space, external systems by host (or <code>unresolved</code>).</span></li>
+        <li><span><strong>Fact edges.</strong> Each extracted edge, with <code>@app</code> replaced by the application that owns the file.</span></li>
+        <li><span><strong>Code.</strong> <code>invocations</code> for all 486 functions builds the call graph; async edges from rules are added. Everything reachable from an entry point becomes a Function node (274), with <code>INVOKES</code> edges carrying <code>seq</code>, line, conditional and in-loop. A function is tagged <code>significant</code> when it, or anything below it, reads, writes or calls out.</span></li>
+        <li><span><strong>Flows.</strong> One Flow per entry point: <code>STARTS</code> from the endpoint, <code>ENTRY</code> into the handler, and every effect of every function it reaches copied onto the flow as a <code>rollup</code> edge.</span></li>
+      </ol>
+      <h3>One flow, as it lands in the graph</h3>
+      <figure>
+        <div class="diagram">
+          <svg viewBox="0 0 1000 440" role="img" aria-label="The flow for POST /api/jobs/projects/{project_id}. Architecture side: the application exposes the endpoint, the endpoint starts the flow, the flow belongs to the application, and the flow reads and writes tables as rollups; tables belong to a placeholder data store. Code side: the application is built from the apps/backend module; the flow's entry is the router handler, which asynchronously invokes JobService.run_project_jobs, which invokes run_data_source_job and 19 more functions; one of those, RecordLockService.lock, has the real WRITES_TO record_lock edge that the flow's rollup copies.">
+            <defs>
+              <marker id="m10" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker>
+              <marker id="m10n" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head neo" d="M0,0 L10,5 L0,10 z"/></marker>
+              <marker id="m10c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head code" d="M0,0 L10,5 L0,10 z"/></marker>
+            </defs>
+            <rect class="panel" x="10" y="10" width="980" height="210" rx="10"/>
+            <text class="ms" x="24" y="30">ARCHITECTURE NODES · searched, carded later</text>
+            <rect class="panel" x="10" y="236" width="980" height="194" rx="10"/>
+            <text class="ms" x="24" y="256">CODE NODES · visited for detail</text>
+
+            <!-- architecture -->
+            <rect class="box neo" x="30" y="80" width="170" height="50" rx="7"/>
+            <text class="t" x="46" y="100">Application</text>
+            <text class="m" x="46" y="118">contextualized-backend</text>
+            <rect class="box neo" x="260" y="80" width="210" height="50" rx="7"/>
+            <text class="t" x="276" y="100">Interface:HttpEndpoint</text>
+            <text class="m" x="276" y="118">POST /api/jobs/projects/{…}</text>
+            <rect class="box neo" x="530" y="80" width="170" height="50" rx="7"/>
+            <text class="t" x="546" y="100">Flow</text>
+            <text class="m" x="546" y="118">functions = 22</text>
+            <rect class="box" x="790" y="46" width="180" height="40" rx="7"/>
+            <text class="t" x="806" y="71">Table  job</text>
+            <rect class="box" x="790" y="100" width="180" height="40" rx="7"/>
+            <text class="t" x="806" y="125">Table  record_lock</text>
+            <text class="s" x="790" y="158">+ data_source, embed_task, diff_task</text>
+            <rect class="box off" x="790" y="170" width="180" height="40" rx="7"/>
+            <text class="s" x="806" y="194">DataStore (not identified yet)</text>
+
+            <line class="ln neo" x1="200" y1="105" x2="258" y2="105" marker-end="url(#m10n)"/>
+            <text class="lbl" x="229" y="97" text-anchor="middle">EXPOSES</text>
+            <line class="ln neo" x1="470" y1="105" x2="528" y2="105" marker-end="url(#m10n)"/>
+            <text class="lbl" x="499" y="97" text-anchor="middle">STARTS</text>
+            <path class="ln neo" d="M615,80 L615,52 L115,52 L115,78" marker-end="url(#m10n)"/>
+            <text class="lbl" x="365" y="46" text-anchor="middle">BELONGS_TO</text>
+            <line class="ln neo" x1="700" y1="96" x2="788" y2="68" marker-end="url(#m10n)"/>
+            <text class="lbl" x="712" y="72">READS, WRITES</text>
+            <line class="ln neo dash" x1="700" y1="114" x2="788" y2="120" marker-end="url(#m10n)"/>
+            <text class="lbl" x="716" y="134">WRITES_TO</text>
+            <text class="lbl" x="716" y="148">rollup</text>
+            <line class="ln soft" x1="880" y1="140" x2="880" y2="168" marker-end="url(#m10)"/>
+
+            <!-- code -->
+            <rect class="box code" x="30" y="300" width="170" height="50" rx="7"/>
+            <text class="t" x="46" y="320">Module:Service</text>
+            <text class="m" x="46" y="338">apps/backend</text>
+            <rect class="box code" x="260" y="300" width="210" height="50" rx="7"/>
+            <text class="t" x="276" y="320">Function (handler)</text>
+            <text class="m" x="276" y="338">job.run_project_jobs</text>
+            <rect class="box code" x="530" y="300" width="200" height="50" rx="7"/>
+            <text class="t" x="546" y="320">Function</text>
+            <text class="m" x="546" y="338">JobService.run_project_jobs</text>
+            <rect class="box code" x="790" y="300" width="180" height="50" rx="7"/>
+            <text class="t" x="806" y="320">Function</text>
+            <text class="m" x="806" y="338">run_data_source_job</text>
+            <text class="s" x="790" y="372">… 19 more, down to</text>
+            <rect class="box code" x="790" y="380" width="180" height="40" rx="7"/>
+            <text class="m" x="806" y="405">RecordLockService.lock</text>
+
+            <line class="ln code" x1="470" y1="325" x2="528" y2="325" marker-end="url(#m10c)"/>
+            <text class="lbl" x="499" y="317" text-anchor="middle">INVOKES</text>
+            <text class="lbl" x="499" y="345" text-anchor="middle">async</text>
+            <line class="ln code" x1="730" y1="325" x2="788" y2="325" marker-end="url(#m10c)"/>
+            <text class="lbl" x="759" y="317" text-anchor="middle">seq 3</text>
+
+            <!-- bridges -->
+            <line class="ln" x1="115" y1="130" x2="115" y2="298" marker-end="url(#m10)"/>
+            <text class="lbl" x="123" y="216">BUILT_FROM</text>
+            <line class="ln" x1="580" y1="130" x2="400" y2="298" marker-end="url(#m10)"/>
+            <text class="lbl" x="470" y="200">ENTRY</text>
+            <path class="ln" d="M970,400 L984,400 L984,128 L972,128" marker-end="url(#m10)"/>
+            <text class="lbl" x="978" y="280" text-anchor="end">WRITES_TO</text>
+            <text class="lbl" x="978" y="294" text-anchor="end">(the real one)</text>
+          </svg>
+        </div>
+        <figcaption><b>Two copies of every effect.</b> The real <code>WRITES_TO record_lock</code> sits on <code>RecordLockService.lock</code>, a code node. The flow gets a copy marked <code>rollup</code>, so the architecture side can say what a flow touches without opening code. Without the async <code>INVOKES</code> from the background-task rule, this flow would stop at the handler: 1 function instead of 22.</figcaption>
+      </figure>
+      <p>Rules that add async edges change flows a lot. <code>POST /api/data/sources/</code> reaches 18 functions through ordinary calls and 38 once the background tasks it starts are followed.</p>
+    </section>
+
+    <!-- 11 -->
+    <section id="write">
+      <h2><span class="num">11</span>The write stage</h2>
+      <p class="lede">Writing is idempotent because every node's ID is built from what it is, never from when it was seen.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Node</th><th>ID built from</th><th>Example</th></tr></thead>
+          <tbody>
+            <tr><td>Application</td><td>name</td><td><code>app:contextualized-backend</code></td></tr>
+            <tr><td>HttpEndpoint</td><td>app, method, path</td><td><code>endpoint:contextualized-backend:POST:/api/jobs/projects/{project_id}</code></td></tr>
+            <tr><td>Flow</td><td>app, trigger name</td><td><code>flow:contextualized-backend:POST /api/jobs/projects/{project_id}</code></td></tr>
+            <tr><td>Function</td><td>repo, qualified name</td><td><code>fn:contextualized:app.services.job.JobService.run_project_jobs</code></td></tr>
+            <tr><td>Table</td><td>data store, schema, name</td><td><code>table:datastore:unknown:unresolved:repo-contextualized::job</code></td></tr>
+            <tr><td>ExternalSystem</td><td>host, or <code>unresolved</code></td><td><code>external:localhost:11434</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ol class="steps">
+        <li><span><strong>Nodes.</strong> Grouped by label set, sent in batches of 500: <code>MERGE (n:Flow {id: row.id}) SET n += row.props</code>. <code>first_seen</code> is set only on create.</span></li>
+        <li><span><strong>Edges.</strong> Grouped by type and end labels: <code>MATCH</code> both ends by ID, <code>MERGE</code> the relationship, set its properties. Every node and edge carries <code>repo</code>, <code>ingestion_job</code>, <code>commit</code>, <code>extracted_by</code> (the rule id), <code>source_file</code> and <code>source_line</code>.</span></li>
+        <li><span><strong>Stale facts.</strong> Delete edges and nodes with this <code>repo</code> but an older <code>ingestion_job</code>, except shared nodes (tables, data stores, external systems), which are deleted only once nothing points at them.</span></li>
+      </ol>
+    </section>
+
+    <!-- 12 -->
+    <section id="trace">
+      <h2><span class="num">12</span>One endpoint, end to end</h2>
+      <p class="lede"><code>POST /api/jobs/projects/{project_id}</code>, from source to Neo4j, with the stage each step happens in.</p>
+      <ol class="steps">
+        <li><span><span class="stage">clone</span>The repository lands in <code>/tmp/steno-workspaces/job-N/</code>.</span></li>
+        <li><span><span class="stage">parse</span><code>fastapi</code> is in <code>requirements.txt</code>, so <code>steno-pack-fastapi</code> is on. The resolver indexes 112 modules; <code>job.py</code> becomes <code>app.api.routers.job</code>.</span></li>
+        <li><span><span class="stage">parse</span><code>fastapi-router-prefix</code> matches <code>router = APIRouter(prefix="/jobs")</code> and pins a prefix clue on <code>app.api.routers.job.router</code>. Same for <code>/api</code> on <code>app_router</code>.</span></li>
+        <li><span><span class="stage">parse</span><code>fastapi-include-router</code> pins mount clues: <code>job.router</code> inside <code>app_router</code>, <code>app_router</code> inside the app.</span></li>
+        <li><span><span class="stage">parse</span><code>fastapi-endpoint</code> matches line 16. <code>where</code>: <code>type_of(router)</code> is <code>fastapi.APIRouter</code>. Emits an HttpEndpoint <code>POST /projects/{project_id}</code> pending its prefix, an <code>EXPOSES</code> from <code>@app</code>, and an entry point into <code>run_project_jobs</code>.</span></li>
+        <li><span><span class="stage">parse</span><code>fastapi-background-task</code> matches line 28 and emits an async <code>INVOKES</code> to <code>JobService.run_project_jobs</code>.</span></li>
+        <li><span><span class="stage">resolve</span>The prefix chain makes the path <code>/api/jobs/projects/{project_id}</code>.</span></li>
+        <li><span><span class="stage">flows</span><code>apps/backend</code> holds entry points, so it's a Service; the application is <code>contextualized-backend</code>.</span></li>
+        <li><span><span class="stage">flows</span>The call graph, plus the async edge, reaches 22 functions. Their effects roll up: reads of <code>data_source</code>, <code>diff_task</code>, <code>embed_task</code>, <code>job</code>; writes to <code>job</code> and <code>record_lock</code>.</span></li>
+        <li><span><span class="stage">write</span><code>MERGE (n:Interface {id: "endpoint:contextualized-backend:POST:/api/jobs/projects/{project_id}"})</code>, then the Flow, 22 Functions, and their edges.</span></li>
+      </ol>
+    </section>
+
+    <!-- 13 -->
+    <section id="noticed">
+      <h2><span class="num">13</span>What I noticed</h2>
+      <p class="lede">Things found while tracing this page that are worth a decision or a fix. Each was checked against the code and the Contextualized run.</p>
+
+      <div class="finding">
+        <div class="sev"><span class="tag warn">misses facts</span></div>
+        <div>
+          <h4>12 real database writes are dropped</h4>
+          <p><code>table_of</code> needs the type of the object being saved. It's missing when the object came from a method with no return annotation (<code>conversation = await self.get_conversation(id)</code>), from <code>session.get(DiffTask, id)</code>, or from a loop over a relationship (<code>for pd in ds.project_data: self.db.delete(pd)</code>). 6 <code>session.add</code> and 6 <code>session.delete</code> matches are lost this way, so those flows under-report their writes.</p>
+          <p class="where">resolvers/python.py type_of · conversation.py:174, diff_task.py:123, data_source.py:420</p>
+        </div>
+      </div>
+
+      <div class="finding">
+        <div class="sev"><span class="tag warn">view effect</span></div>
+        <div>
+          <h4>Every unknown URL becomes the same ExternalSystem</h4>
+          <p>22 of the 24 <code>CALLS</code> in Contextualized have unresolved URLs (Jira, Confluence, GitHub and Bitbucket, all built from a database row). They all land on one node, <code>external:unresolved</code>, so the views show one system that half the app calls. Grouping by the calling class or the rule, or keeping them as separate stubs, would read more truthfully.</p>
+          <p class="where">graph/build.py _external</p>
+        </div>
+      </div>
+
+      <div class="finding">
+        <div class="sev"><span class="tag part">no effect</span></div>
+        <div>
+          <h4>The pydantic-settings pack's clues are never used</h4>
+          <p>It emits 62 <code>property</code> clues in Contextualized (11 in Steno). The engine copies property clues into the resolver only before code rules run, and only config rules' clues exist then; this pack is a code rule. <code>settings.X</code> resolves anyway, through the <code>Settings</code> class defaults, so today the pack only adds to clue counts.</p>
+          <p class="where">extractors/engine.py collect</p>
+        </div>
+      </div>
+
+      <div class="finding">
+        <div class="sev"><span class="tag part">doc gap</span></div>
+        <div>
+          <h4>Config values don't feed resolution</h4>
+          <p>extractor-rules.md §5 says every config key becomes a <code>property</code> clue automatically. That isn't built, and no pack has a config rule, so <code>os.getenv("OLLAMA_BASE_URL", …)</code> always uses its code default even if a <code>.env</code> in the repository sets it.</p>
+          <p class="where">extractors/config_files.py (only used by config rules)</p>
+        </div>
+      </div>
+
+      <div class="finding">
+        <div class="sev"><span class="tag part">doc gap</span></div>
+        <div>
+          <h4><code>where</code> runs in parse, not resolve</h4>
+          <p>extractor-rules.md §2 says <code>where</code> is evaluated in the resolve pass. The engine checks it at match time. One consequence: a client clue's <code>returns</code> hints are registered during resolve, so a <code>where: type</code> on a value returned by an SDK method can't see them.</p>
+          <p class="where">extractors/engine.py _where · extractors/resolve.py _clients</p>
+        </div>
+      </div>
+
+      <div class="finding">
+        <div class="sev"><span class="tag part">view effect</span></div>
+        <div>
+          <h4>Background tasks always draw as the last step</h4>
+          <p>An <code>INVOKES</code> that exists only because of a rule (an <code>add_task</code>) has no <code>seq</code>, and the flow view sorts calls without one to the end. A task added in the middle of a handler still appears after everything else it calls. (Edges that the call graph also sees, like <code>asyncio.create_task(f())</code>, do get a <code>seq</code>.)</p>
+          <p class="where">graph/build.py _fact_edge · graph/views.py flow</p>
+        </div>
+      </div>
+
+      <div class="finding">
+        <div class="sev"><span class="tag no">coverage</span></div>
+        <div>
+          <h4>Only HTTP endpoints start flows</h4>
+          <p>Every entry point comes from <code>fastapi-endpoint</code>. Steno ingesting itself gets 25 flows, all Admin API routes; its worker loop, the most important code path, isn't a flow because nothing marks a CLI command or a polling loop as an entry point.</p>
+        </div>
+      </div>
+
+      <div class="finding">
+        <div class="sev"><span class="tag no">minor</span></div>
+        <div>
+          <h4>The flow view stops at 12 hops</h4>
+          <p>The builder follows calls without a limit; the view re-walks <code>INVOKES*0..12</code>. Contextualized's deepest chain is 7, so nothing is cut today, but a deeper app would show fewer steps than the flow's <code>functions</code> count.</p>
+          <p class="where">graph/views.py flow</p>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+</body>
+</html>
