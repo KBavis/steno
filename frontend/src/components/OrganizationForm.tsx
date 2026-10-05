@@ -30,7 +30,7 @@ export function OrganizationForm({
   return (
     <form className="stack" onSubmit={submit}>
       <Field label="Organization name">
-        <input autoFocus required placeholder="Acme" value={name} onChange={(e) => setName(e.target.value)} />
+        <input autoFocus={!organization} required placeholder="Acme" value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
       <Field label="Description" hint="What the organization does. Agents see it as the top of the map.">
         <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />

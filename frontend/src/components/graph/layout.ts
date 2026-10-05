@@ -124,17 +124,8 @@ function withLanes(view: GraphView): GraphView {
       { id: 'lane:touches', kind: 'lane', label: 'Data and systems', parent: null },
       ...view.groups.map((g) => (top(g.parent) ? { ...g, parent: lane(g.kind) } : g)),
     ],
-    nodes: view.nodes.map((n) => (top(n.parent) ? { ...n, parent: lane(n.kind) } : shortened(n, view))),
+    nodes: view.nodes.map((n) => (top(n.parent) ? { ...n, parent: lane(n.kind) } : n)),
   }
-}
-
-/** Inside a resource group, drop the group's path from a flow label: "GET /api/jobs/{id}" reads "GET /{id}". */
-function shortened(n: GraphNode, view: GraphView): GraphNode {
-  const group = view.groups.find((g) => g.id === n.parent)
-  if (n.kind !== 'flow' || group?.kind !== 'resource') return n
-  const [method, path] = n.label.split(' ', 2)
-  if (!path?.startsWith(group.label)) return n
-  return { ...n, label: `${method} ${path.slice(group.label.length).replace(/^(?!\/)/, '/')}` }
 }
 
 /** A space level draws the space itself as a frame around what's inside it; neighbors sit outside. */

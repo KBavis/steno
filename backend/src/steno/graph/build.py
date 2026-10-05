@@ -233,7 +233,7 @@ class _Builder:
         return nid
 
     def _table(self, name: str, prov: dict[str, Any], datastore: str | None = None) -> str:
-        """Tables whose data store isn't known yet hang off one placeholder store per space."""
+        """Tables whose data store isn't known yet hang off the repository's placeholder store."""
         store = datastore or self._unknown_relational_store(prov)
         tid = self.plan.node(
             ids.table_id(store, None, name),
@@ -247,11 +247,12 @@ class _Builder:
         return tid
 
     def _unknown_relational_store(self, prov: dict[str, Any]) -> str:
-        space = (self.ctx.space_id or "unassigned").replace("space:", "")
+        """Assume an unidentified store belongs to this repository, so that separate
+        applications in one space don't appear to share a database."""
         sid = self.plan.node(
-            ids.datastore_id("unknown", "unresolved", f"space-{space}"),
+            ids.datastore_id("unknown", "unresolved", f"repo-{self.ctx.repo}"),
             ["DataStore", "Relational"],
-            name="Relational store (not identified yet)",
+            name=f"{self.ctx.repo} relational store (not identified yet)",
             vendor="unknown",
             stub=True,
             **prov,
@@ -266,8 +267,10 @@ class _Builder:
             props.get("host", ""),
             props.get("database", ""),
         )
+        # A host we couldn't resolve says nothing about which server it is: keep it per repository
+        host_key = host if host and host != UNRESOLVED_TEXT else f"unresolved-{self.ctx.repo}"
         sid = self.plan.node(
-            ids.datastore_id(vendor, host, db),
+            ids.datastore_id(vendor, host_key, db),
             [lbl for lbl in labels if lbl != "Searchable"],
             name=f"{vendor} @ {host or '?'}",
             **{k: v for k, v in props.items() if isinstance(v, (str, int))},
