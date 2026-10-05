@@ -11,7 +11,7 @@ export const KINDS: Record<
     baseUrl: 'https://github.com',
     scopeKey: 'org',
     scopeLabel: 'Organization or user',
-    placeholder: 'KBavis',
+    placeholder: 'acme',
   },
   bitbucket: {
     label: 'Bitbucket',
@@ -19,7 +19,7 @@ export const KINDS: Record<
     baseUrl: '',
     scopeKey: 'project',
     scopeLabel: 'Project key',
-    placeholder: 'PAY',
+    placeholder: 'PROJ',
   },
   gitlab: {
     label: 'GitLab',
@@ -35,7 +35,7 @@ export function scopeValue(c: Pick<Connector, 'kind' | 'scope'>): string {
   return c.scope[KINDS[c.kind].scopeKey] ?? ''
 }
 
-/** "github.com/KBavis": where the connector points, for display */
+/** "github.com/acme": where the connector points, for display */
 export function connectorLocation(c: Pick<Connector, 'kind' | 'scope' | 'base_url'>): string {
   const host = c.base_url.replace(/^https?:\/\//, '').replace(/\/+$/, '')
   const scope = scopeValue(c)

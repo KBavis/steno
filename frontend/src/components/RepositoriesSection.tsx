@@ -18,7 +18,7 @@ const EMPTY: RepositoryInput = {
 }
 const FORM_ID = 'repository-form'
 
-/** The usual clone URL for a repository on this connector, e.g. https://github.com/KBavis/contextualized.git */
+/** The usual clone URL for a repository on this connector, e.g. https://github.com/acme/my-service.git */
 function suggestCloneUrl(connector: Connector | undefined, name: string): string {
   const scope = connector && scopeValue(connector)
   if (!connector || !scope || !name) return ''
@@ -57,10 +57,12 @@ export function RepositoriesSection({
   const spaceNodes = spaceTree(spaces.data ?? [])
   const spacePath = (id: number | null) => spaceNodes.find((n) => n.space.id === id)?.path
   const connectorOf = (id: number) => connectorList.find((c) => c.id === id)
+  const derivedUrl = suggestCloneUrl(connector, form.name)
 
   function open(repo: Repository | null) {
     setEditing(repo)
-    setUrlTouched(!!repo)
+    // An existing URL that matches the derived one stays derived, so renames carry through
+    setUrlTouched(!!repo && repo.clone_url !== suggestCloneUrl(connectorOf(repo.connector_id), repo.name))
     setForm(repo ? { ...repo } : { ...EMPTY, connector_id: connectorList[0]?.id ?? 0, space_id: spaceNodes[0]?.space.id ?? null })
   }
 
@@ -191,7 +193,7 @@ export function RepositoriesSection({
               </select>
             </Field>
             <Field label="Repository name">
-              <input autoFocus required placeholder="contextualized" value={form.name} onChange={(e) => update({ name: e.target.value })} />
+              <input autoFocus required placeholder="my-service" value={form.name} onChange={(e) => update({ name: e.target.value })} />
             </Field>
             <Field label="Space" hint="Where this repository belongs in your organization.">
               <select value={form.space_id ?? ''} onChange={(e) => update({ space_id: e.target.value ? Number(e.target.value) : null })}>
@@ -203,14 +205,35 @@ export function RepositoriesSection({
                 ))}
               </select>
             </Field>
-            <Field label="Clone URL" hint={!urlTouched && connector ? 'Filled in from the connector and name.' : undefined}>
+            <Field
+              label="Clone URL"
+              hint={
+                !urlTouched && connector ? (
+                  'Derived from the connector and name.'
+                ) : derivedUrl && derivedUrl !== form.clone_url ? (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => {
+                      setUrlTouched(false)
+                      setForm({ ...form, clone_url: derivedUrl })
+                    }}
+                  >
+                    Use derived URL
+                  </button>
+                ) : undefined
+              }
+            >
               <input
                 required
                 className="mono"
+                placeholder={derivedUrl || suggestCloneUrl(connector, 'my-service')}
                 value={form.clone_url}
                 onChange={(e) => {
-                  setUrlTouched(true)
-                  setForm({ ...form, clone_url: e.target.value })
+                  // Clearing the field goes back to deriving it
+                  const value = e.target.value
+                  setUrlTouched(value !== '')
+                  setForm({ ...form, clone_url: value || derivedUrl })
                 }}
               />
             </Field>

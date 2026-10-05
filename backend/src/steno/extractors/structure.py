@@ -49,8 +49,8 @@ class Structure:
         return best
 
     def application_name(self, repo: str, module: Module) -> str:
-        """`contextualized` when the repository root is the service; in a monorepo, the
-        service's folder is appended: `contextualized-backend`."""
+        """`my-service` when the repository root is the service; in a monorepo, the
+        service's folder is appended: `my-service-backend`."""
         return repo if module.path == "." else f"{repo}-{module.name}"
 
 

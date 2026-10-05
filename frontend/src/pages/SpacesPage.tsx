@@ -113,7 +113,7 @@ export function SpacesPage({ onChange, embedded }: { onChange?: () => void; embe
         >
           <form id={FORM_ID} className="stack" onSubmit={submit}>
             <Field label="Name">
-              <input autoFocus required placeholder="Payroll" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              <input autoFocus required placeholder="Platform" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </Field>
             <Field label="Description" hint="What this part of the organization is responsible for.">
               <textarea rows={3} value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} />

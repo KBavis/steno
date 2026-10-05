@@ -742,7 +742,7 @@ PROJECT_MARKERS = ("pyproject.toml", "setup.py", "setup.cfg")
 def find_source_roots(repo: Path) -> list[Path]:
     """Directories that module names are relative to: each Python project in the repository
     (a folder with pyproject.toml, setup.py, setup.cfg, or requirements*.txt), or its `src/`.
-    In a monorepo like Contextualized, `apps/backend/app/models.py` is the module `app.models`."""
+    In a monorepo, `apps/backend/app/models.py` is the module `app.models`."""
     roots = {repo}
     for f in source_files(repo):
         if f.name in PROJECT_MARKERS or (f.name.startswith("requirements") and f.suffix == ".txt"):

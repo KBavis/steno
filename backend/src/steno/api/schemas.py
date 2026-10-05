@@ -48,7 +48,7 @@ class ConnectorIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     kind: ConnectorKind
     base_url: str = Field(min_length=1)
-    # Which part of the host this connector covers, e.g. {"org": "KBavis"} (D30)
+    # Which part of the host this connector covers, e.g. {"org": "acme"} (D30)
     scope: dict[str, Any] = Field(default_factory=dict)
     # A reference to a secret (e.g. "env:STENO_GITHUB_TOKEN"), never the secret itself
     credentials_ref: str | None = None
