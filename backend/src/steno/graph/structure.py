@@ -9,7 +9,7 @@ Open): a module is a Service when rules found entry points in it.
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from steno.source.files import SKIP_DIRS
+from steno.source.files import source_files
 
 # Build file → (build tool, language)
 BUILD_FILES = {
@@ -57,10 +57,8 @@ class Structure:
 def detect(repo: Path, entry_files: set[str]) -> Structure:
     """Find build units. `entry_files` are files where rules found entry points."""
     modules: dict[str, Module] = {}
-    for path in sorted(repo.rglob("*")):
+    for path in source_files(repo):
         rel = path.relative_to(repo)
-        if not path.is_file() or SKIP_DIRS & set(rel.parts):
-            continue
         name = path.name
         if name in BUILD_FILES or (name.startswith("requirements") and name.endswith(".txt")):
             tool, language = BUILD_FILES.get(name, ("pip", "python"))
