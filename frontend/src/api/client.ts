@@ -108,6 +108,10 @@ export interface GraphNode {
   depth?: number
   conditional?: boolean
   container?: string | null
+  /** Flow view: the subclass an inherited method runs as (Task.run as DiffTaskRunner) */
+  bound_to?: string | null
+  /** Flow view: one of several implementations that can run here, chosen at runtime */
+  candidate?: boolean
   /** Flow view: what a step does, in words (operation and target) */
   does?: { type: string; op?: string | null; target: string }[]
   /** Flow view: the first step that uses a target */

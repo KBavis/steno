@@ -27,10 +27,19 @@ def application_id(name: str) -> str:
     return f"app:{name}"
 
 
-def function_id(repo: str, qualified_name: str, param_types: list[str] | None = None) -> str:
-    """`param_types` is given only where the language has overloading."""
+def function_id(
+    repo: str,
+    qualified_name: str,
+    param_types: list[str] | None = None,
+    bound_to: str | None = None,
+) -> str:
+    """`param_types` is given only where the language has overloading. `bound_to` names the
+    subclass an inherited method runs for, when that changes what it calls:
+    `fn:repo:app.tasks.base.Task.run@app.tasks.diff.DiffTaskRunner`."""
     base = f"fn:{repo}:{qualified_name}"
-    return base if param_types is None else f"{base}({','.join(param_types)})"
+    if param_types is not None:
+        base = f"{base}({','.join(param_types)})"
+    return f"{base}@{bound_to}" if bound_to else base
 
 
 def http_endpoint_id(app: str, method: str, path: str) -> str:

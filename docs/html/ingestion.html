@@ -321,7 +321,7 @@ pre .k-emit { color: var(--neo); font-weight: 500; }
             <tr><td>parse</td><td>Which rule packs apply, and what's in the code?<span class="eg">e.g. <code>fastapi</code> is a dependency, so the FastAPI pack is on; <code>job.py</code> is the module <code>app.api.routers.job</code></span></td><td>File list, symbol table, syntax trees</td><td>112 modules · 486 functions · 112 trees · 0.16 s</td><td><code>extraction/engine.py</code>, <code>resolvers/python.py</code></td></tr>
             <tr><td>extract</td><td>What does each code shape mean?<span class="eg">e.g. <code>@router.post(path)</code> on a function is an endpoint; its router prefix is still blank</span></td><td>Facts, facts with blanks, clues</td><td>75 nodes · 230 edges · 91 clues · 1.8 s</td><td><code>extraction/engine.py</code></td></tr>
             <tr><td>assemble</td><td>What goes in each blank?<span class="eg">e.g. <code>/api</code> + <code>/jobs</code> + <code>/projects/{project_id}</code> → <code>/api/jobs/projects/{project_id}</code></span></td><td>Completed facts, the facts JSON</td><td>199 edges · 37 dropped · 1.7 s</td><td><code>assemblers/assemble.py</code></td></tr>
-            <tr><td>flows</td><td>What does each entry point reach, and how does it all fit in the graph?<span class="eg">e.g. that endpoint's handler reaches 22 functions, so its Flow writes to <code>job</code> and <code>record_lock</code></span></td><td>A graph plan: nodes and edges with stable IDs</td><td>438 nodes · 1,035 edges · 33 flows · 4.6 s</td><td><code>graph/structure.py</code>, <code>graph/build.py</code></td></tr>
+            <tr><td>flows</td><td>What does each entry point reach, and how does it all fit in the graph?<span class="eg">e.g. that endpoint's handler reaches 115 functions (the diff task's work, then the embed task's), so its Flow writes to <code>job</code>, <code>record_lock</code>, <code>pull_request</code>, …</span></td><td>A graph plan: nodes and edges with stable IDs</td><td>494 nodes · 1,268 edges · 33 flows · 5.3 s</td><td><code>graph/structure.py</code>, <code>graph/build.py</code></td></tr>
             <tr><td>write</td><td>What does Neo4j need to change?<span class="eg">e.g. <code>MERGE</code> the endpoint by its ID; a function deleted since the last run is removed</span></td><td>The graph, updated in place</td><td>MERGE, then remove stale facts</td><td><code>graph/writer.py</code></td></tr>
             <tr><td>cards</td><td>What does each flow do, in words? (LLM)<span class="eg">e.g. a purpose like "starts a sync job for each of a project's data sources"</span></td><td>Skipped: not built</td><td>skipped</td><td>not built</td></tr>
           </tbody>
@@ -801,7 +801,7 @@ async with get_async_db_session_context() as session:     <span class="c"># retu
             <tr><td><code>class_of(expr)</code><span class="eg">e.g. <code>Job</code> → <code>app.models.job.Job</code>; <code>svc</code> → none (an instance, not a class)</span></td><td>The class an expression names (repository classes, and library names that look like classes)</td><td>extract, assemble</td><td>Classes chosen at runtime</td></tr>
             <tr><td><code>value_of(expr)</code><span class="eg">e.g. <code>os.getenv("OLLAMA_BASE_URL", settings.OLLAMA_LOCAL_HOST_URL) + "/api/tags"</code> → <code>"http://localhost:11434/api/tags"</code></span></td><td>The constant a value holds: literals, f-strings, <code>+</code>, single assignments, module constants across imports, class defaults, <code>os.getenv</code> defaults</td><td>extract</td><td>Values that exist only at runtime</td></tr>
             <tr><td><code>is_subclass(type, targets)</code><span class="eg">e.g. <code>Gateway</code>, <code>[OpenAILike]</code> → true when the app declares <code>class Gateway(OpenAILike)</code></span></td><td>Whether a type is, or inherits from, a target (repository bases walked; library bases by name)</td><td>extract (<code>where</code>), assemble (clients)</td><td>Inheritance inside libraries</td></tr>
-            <tr><td><code>invocations(fn)</code><span class="eg">e.g. <code>JobService.run_project_jobs</code> → <code>get_async_db_session_context</code> (line 88), <code>aget_project_data_sources</code> (91), <code>run_data_source_job</code> (99)</span></td><td>Every call from a function into the repository's own functions, in order, flagged conditional or in a loop</td><td>flows (the call graph)</td><td>Runtime dispatch, calls through base classes</td></tr>
+            <tr><td><code>invocations(fn)</code><span class="eg">e.g. <code>JobService.run_project_jobs</code> → <code>get_async_db_session_context</code> (line 88), <code>aget_project_data_sources</code> (91), <code>run_data_source_job</code> (99)</span></td><td>Every call from a function into the repository's own functions, in order, flagged conditional or in a loop</td><td>flows (the call graph)</td><td>Which subclass runs when the code doesn't say (a factory returning the base type): every candidate is linked</td></tr>
           </tbody>
         </table>
       </div>
@@ -938,20 +938,20 @@ client:
       <div class="io">
         <div><b>Reads</b>Completed facts, entry points, the symbol resolver, the build files</div>
         <div><b>Does</b>Decides the graph's shape: modules, applications, code nodes, flows, IDs</div>
-        <div><b>Leaves</b>A graph plan in memory: 438 nodes, 1,035 edges, each with a stable ID</div>
+        <div><b>Leaves</b>A graph plan in memory: 494 nodes, 1,268 edges, each with a stable ID</div>
       </div>
       <p class="lede">Facts so far are loose: "this function writes to table <code>job</code>". Flows fits them into one tree (organization → space → application → …) and works out which code each entry point actually runs. It's pure planning: nothing is written yet, which is why it can be tested without a database.</p>
       <ol class="steps">
         <li><span><strong>Structure.</strong> Every folder with a build file (<code>pyproject.toml</code>, <code>requirements*.txt</code>, <code>package.json</code>, <code>pom.xml</code>, …) is a <code>Module</code>. A module that contains an entry point is a <code>Service</code> and gets an <code>Application</code>, named after the repository plus the folder in a monorepo. Contextualized: <code>.</code>, <code>apps/backend</code> (Service → <code>contextualized-backend</code>), <code>apps/frontend/app</code>. The application is joined to its module by <code>BUILT_FROM</code>.</span></li>
         <li><span><strong>Fact nodes.</strong> Every extracted node gets its stable ID (section 10): endpoints and entities under their application, tables under a placeholder data store for the repository, external systems by host. Each gets <code>BELONGS_TO</code> its owner.</span></li>
         <li><span><strong>Fact edges.</strong> Each extracted edge, with its ends filled in: <code>@app</code> becomes the application whose module holds the file, an <code>{http: …}</code> target becomes an <code>ExternalSystem</code> keyed by host.</span></li>
-        <li><span><strong>Call graph.</strong> Ask the resolver for <code>invocations</code> of all 486 functions, add the async <code>INVOKES</code> edges rules found (background tasks), then walk from the 33 entry points. Everything reached (274 functions) becomes a <code>Function</code> node, with its <code>File</code> (49) and <code>INVOKES</code> edges carrying call order, line, conditional and in-loop. A function is <code>significant</code> when it, or anything below it, reads, writes or calls out.</span></li>
+        <li><span><strong>Call graph.</strong> Ask the resolver for <code>invocations</code> of all 486 functions, add the async <code>INVOKES</code> edges rules found (background tasks), then walk from the 33 entry points. Everything reached becomes a <code>Function</code> node, with its <code>File</code> and <code>INVOKES</code> edges carrying call order, line, conditional and in-loop. A call to an inherited method follows the subclass it was made on: <code>Task.run</code> reached through <code>DiffTaskRunner(…).run()</code> gets its own node, <em>Task.run as DiffTaskRunner</em>, whose calls go to Diff's methods. A call to an abstract method picked at runtime goes to every implementation, marked <code>candidate</code>. A function is <code>significant</code> when it, or anything below it, reads, writes or calls out.</span></li>
         <li><span><strong>Flows.</strong> One <code>Flow</code> per entry point: <code>STARTS</code> from the trigger, <code>ENTRY</code> into the handler, and every effect of every function it reaches copied onto the flow as a <code>rollup</code> edge.</span></li>
       </ol>
       <h3>One flow, as it lands in the graph</h3>
       <figure>
         <div class="diagram">
-          <svg viewBox="0 0 1000 440" role="img" aria-label="The flow for POST /api/jobs/projects/{project_id}. Architecture side: the application exposes the endpoint, the endpoint starts the flow, the flow belongs to the application, and the flow reads and writes tables as rollups; tables belong to a placeholder data store. Code side: the application is built from the apps/backend module; the flow's entry is the router handler, which asynchronously invokes JobService.run_project_jobs, which invokes run_data_source_job and 19 more functions; one of those, RecordLockService.lock, has the real WRITES_TO record_lock edge that the flow's rollup copies.">
+          <svg viewBox="0 0 1000 440" role="img" aria-label="The flow for POST /api/jobs/projects/{project_id}. Architecture side: the application exposes the endpoint, the endpoint starts the flow, the flow belongs to the application, and the flow reads and writes tables as rollups; tables belong to a placeholder data store. Code side: the application is built from the apps/backend module; the flow's entry is the router handler, which asynchronously invokes JobService.run_project_jobs, which invokes run_data_source_job and more than a hundred other functions, including the diff and embed tasks' own methods; one of those, RecordLockService.lock, has the real WRITES_TO record_lock edge that the flow's rollup copies.">
             <defs>
               <marker id="m10" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker>
               <marker id="m10n" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head neo" d="M0,0 L10,5 L0,10 z"/></marker>
@@ -971,7 +971,7 @@ client:
             <text class="m" x="276" y="118">POST /api/jobs/projects/{…}</text>
             <rect class="box neo" x="530" y="80" width="170" height="50" rx="7"/>
             <text class="t" x="546" y="100">Flow</text>
-            <text class="m" x="546" y="118">functions = 22</text>
+            <text class="m" x="546" y="118">functions = 115</text>
             <rect class="box" x="790" y="46" width="180" height="40" rx="7"/>
             <text class="t" x="806" y="71">Table  job</text>
             <rect class="box" x="790" y="100" width="180" height="40" rx="7"/>
@@ -1006,7 +1006,7 @@ client:
             <rect class="box code" x="790" y="300" width="180" height="50" rx="7"/>
             <text class="t" x="806" y="320">Function</text>
             <text class="m" x="806" y="338">run_data_source_job</text>
-            <text class="s" x="790" y="372">… 19 more, down to</text>
+            <text class="s" x="790" y="372">… 112 more, including</text>
             <rect class="box code" x="790" y="380" width="180" height="40" rx="7"/>
             <text class="m" x="806" y="405">RecordLockService.lock</text>
 
@@ -1026,7 +1026,7 @@ client:
             <text class="lbl" x="978" y="294" text-anchor="end">(the real one)</text>
           </svg>
         </div>
-        <figcaption><b>Two copies of every effect.</b> The real <code>WRITES_TO record_lock</code> sits on <code>RecordLockService.lock</code>, a code node. The flow gets a copy marked <code>rollup</code>, so the architecture side can say what a flow touches without opening code. Without the async <code>INVOKES</code> from the background-task rule, this flow would stop at the handler: 1 function instead of 22.</figcaption>
+        <figcaption><b>Two copies of every effect.</b> The real <code>WRITES_TO record_lock</code> sits on <code>RecordLockService.lock</code>, a code node. The flow gets a copy marked <code>rollup</code>, so the architecture side can say what a flow touches without opening code. Without the async <code>INVOKES</code> from the background-task rule, this flow would stop at the handler. Without following <code>Task.run</code> into each task's own methods, it would stop at the lock calls: 22 functions instead of 115.</figcaption>
       </figure>
       <h3>Every node and edge carries where it came from</h3>
       <div class="table-wrap">
@@ -1240,8 +1240,8 @@ client:
         <li><span><span class="stage">extract</span><code>fastapi-background-task</code> matches line 28 and emits an async <code>INVOKES</code> to <code>JobService.run_project_jobs</code> (section 07, example 1).</span></li>
         <li><span><span class="stage">assemble</span>The prefix chain fills the blank: <code>/api/jobs/projects/{project_id}</code>. Down the call path, <code>session.add(job)</code>'s <code>table_of</code> becomes table <code>job</code>.</span></li>
         <li><span><span class="stage">flows</span><code>apps/backend</code> holds entry points, so it's a Service; the application is <code>contextualized-backend</code>.</span></li>
-        <li><span><span class="stage">flows</span>The call graph, plus the async edge, reaches 22 functions. Their effects roll up: reads of <code>data_source</code>, <code>diff_task</code>, <code>embed_task</code>, <code>job</code>; writes to <code>job</code> and <code>record_lock</code>.</span></li>
-        <li><span><span class="stage">write</span><code>MERGE (n:Interface {id: "endpoint:contextualized-backend:POST:/api/jobs/projects/{project_id}"})</code>, then the Flow, 22 Functions, and their edges, each stamped with this job's ID.</span></li>
+        <li><span><span class="stage">flows</span>The call graph, plus the async edge, reaches 115 functions: <code>Task.run</code> as <code>DiffTaskRunner</code> (the diff work), then as <code>EmbedTaskRunner</code> (the embedding work). Providers chosen at runtime (GitHub, Bitbucket, Jira, Confluence) are linked as candidates. Every effect rolls up onto the flow: writes to <code>job</code>, <code>record_lock</code>, <code>pull_request</code>, <code>file</code> and more.</span></li>
+        <li><span><span class="stage">write</span><code>MERGE (n:Interface {id: "endpoint:contextualized-backend:POST:/api/jobs/projects/{project_id}"})</code>, then the Flow, its Functions, and their edges, each stamped with this job's ID.</span></li>
       </ol>
     </section>
 

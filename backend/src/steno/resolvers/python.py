@@ -94,6 +94,9 @@ class ModuleInfo:
 class Scope:
     module: ModuleInfo
     function: FunctionInfo | None = None
+    # The class `self` really is when an inherited method runs for a subclass:
+    # Task.run reached through DiffTaskRunner(...).run() has self_type DiffTaskRunner
+    self_type: str | None = None
 
 
 class PythonResolver:
@@ -107,6 +110,7 @@ class PythonResolver:
         # Configuration values (property clues): key → value
         self.properties: dict[str, Any] = {}
         self._busy: set[Any] = set()
+        self._subclasses: dict[str, list[ClassInfo]] | None = None
         self.source_roots = find_source_roots(root)
         for path in files if files is not None else source_files(root):
             if path.suffix == ".py" and not is_test_file(path.relative_to(root)):
@@ -394,14 +398,14 @@ class PythonResolver:
         found = self.lookup(sym) if sym else None
         return found if isinstance(found, FunctionInfo) else None
 
-    def scope_of(self, fn: FunctionInfo) -> Scope:
-        return Scope(fn.module, fn)
+    def scope_of(self, fn: FunctionInfo, self_type: str | None = None) -> Scope:
+        return Scope(fn.module, fn, self_type)
 
     # ------------------------------------------------------------------- types
 
     def type_of(self, expr: ast.expr, scope: Scope) -> str | None:
         """The qualified type of the value an expression produces, when it can be known."""
-        key = ("type", id(expr), id(scope.function))
+        key = ("type", id(expr), id(scope.function), scope.self_type)
         if key in self._busy:
             return None
         self._busy.add(key)
@@ -458,9 +462,9 @@ class PythonResolver:
                 and name in ("self", "cls")
                 and next(iter(fn.params), None) == name
             ):
-                return fn.cls.qualname
+                return scope.self_type or fn.cls.qualname
             if name in fn.params or name in _local_names(fn.node):
-                return self._local_type(fn, name)
+                return self._local_type(fn, name, scope)
         mod = scope.module
         if name in mod.annotations:
             return self.annotation_type(mod.annotations[name], Scope(mod))
@@ -474,8 +478,7 @@ class PythonResolver:
                 return self._name_type(found[1], Scope(found[0]))
         return None
 
-    def _local_type(self, fn: FunctionInfo, name: str) -> str | None:
-        scope = self.scope_of(fn)
+    def _local_type(self, fn: FunctionInfo, name: str, scope: Scope) -> str | None:
         annotation = fn.params.get(name)
         if annotation is not None:
             return self.annotation_type(annotation, Scope(fn.module))
@@ -550,7 +553,7 @@ class PythonResolver:
 
     def value_of(self, expr: ast.expr, scope: Scope) -> Any:
         """The constant an expression evaluates to, or UNRESOLVED."""
-        key = ("value", id(expr), id(scope.function))
+        key = ("value", id(expr), id(scope.function), scope.self_type)
         if key in self._busy:
             return UNRESOLVED
         self._busy.add(key)
@@ -689,14 +692,19 @@ class PythonResolver:
             for cls in mod.classes.values():
                 yield from cls.methods.values()
 
-    def invocations(self, fn: FunctionInfo) -> list["Invocation"]:
+    def invocations(self, fn: FunctionInfo, self_type: str | None = None) -> list["Invocation"]:
         """Calls from `fn` to first-party functions, in source order (the call graph's edges).
 
         A constructor call (`Job()`) counts as a call to the class's `__init__` when the
         repository defines one. Calls into libraries aren't listed.
+
+        `self_type` reads an inherited method as the subclass it runs for, so `self.execute()`
+        inside Task.run finds DiffTaskRunner.execute. Each call records the class it was made
+        on (`receiver`) when the method found is inherited from a base class, and a call that
+        lands on an abstract method lists the subclasses' implementations (`candidates`).
         """
         found: list[Invocation] = []
-        scope = self.scope_of(fn)
+        scope = self.scope_of(fn, self_type)
 
         def visit(node: ast.AST, conditional: bool, in_loop: bool) -> None:
             # Nested functions and lambdas (closures, `async def _run(...)` handed to
@@ -705,12 +713,28 @@ class PythonResolver:
             if isinstance(node, ast.ClassDef):
                 return
             if isinstance(node, ast.Call):
-                callee = self._callee(node.func, scope)
+                callee, receiver = self._call_target(node.func, scope)
                 if callee is not None:
                     # Ordered by where each call ends: in `Runner(x).run()`,
                     # the constructor runs first
                     end = (node.end_lineno or node.lineno, node.end_col_offset or node.col_offset)
-                    found.append(Invocation(callee.qualname, end[0], end[1], conditional, in_loop))
+                    inherited = receiver if callee.cls and receiver != callee.cls.qualname else None
+                    candidates = (
+                        tuple(o.qualname for o in self.implementations(callee, receiver))
+                        if self.is_abstract(callee)
+                        else ()
+                    )
+                    found.append(
+                        Invocation(
+                            callee.qualname,
+                            end[0],
+                            end[1],
+                            conditional,
+                            in_loop,
+                            inherited,
+                            candidates,
+                        )
+                    )
             branchy = isinstance(node, (ast.If, ast.IfExp, ast.Try, ast.Match, ast.BoolOp))
             loopy = isinstance(node, (ast.For, ast.AsyncFor, ast.While, ast.comprehension))
             for child in ast.iter_child_nodes(node):
@@ -720,13 +744,71 @@ class PythonResolver:
             visit(stmt, False, False)
         return sorted(found, key=lambda i: (i.line, i.column))
 
-    def _callee(self, func: ast.expr, scope: Scope) -> "FunctionInfo | None":
-        found = self.function_of(func, scope)
-        if found is not None:
-            return found
+    def _call_target(self, func: ast.expr, scope: Scope) -> tuple[FunctionInfo | None, str | None]:
+        """The function a call runs, and the repository class it was called on (if any)."""
+        if isinstance(func, ast.Attribute) and not self._is_module_ref(func.value, scope):
+            owner = self.class_of(func.value, scope) or self.type_of(func.value, scope)
+            found = self.lookup(owner) if owner else None
+            if isinstance(found, ClassInfo):
+                method = self._class_member(found, func.attr)
+                if method is not None:
+                    return method, found.qualname
+        fn = self.function_of(func, scope)
+        if fn is not None:
+            return fn, None
         cls = self.class_of(func, scope)
         target = self.lookup(cls) if cls else None
-        return self._class_member(target, "__init__") if isinstance(target, ClassInfo) else None
+        if isinstance(target, ClassInfo):  # a constructor call: its __init__, maybe inherited
+            init = self._class_member(target, "__init__")
+            return (init, target.qualname) if init else (None, None)
+        return None, None
+
+    # ------------------------------------------------------- abstract methods
+
+    def is_abstract(self, fn: FunctionInfo) -> bool:
+        """An @abstractmethod, or a method with no body of its own (docstring, `pass`, `...`,
+        `raise NotImplementedError`): calling it really runs a subclass's version."""
+        if fn.cls is None:
+            return False
+        scope = Scope(fn.module)
+        for d in fn.node.decorator_list:
+            if (self.symbol_of(d, scope) or "").endswith("abstractmethod"):
+                return True
+        body = list(fn.node.body)
+        first = body[0] if body else None
+        if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+            if isinstance(first.value.value, str):
+                body = body[1:]  # the docstring
+        return all(_is_placeholder(stmt) for stmt in body)
+
+    def implementations(self, fn: FunctionInfo, within: str | None = None) -> list[FunctionInfo]:
+        """Subclass methods that implement an abstract `fn`. With `within`, only classes
+        that are, or inherit from, that class (the call's receiver)."""
+        if fn.cls is None:
+            return []
+        out = []
+        for cls in self.subclasses(fn.cls.qualname):
+            if (
+                within
+                and within != fn.cls.qualname
+                and not self.is_subclass(cls.qualname, [within])
+            ):
+                continue
+            method = cls.methods.get(fn.node.name)
+            if method is not None and not self.is_abstract(method):
+                out.append(method)
+        return sorted(out, key=lambda m: m.qualname)
+
+    def subclasses(self, qualname: str) -> list[ClassInfo]:
+        """Every repository class that inherits from `qualname`, directly or not."""
+        if self._subclasses is None:
+            index: dict[str, list[ClassInfo]] = {}
+            for mod in self.modules.values():
+                for cls in mod.classes.values():
+                    for base in self.base_symbols(cls.qualname):
+                        index.setdefault(base, []).append(cls)
+            self._subclasses = index
+        return self._subclasses.get(qualname, [])
 
     def method_calls(self) -> Iterator[tuple[FunctionInfo, ast.Call]]:
         """Every `receiver.method(...)` call, with the function it's in."""
@@ -758,11 +840,26 @@ class Invocation:
     column: int
     conditional: bool  # inside an if / try / match / boolean shortcut
     in_loop: bool
+    # The subclass the call was made on, when `callee` is inherited from a base class
+    receiver: str | None = None
+    # When `callee` is abstract: the subclass methods that can really run
+    candidates: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class _Placeholder:
     name: str
+
+
+def _is_placeholder(stmt: ast.stmt) -> bool:
+    if isinstance(stmt, ast.Pass):
+        return True
+    if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
+        return True  # `...` or a stray string
+    if isinstance(stmt, ast.Raise) and stmt.exc is not None:
+        exc = stmt.exc.func if isinstance(stmt.exc, ast.Call) else stmt.exc
+        return isinstance(exc, ast.Name) and exc.id == "NotImplementedError"
+    return False
 
 
 def _is_self_attr(target: ast.expr) -> bool:

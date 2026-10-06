@@ -426,7 +426,8 @@ class GraphViews:
         calls: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for row in self._read(
             "MATCH (a:Function)-[r:INVOKES]->(b:Function) WHERE a.id IN $ids AND b.id IN $ids "
-            "RETURN a.id AS a, b.id AS b, r.seq AS seq, r.conditional AS cond, r.async AS async",
+            "RETURN a.id AS a, b.id AS b, r.seq AS seq, r.conditional AS cond, r.async AS async, "
+            "r.candidate AS candidate",
             ids=list(funcs),
         ):
             calls[row["a"]].append(row.data())
@@ -443,7 +444,9 @@ class GraphViews:
         steps: list[dict[str, Any]] = []
         seen: set[str] = set()
 
-        def walk(fid: str, depth: int, conditional: bool, is_async: bool) -> None:
+        def walk(
+            fid: str, depth: int, conditional: bool, is_async: bool, candidate: bool = False
+        ) -> None:
             if fid in seen:
                 return
             seen.add(fid)
@@ -460,6 +463,8 @@ class GraphViews:
                         conditional=conditional,
                         is_async=is_async or bool(f.get("is_async")),
                         significant=bool(f.get("significant")),
+                        bound_to=f.get("bound_to"),
+                        candidate=candidate,
                     )
                 )
             for c in calls.get(fid, []):
@@ -468,6 +473,7 @@ class GraphViews:
                     depth + 1 if shown else depth,
                     conditional or bool(c["cond"]),
                     bool(c["async"]),
+                    bool(c["candidate"]),
                 )
 
         walk(entry["id"], 0, False, False)

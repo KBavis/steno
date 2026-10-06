@@ -320,7 +320,7 @@ What it can't follow (dynamic attribute access, values built at runtime, untyped
 | `class_of(expr)` | The class an expression names (repository classes, and library names that look like classes) | Classes chosen at runtime |
 | `value_of(expr)` | The constant a value holds: literals, f-strings, `+`, single assignments, module constants across imports, class defaults, `os.getenv(key, default)`; a parameter inside a string becomes `{name}` | Values that exist only at runtime |
 | `is_subclass(type, targets)` | Whether a type is, or inherits from, one of the targets (repository bases walked; library bases by name) | Inheritance inside libraries that aren't read |
-| `invocations(fn)` | Every first-party call in a function, closures included, in execution order, flagged conditional or in-loop: the call graph | Runtime dispatch, calls through base classes |
+| `invocations(fn, self_type?)` | Every first-party call in a function, closures included, in execution order, flagged conditional or in-loop: the call graph. With `self_type`, an inherited method is read as that subclass, so `self.execute()` in `Task.run` finds `DiffTaskRunner.execute`; a call to an abstract method lists its implementations as candidates (D58) | Which implementation runs when the code doesn't say (a factory returning the base type): every candidate is linked instead |
 
 **One symbol resolver per language.** Each language gets its own symbol resolver behind these same questions. The engine today builds only the Python one, so a repository mixing languages needs a symbol resolver per language, chosen by each rule's `language` (Open). Links between languages go through shared interface nodes in the graph, not through a resolver.
 

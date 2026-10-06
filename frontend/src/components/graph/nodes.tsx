@@ -284,6 +284,16 @@ export function StepRowNode({ id, data, selected }: NodeProps<Node<EntityData>>)
           {name}
         </span>
         <span className="row-sub">
+          {node.bound_to ? (
+            <span className="step-tag" title={node.bound_to}>
+              as {node.bound_to.split('.').pop()}
+            </span>
+          ) : null}
+          {node.candidate ? (
+            <span className="step-tag" title="One of several implementations; which one runs is decided at runtime">
+              one of
+            </span>
+          ) : null}
           {node.conditional ? <span className="step-tag">if</span> : null}
           {node.is_async ? <span className="step-tag">async</span> : null}
           {node.sub}

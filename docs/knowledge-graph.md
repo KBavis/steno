@@ -131,7 +131,7 @@ Candidates for later: `Team`/owner, deployment `Environment`.
 
 | Property | Meaning | Java example | Python example | Why |
 |---|---|---|---|---|
-| `id` | `fn:{repo}:{qualified_name}`, plus `({param types})` where the language has overloading | `fn:microservices:com.x.PassServiceImpl#callToFunction(com.x.ClientRequest)` | `fn:contextualized:app.services.job.JobService.run_data_source_job` | Identity |
+| `id` | `fn:{repo}:{qualified_name}`, plus `({param types})` where the language has overloading, plus `@{subclass}` for a bound copy (below) | `fn:microservices:com.x.PassServiceImpl#callToFunction(com.x.ClientRequest)` | `fn:contextualized:app.services.job.JobService.run_data_source_job` | Identity |
 | `language` | Source language | `java` | `python` | Picks the rules and symbol resolver |
 | `name` | Short name | `callToFunction` | `run_data_source_job` | Display, keyword search |
 | `container` | What it's defined in: class, module, struct, object, or none | `com.x.PassServiceImpl` (class) | `app.services.job.JobService` (class) | Display, grouping |
@@ -140,6 +140,7 @@ Candidates for later: `Team`/owner, deployment `Environment`.
 | `returns` | Declared return type, if any | `com.x.ClientResponse` | *(empty)* | Chained calls, payloads |
 | `annotations` | Annotations, decorators, or attributes, whatever the language calls them | `["@Transactional"]` | `["@router.post(\"/projects/{project_id}…\")"]` | Rules, entry points, display |
 | `visibility` | `public` / `private` / `protected` / `internal`; by convention where the language has none (Python `_name` → private) | `public` | `public` | Entry-point rules |
+| `bound_to` | On a bound copy: the subclass the inherited method runs as | `com.x.DiffTask` | `app.tasks.diff.DiffTaskRunner` | Flows follow the real implementation |
 | `is_async` | Runs asynchronously | `false` | `true` | Flow ordering (async steps) |
 | `doc` | First sentence of its doc comment (Javadoc, docstring, JSDoc, GoDoc) | | "Creates Job, builds the applicable Tasks, and runs them." | Cards |
 | `start_line`, `end_line` | Line range at the ingested commit | `42`, `87` | `111`, `146` | Slicing source for `view_flow_code` |
@@ -147,6 +148,8 @@ Candidates for later: `Team`/owner, deployment `Environment`.
 | `lang` | Language-specific extras, only when a rule needs them | `{throws: ["IOException"]}` | `{is_generator: false}` | Kept out of the shared schema |
 
 **Not stored:** function bodies (the source is fetched from the git host), local variables, and individual statements. The call sites inside a body are stored only as `INVOKES` / `CALLS` / `PRODUCES` / … edges with their `seq` order.
+
+**Inherited methods that call subclass code: bound copies (Decided, D58).** A base class often runs shared steps and calls a method each subclass provides (`Task.run` calls `self.execute()`). Reached through `DiffTaskRunner(...).run()`, that code runs `DiffTaskRunner.execute`; reached through `EmbedTaskRunner(...).run()`, it runs Embed's. So the inherited method gets **one `Function` node per subclass it runs as**, when that changes what it calls: `fn:contextualized:app.tasks.base.Task.run@app.tasks.diff.DiffTaskRunner`, with `symbol` still `app.tasks.base.Task.run` and `bound_to` naming the subclass. Each copy's `INVOKES` point at that subclass's methods, so a flow lists Diff's work, then Embed's, in order. Copies are made only when the subclass changes something; an inherited method that calls nothing overridden stays one node. When the code doesn't say which subclass it is (a factory returning the base type), the call goes to every implementation, marked `candidate`.
 
 **The same rule applies to every node type.** `Module` is whatever the ecosystem's build unit is (a Maven/Gradle module, a Python package with its own `pyproject.toml`, an npm workspace, a Go module), and `Entity` covers JPA classes, SQLAlchemy models, Pydantic models, protobuf messages, and so on.
 
@@ -222,7 +225,7 @@ Every relationship is either **extracted** (read directly from code or config by
 | `BUILT_FROM` | Application → Module | | Which module builds the deployable | Extracted (build files) |
 | `DEPENDS_ON` | Module → Module | `scope` | A **build dependency**, from `pom.xml` / `build.gradle`: `services/users` depends on `plugins/logging` | Extracted (build files) |
 | `EXPOSES` | Application → Interface | | The app serves this endpoint or method | Extracted |
-| `INVOKES` | Function → Function | `seq`, `conditional`, `in_loop`, `async`, `ambiguous` | **A call in code** (in-process). `seq` = position of the call site in the caller. | Extracted |
+| `INVOKES` | Function → Function | `seq`, `conditional`, `in_loop`, `async`, `ambiguous`, `candidate` | **A call in code** (in-process). `seq` = position of the call site in the caller. `candidate`: a call to an abstract method, linked to each implementation because which one runs is decided at runtime. | Extracted |
 | `CALLS` | Function → Interface / ExternalSystem | `transport`, `confidence` | **A network call** to an endpoint or gRPC method | Extracted |
 | `PRODUCES` / `CONSUMES` | Function → KafkaTopic / Queue | `consumer_group` | Async messaging | Extracted |
 | `READS_FROM` / `WRITES_TO` | Function → Table / DataStore | `operation` | Data access. Table-level when known. | Extracted |
