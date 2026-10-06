@@ -3,6 +3,7 @@ import type { ElkExtendedEdge, ElkNode } from 'elkjs/lib/elk-api'
 import type { Edge, Node } from '@xyflow/react'
 import { MarkerType } from '@xyflow/react'
 import type { GraphEdge, GraphNode, GraphView } from '../../api/client'
+import { alongCurve } from './curve'
 import type { Point, RoutedData } from './edges'
 import { partText, type LabelPart } from './labels'
 
@@ -204,9 +205,10 @@ async function layoutOnce(
     const [width, height] = shapes.get(n.id)!.size
     push(n.parent ?? null, { id: n.id, width, height })
   }
-  // Level labels sit midway between columns, so each gap is as wide as the longest label
+  // Level labels sit on the lines between columns, so each gap fits the longest label with
+  // line still showing on both sides of it
   const longest = Math.max(0, ...view.edges.map((e) => (e.label ?? '').length))
-  const levelSpacing = { ...LEVEL_SPACING, 'elk.layered.spacing.nodeNodeBetweenLayers': String(Math.max(130, longest * 7 + 70)) }
+  const levelSpacing = { ...LEVEL_SPACING, 'elk.layered.spacing.nodeNodeBetweenLayers': String(Math.max(160, longest * 7.4 + 150)) }
   const groupNode = (id: string): ElkNode => {
     const kids = (children.get(id) ?? []).map((c) => (groupIds.has(c.id) ? groupNode(c.id) : c))
     const kind = groupKind.get(id)!
@@ -321,6 +323,7 @@ async function layoutOnce(
     }
   }
   walk(laid)
+  if (level) placeLevelLabels(view.edges, routes, rfNodes, absolute)
 
   const widest = Math.max(1, ...view.edges.map((e) => e.n))
   const rfEdges: Edge[] = view.edges
@@ -332,6 +335,43 @@ async function layoutOnce(
 interface Route {
   points: Point[]
   labelAt?: Point
+}
+
+interface Rect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/** Tried from the middle outward: the first spot clear of every tile and earlier label wins */
+const LABEL_SPOTS = [0.5, 0.42, 0.58, 0.34, 0.66, 0.26, 0.74, 0.18, 0.82]
+
+/**
+ * Level labels aren't given to ELK (it would give them columns of their own and spread the
+ * tiles apart), so place them here: on the drawn curve, clear of tiles and of each other.
+ * Busier connections choose first.
+ */
+function placeLevelLabels(edges: GraphEdge[], routes: Map<string, Route>, nodes: Node[], absolute: Map<string, Point>) {
+  const tiles: Rect[] = nodes.filter((n) => n.type !== 'cluster').map((n) => ({ ...absolute.get(n.id)!, w: n.width ?? 0, h: n.height ?? 0 }))
+  const placed: Rect[] = []
+  const clear = (r: Rect) => [...tiles, ...placed].every((o) => !overlaps(r, o, 8))
+  for (const e of [...edges].sort((a, b) => b.n - a.n)) {
+    const route = routes.get(e.id)
+    if (!route || route.points.length < 2) continue
+    const parts = (e as { parts?: LabelPart[] }).parts ?? []
+    const w = Math.max(60, ...parts.map((p) => partText(p).length * 7.4 + 34))
+    const h = Math.max(1, parts.length) * 19 + 12
+    const spots = alongCurve(route.points, true, LABEL_SPOTS)
+    const box = (c: Point): Rect => ({ x: c.x - w / 2, y: c.y - h / 2, w, h })
+    const best = spots.find((c) => clear(box(c))) ?? spots[0]
+    route.labelAt = best
+    placed.push(box(best))
+  }
+}
+
+function overlaps(a: Rect, b: Rect, margin: number): boolean {
+  return a.x < b.x + b.w + margin && b.x < a.x + a.w + margin && a.y < b.y + b.h + margin && b.y < a.y + a.h + margin
 }
 
 /** Every edge's route, wherever ELK put it in the hierarchy */

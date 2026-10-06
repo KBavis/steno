@@ -1,5 +1,6 @@
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, useInternalNode, type Edge, type EdgeProps } from '@xyflow/react'
 import { ArrowUpRight } from 'lucide-react'
+import { alongCurve, dist, toward } from './curve'
 import { PARTS, partText, sentence, type LabelPart } from './labels'
 import type { EntityData } from './layout'
 
@@ -39,7 +40,7 @@ export function RoutedEdge(props: EdgeProps<Edge<RoutedData>>) {
   if (routed) {
     const points = data!.points!
     path = data!.spline ? splinePath(points) : roundedPath(points, 10)
-    const mid = data!.labelAt ?? halfway(points)
+    const mid = data!.labelAt ?? alongCurve(points, !!data!.spline, [0.5])[0]
     lx = mid.x
     ly = mid.y
   } else {
@@ -105,21 +106,3 @@ function roundedPath(p: Point[], radius: number): string {
   const last = p[p.length - 1]
   return `${d} L ${last.x} ${last.y}`
 }
-
-/** The point halfway along a route, measured along its control polygon */
-function halfway(p: Point[]): Point {
-  const lengths = p.slice(1).map((q, i) => dist(p[i], q))
-  let left = lengths.reduce((a, b) => a + b, 0) / 2
-  for (let i = 0; i < lengths.length; i++) {
-    if (left <= lengths[i]) return toward(p[i], p[i + 1], left)
-    left -= lengths[i]
-  }
-  return p[p.length - 1]
-}
-
-const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y)
-function toward(from: Point, to: Point, r: number): Point {
-  const len = dist(from, to) || 1
-  return { x: from.x + ((to.x - from.x) / len) * r, y: from.y + ((to.y - from.y) / len) * r }
-}
-
