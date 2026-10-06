@@ -2,7 +2,7 @@
 
 export type JobMode = 'full' | 'incremental' | 'dry_run'
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed'
-export type StageName = 'clone' | 'deps' | 'parse' | 'resolve' | 'flows' | 'write' | 'cards'
+export type StageName = 'clone' | 'deps' | 'parse' | 'extract' | 'assemble' | 'flows' | 'write' | 'cards'
 export type StageStatus = 'running' | 'succeeded' | 'failed' | 'skipped'
 
 export interface Health {

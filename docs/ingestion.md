@@ -12,7 +12,7 @@ Part of the [Design Doc](./DESIGN_DOC.md). Status markers: **Decided** · **Prop
 |---|---|
 | **Build bottom-up.** Applications first; space and org views are rollups. | Decided |
 | **Deterministic first.** Rules extract facts. Jev decides only what rules can't. The LLM only writes prose. | Decided |
-| **Agnostic core, org-specific plugins.** The core defines fact types; extractors are rules and plugins that orgs extend. | Decided |
+| **Agnostic core, org-specific plugins.** The core defines fact types; rules (in rule packs) and plugins are what orgs extend. | Decided |
 | **Passive.** Applications don't opt in to anything; Steno reads what already exists. No OpenTelemetry, Terraform, or annotations are required. | Decided |
 | **Idempotent.** Re-running any ingestion yields the same graph. | Decided |
 | **Static only in Phase 1.** Code and config only. Runtime signals (Splunk, OpenTelemetry) are deferred. | Decided |
@@ -25,12 +25,15 @@ Part of the [Design Doc](./DESIGN_DOC.md). Status markers: **Decided** · **Prop
 ```mermaid
 flowchart LR
     C[Connector<br/><i>access</i>] --> W[Workspace<br/><i>temporary clone</i>]
-    W --> X[Extractors<br/><i>rules → raw facts</i>]
-    W --> SR[Symbol resolution<br/><i>JavaParser + dependency JARs</i>]
-    X --> CG[Call graph + flows<br/><i>whole app</i>]
+    W --> P[Parse<br/><i>syntax trees + symbol index</i>]
+    P --> X[Rule engine<br/><i>rule packs → facts + clues</i>]
+    P --> SR[Symbol resolver<br/><i>names, types, values</i>]
+    SR -. answers .-> X
+    X --> A[Assemblers<br/><i>clues → complete facts</i>]
+    SR -. answers .-> A
+    A --> CG[Call graph + flows<br/><i>whole app; IDs, stubs</i>]
     SR --> CG
-    CG --> R[Resolver<br/><i>placeholders, DI, stubs</i>]
-    R --> GW[Graph writer<br/><i>MERGE by stable ID</i>]
+    CG --> GW[Graph writer<br/><i>MERGE by stable ID</i>]
     GW --> D[Delta<br/><i>added / removed / changed</i>]
     D --> CARD[Card generator<br/><i>LLM, gated by Jev</i>]
     GW --> NEO[(Neo4j)]
@@ -42,10 +45,21 @@ flowchart LR
 
 Flows are **derived**, not extracted one by one:
 
-1. **Per file:** extractors emit structural facts (entry points, interfaces, functions, calls, reads/writes, entities). File order doesn't matter.
-2. **Whole application:** build the call graph with symbol resolution, then walk from every entry point to derive all flows at once.
-3. **Resolve:** config placeholders, DI candidates, stubs, identities across applications.
-4. **Write:** `MERGE` by stable ID, compute the delta, then generate cards for changed nodes only.
+1. **Parse:** read the code once. Every file is listed once, the symbol resolver builds its index (modules, imports, classes, functions), and every file a rule will look at becomes a syntax tree. No rules run.
+2. **Extract:** the **rule engine** runs every rule of every enabled rule pack over every file. File order doesn't matter. Each match produces one of three kinds of output:
+
+| Kind | Example | Done? |
+|---|---|---|
+| **Fact** | Class `Job` maps to table `job` | Yes: goes on to the graph as it is |
+| **Fact with a blank** | Endpoint `POST /projects/{project_id}`, prefixed by `router` | Not yet: its full path waits for the router's prefixes |
+| **Clue** | `router` has prefix `/jobs` | Never stored: a note that fills another fact's blank |
+
+3. **Assemble:** each clue type's **assembler** fills in the blanks from the clues, such as an endpoint's full path. It runs before flows, which need completed facts to name each flow.
+4. **Whole application (flows):** build the call graph with the symbol resolver, then walk from every entry point to derive all flows at once. The graph builder gives every fact a stable ID and creates stubs for targets not yet ingested.
+5. **Write:** `MERGE` by stable ID, compute the delta, then generate cards for changed nodes only.
+
+> [!IMPORTANT]
+> **Resolve** and **assemble** are different jobs (D56). The **symbol resolver** (one per language, §5) answers *what is this?*: which symbol a name refers to, a value's type, the constant it holds. **Assemblers** (one per clue type, the same for every language) combine clues into complete facts, asking the symbol resolver when they need to. Nothing else is called a resolver.
 
 ---
 
@@ -103,13 +117,13 @@ Queries never need a clone. Steno stores **no file contents**: code tools read f
 
 ### What a config file produces
 
-Config files become **facts** in the graph, plus a raw property map for the resolver.
+Config files become **facts** in the graph, plus a raw property map for the symbol resolver.
 
 | Config value | Becomes |
 |---|---|
 | Kafka topic names, consumer groups | `KafkaTopic` nodes, `CONSUMES` / `PRODUCES` properties |
 | Kafka bootstrap servers | `KafkaCluster` node identity (`HOSTED_ON`) |
-| Downstream base URLs (`services.billing.url`) | Resolve `CALLS` targets to a host, then an application or `ExternalSystem` |
+| Downstream base URLs (`services.billing.url`) | Give `CALLS` targets a host, then an application or `ExternalSystem` |
 | Datasource URLs | `DataStore` node identity: host, database, vendor |
 | Cron expressions, scheduling config | `Schedule` properties |
 | Every property, per profile | Re-read from the clone in every job to resolve placeholders (nothing stored) |
@@ -117,9 +131,9 @@ Config files become **facts** in the graph, plus a raw property map for the reso
 
 ---
 
-## 4. Extractors: rules for being agnostic
+## 4. Rules and rule packs
 
-An extractor is a rule: **"when you see X, emit fact Y."** Extractors match **file types and code patterns, not connectors**, so a Spring controller rule works whether the code came from Bitbucket or GitHub.
+A rule says **"when you see X, emit fact Y."** Rules come in **rule packs**, and the **rule engine** runs them in the extract stage. Rules match **file types and code patterns, not connectors**, so a Spring controller rule works whether the code came from Bitbucket or GitHub.
 
 | Format | Used for | Example |
 |---|---|---|
@@ -127,7 +141,7 @@ An extractor is a rule: **"when you see X, emit fact Y."** Extractors match **fi
 | **Config path rules** | YAML / properties / XML | `spring.kafka.consumer.topics` → `KafkaTopic` + `CONSUMES` |
 | **Code plugins** | Anything rules can't express | An internal communication framework |
 
-A rule pairs an ast-grep pattern (`match`) with what it means in Steno's vocabulary (`emit`): nodes, edges, **clues** (partial facts a resolver combines across files, such as a router's URL prefix), and **entry points**. Rules never reference each other, and every rule ships with test cases. **The full format: [Extractor Rules](./extractor-rules.md).**
+A rule pairs an ast-grep pattern (`match`) with what it means in Steno's vocabulary (`emit`): nodes, edges, **clues** (partial facts an assembler combines across files, such as a router's URL prefix), and **entry points**. Rules never reference each other, and every rule ships with test cases. **The full format: [Rules and Rule Packs](./rule-packs.md).**
 
 ```yaml
 id: fastapi-endpoint
@@ -140,21 +154,21 @@ emit:
     as: endpoint
     method: $METHOD
     path: $PATH
-    prefixed_by: $ROUTER        # a clue resolver adds the router's prefix chain
+    prefixed_by: $ROUTER        # the prefix-chain assembler adds the router's prefixes
   - edge: EXPOSES
     from: "@app"
     to: endpoint
   - entry_point: { trigger: endpoint, function: "@function" }
 ```
 
-- The core ships **common extractors**. Organizations **add plugins** over time without changing the core.
+- The core ships **common rule packs**. Organizations **add their own packs and plugins** over time without changing the core.
 - The first set targets our org's patterns: Kafka configs, controllers, application YAML, service providers, and scheduling (`@Scheduled`, cron).
-- **Scheduling differences between orgs** are handled the same way: each mechanism is an extractor that emits a `Schedule` node.
+- **Scheduling differences between orgs** are handled the same way: each mechanism is a rule (or plugin) that emits a `Schedule` node.
 - **Data definitions:** JPA / Spring Data rules produce entities and stub tables. **Org plugins** cover internal mechanisms for defining tables and relationships.
 
 ### Rule packs (Decided)
 
-Rules are published as **versioned packs**, like ESLint shareable configs or the Semgrep registry: `steno-pack-spring-web`, `steno-pack-spring-kafka`, `steno-pack-jpa`, plus an org pack such as `yourorg-internal`. Packs are grouped by ecosystem in `rule-packs/` (`java/`, `python/`, `org/`); see [Extractor Rules §6](./extractor-rules.md#6-packs-and-layout-decided).
+Rules are published as **versioned packs**, like ESLint shareable configs or the Semgrep registry: `steno-pack-spring-web`, `steno-pack-spring-kafka`, `steno-pack-jpa`, plus an org pack such as `yourorg-internal`. Packs are grouped by ecosystem in `rule-packs/` (`java/`, `python/`, `org/`); see [Rules and Rule Packs §6](./rule-packs.md#6-packs-and-layout-decided).
 
 - **Packs are auto-enabled** from the build file's dependencies (`spring-kafka` present → Kafka pack on).
 - Rough size for a Spring/Kafka stack: **~40–60 rules**, written once per framework, not per repository:
@@ -192,7 +206,7 @@ Until then, Jev I2/I3 cover them at low confidence.
 
 ### Turning a coverage item into a rule (Deferred: future enhancement)
 
-**Phase 1 is fully deterministic.** A person writes each rule, by hand or with the `rule-pack-author` skill as an assistant ([Extractor Rules §8](./extractor-rules.md#8-writing-rules-by-hand-or-with-the-skill-decided)), and the coverage report tells you which rules to write next. Steno itself never generates rules in Phase 1. Everything below is a **future enhancement**, useful once many organizations are writing their own rules.
+**Phase 1 is fully deterministic.** A person writes each rule, by hand or with the `rule-pack-author` skill as an assistant ([Rules and Rule Packs §8](./rule-packs.md#8-writing-rules-by-hand-or-with-the-skill-decided)), and the coverage report tells you which rules to write next. Steno itself never generates rules in Phase 1. Everything below is a **future enhancement**, useful once many organizations are writing their own rules.
 
 There's **no LLM scanning the repository.** It works like this:
 
@@ -233,7 +247,7 @@ Flows depend on knowing that `passSvc.callToFunction()` refers to a specific met
 | SCIP (`scip-java`, …) | Runs the real compiler over a full build and outputs every reference | Most accurate, but needs every repo to build in the ingestion environment, which is a large operational effort at org scale | Not planned. Possible future option if measured gaps justify it. |
 | Headless language server (jdtls) | Queries an LSP server | Accurate, slow, harder to run | Not planned |
 
-Each additional language needs its own resolver, a cost of skipping SCIP's shared format.
+Each additional language needs its own symbol resolver, a cost of skipping SCIP's shared format.
 
 ### 5.1a The call resolution plan (Java)
 
@@ -246,7 +260,7 @@ flowchart TD
     T2 --> T3{"3. Interface or<br/>abstract?"}
     T3 -- "no (concrete class)" --> T5
     T3 -- yes --> T4a{"Interface with<br/>no implementation?"}
-    T4a -- "yes: Spring Data repo, Feign client, ..." --> R[Extractor rule decides<br/>READS_FROM / WRITES_TO / CALLS]
+    T4a -- "yes: Spring Data repo, Feign client, ..." --> R[A rule decides<br/>READS_FROM / WRITES_TO / CALLS]
     T4a -- "no" --> T4[4. DI resolution<br/>beans · @Primary · @Qualifier · @Profile]
     T4 -- one --> T5["5. Target identity<br/>fn:repo:com.x.PassServiceImpl#callToFunction(ClientRequest)"]
     T4 -- several --> J[Jev I1, or link all, marked ambiguous]
@@ -265,7 +279,7 @@ flowchart TD
    3. `@Qualifier` at the injection point matching a bean name, otherwise `@Primary`.
    4. `@Profile` / `@ConditionalOnProperty` evaluated against the app's config.
    5. One left: resolved. Several: Jev I1 chooses; below the threshold, link to all of them, marked `ambiguous`.
-   - **Interfaces with no implementation in the code** are generated by the framework at runtime: Spring Data repositories, Feign clients, gRPC stubs. **Extractor rules** handle them: a `JpaRepository<User, …>` method becomes `READS_FROM` / `WRITES_TO` the `users` table; a `@FeignClient` method becomes `CALLS` an endpoint. This is where DI resolution and extractor rules meet.
+   - **Interfaces with no implementation in the code** are generated by the framework at runtime: Spring Data repositories, Feign clients, gRPC stubs. **Rules** handle them: a `JpaRepository<User, …>` method becomes `READS_FROM` / `WRITES_TO` the `users` table; a `@FeignClient` method becomes `CALLS` an endpoint. This is where DI resolution and extractor rules meet.
 5. **Target identity.** Every function has a stable ID built from its fully qualified name **and parameter types**: `fn:{repo}:com.x.PassServiceImpl#callToFunction(com.x.ClientRequest)`. So a call always points to **one specific, already-known function**, and two calls to it point to the same node.
 6. **Where the target lives:**
    - this repo: `INVOKES` to its `Function` node
@@ -286,7 +300,7 @@ flowchart TD
 
 ### 5.1b The call resolution plan (Python) (Decided)
 
-Steno's own small resolver, built on Python's `ast` module (D51); rules still match with ast-grep. It answers the same questions as the Java plan with Python's rules:
+Steno's own small symbol resolver, built on Python's `ast` module (D51); rules still match with ast-grep. It answers the same questions as the Java plan with Python's rules:
 
 0. **Source roots:** module names are relative to each Python project in the repository (a folder with `pyproject.toml`, `setup.py`, `setup.cfg`, or `requirements*.txt`, or its `src/`), so `apps/backend/app/models.py` in a monorepo is `app.models`.
 1. **Names:** follow `import` / `from … import … as …` and module-level assignments, so `job_router` in `__init__.py` and `router` in `job.py` are the same symbol.
@@ -296,7 +310,7 @@ Steno's own small resolver, built on Python's `ast` module (D51); rules still ma
 
 What it can't follow (dynamic attribute access, values built at runtime, untyped parameters) is marked unresolved and shows up in the coverage report. Pyright or Jedi are options only if those gaps turn out to matter.
 
-**How it works.** At the start of the parse stage the resolver reads every source file once into an index: source roots and module names, and per module its imports, classes (bases, methods, class values, `self.x` attributes), functions (parameters, annotations, return types, line spans), and module-level values. Nothing is resolved in advance; each question is answered when the engine, the resolve pass, or the call graph asks it, by recursively asking smaller questions. Clues teach it two things during the run: configuration values (`property`) and library return types (`client` … `returns`).
+**How it works.** At the start of the parse stage the resolver reads every source file once into an index: source roots and module names, and per module its imports, classes (bases, methods, class values, `self.x` attributes), functions (parameters, annotations, return types, line spans), and module-level values. Nothing is resolved in advance; each question is answered when the engine, an assembler, or the call graph asks it, by recursively asking smaller questions. Clues teach it two things during the run: configuration values (`property`) and library return types (`client` … `returns`).
 
 | Question | Answers | Gives up on |
 |---|---|---|
@@ -308,7 +322,7 @@ What it can't follow (dynamic attribute access, values built at runtime, untyped
 | `is_subclass(type, targets)` | Whether a type is, or inherits from, one of the targets (repository bases walked; library bases by name) | Inheritance inside libraries that aren't read |
 | `invocations(fn)` | Every first-party call in a function, closures included, in execution order, flagged conditional or in-loop: the call graph | Runtime dispatch, calls through base classes |
 
-**One resolver per language.** Each language gets its own resolver behind these same questions. The engine today builds only the Python resolver, so a repository mixing languages needs a resolver per language, chosen by each rule's `language` (Open). Links between languages go through shared interface nodes in the graph, not through a resolver.
+**One symbol resolver per language.** Each language gets its own symbol resolver behind these same questions. The engine today builds only the Python one, so a repository mixing languages needs a symbol resolver per language, chosen by each rule's `language` (Open). Links between languages go through shared interface nodes in the graph, not through a resolver.
 
 ### 5.2 DI rules are per-framework plugins
 
@@ -316,12 +330,18 @@ Step 4 above is Spring's set of rules. Other frameworks (Guice, Dagger, .NET DI)
 
 ---
 
-## 6. Resolver
+## 6. Config values, identity, and hosts
 
-- **Config placeholders:** `${kafka.topics.orders}` is resolved by walking `application.yml` → `application-{env}.yml` → `${X:default}` defaults.
-- **Secret values are never ingested.** A value that comes from a vault is recorded as an **unresolved reference** with low confidence. Topic names and URLs are rarely secrets.
-- **Identity:** outbound calls and topics resolve to stable IDs, and stubs are created for targets not yet ingested.
-- **Internal vs. vendor hosts:** a list of known org domains, with Jev I4 for anything not on it.
+There is no separate resolver component (D56). These jobs belong to the parts above:
+
+| Job | Done by | How |
+|---|---|---|
+| **Config placeholders** | Symbol resolver, from `property` clues | `${kafka.topics.orders}` is answered by walking `application.yml` → `application-{env}.yml` → `${X:default}` defaults |
+| **DI candidates** | Symbol resolver + per-framework DI rules (§5), then Jev I1 | See §5 |
+| **Identity and stubs** | Graph builder | Outbound calls and topics get stable IDs, and stubs are created for targets not yet ingested |
+| **Internal vs. vendor hosts** | Graph builder | A list of known org domains, with Jev I4 for anything not on it |
+
+**Secret values are never ingested.** A value that comes from a vault is recorded as an **unresolved reference** with low confidence. Topic names and URLs are rarely secrets.
 
 ### Glossary (Decided: human-declared in V1)
 
@@ -363,7 +383,7 @@ sequenceDiagram
     Orc->>PG: read last_ingested_sha
     Orc->>Wk: run(repo, last_sha..new_sha)
     Wk->>Wk: fetch, then git diff --name-status last..new
-    Wk->>Wk: re-run per-file extractors on the changed files
+    Wk->>Wk: re-run parse and extract on the changed files
     Wk->>Neo: find flows reaching changed functions (reverse reachability)
     Wk->>Wk: re-derive those flows
     Wk->>Neo: MERGE facts, remove stale ones
@@ -380,7 +400,7 @@ sequenceDiagram
 
 ### Steno owns re-ingestion (Decided)
 
-Only Steno's extractors can produce facts in Steno's model. Contextualized later adds the **attribution** (which Project) and the **why**. It never supplies the structural facts.
+Only Steno's rule packs can produce facts in Steno's model. Contextualized later adds the **attribution** (which Project) and the **why**. It never supplies the structural facts.
 
 ---
 
@@ -433,7 +453,7 @@ erDiagram
 | `rule_pack` | `id`, `name`, `version`, `source` (core / org) |
 | `repository_rule_pack` | `repository_id`, `rule_pack_id`, `enabled`, `reason` (auto / manual) |
 | `ingestion_job` | `id`, `repository_id`, `trigger` (initial / merge / manual), `mode` (full / incremental / dry_run), `from_sha`, `to_sha`, `status` (queued / running / succeeded / failed), `queued_at`, `started_at`, `finished_at`, `error`, `stats` (json) |
-| `ingestion_stage` | `id`, `job_id`, `stage` (clone / deps / parse / resolve / flows / write / cards), `started_at`, `finished_at`, `status`, `metrics` (json), `llm_cost`, `jev_cost` |
+| `ingestion_stage` | `id`, `job_id`, `stage` (clone / deps / parse / extract / assemble / flows / write / cards), `started_at`, `finished_at`, `status`, `metrics` (json), `llm_cost`, `jev_cost` |
 | `coverage_item` | `id`, `job_id`, `repository_id`, `kind` (call site / annotation), `target_symbol`, `occurrences`, `samples` (json), `status` (open / ignored / covered) |
 | `fact_change` | `id`, `job_id`, `fact_id`, `fact_type`, `change` (added / removed / modified), `before` (json), `after` (json), `commit_sha` |
 | `job_commit` | `job_id`, `commit_sha`, `pr_number`, `pr_url`, `merged_at` |
@@ -458,7 +478,7 @@ erDiagram
 | Table | Why |
 |---|---|
 | `ingestion_job` | Every job (`trigger`: initial / merge / manual; `mode`: full / incremental / **dry_run**) and its status (**queued** / running / succeeded / failed). **It's also the work queue.** |
-| `ingestion_stage` | Per stage (clone, deps, parse, resolve, flows, write, cards): timings, metrics (files, functions, flows), and **cost** (`llm_cost`, `jev_cost`, summed from the calls made in that stage). This is the dry-run report. |
+| `ingestion_stage` | Per stage (clone, deps, parse, extract, assemble, flows, write, cards): timings, metrics (files, functions, flows), and **cost** (`llm_cost`, `jev_cost`, summed from the calls made in that stage). This is the dry-run report. |
 | `coverage_item` | What **no rule explained** but looks like it matters: unexplained call sites and unrecognized annotations, with occurrence counts and sample locations. `status` is open / ignored / covered, so it's tracked across jobs, noise stays hidden once ignored, and open items measure how complete an app's graph is. |
 
 ### Change history

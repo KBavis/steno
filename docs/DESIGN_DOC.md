@@ -5,7 +5,7 @@
 | **Status** | Draft v0.1 |
 | **Author** | Kellen Bavis |
 | **Last updated** | 2026-09-27 |
-| **Detailed docs** | [Knowledge Graph](./knowledge-graph.md) · [Ingestion](./ingestion.md) · [Extractor Rules](./extractor-rules.md) · [Retrieval & MCP](./retrieval-and-mcp.md) · [Jev](./jev.md) · [Use Cases](./use-cases.md) |
+| **Detailed docs** | [Knowledge Graph](./knowledge-graph.md) · [Ingestion](./ingestion.md) · [Rules and Rule Packs](./rule-packs.md) · [Retrieval & MCP](./retrieval-and-mcp.md) · [Jev](./jev.md) · [Use Cases](./use-cases.md) |
 
 Status markers used throughout: **Decided** · **Proposed** (suggested, not yet confirmed) · **Open** (not yet decided).
 
@@ -19,7 +19,7 @@ Key design choices:
 
 - **Built bottom-up, searched top-down.** Applications are ingested first, and space and org views are **rollups** of application facts. Queries start at the highest layer the question needs.
 - **Deterministic first.** Rules extract facts. **Jev** makes typed, calibrated decisions where rules can't. An **LLM only writes** summaries.
-- **Agnostic core, org-specific rules.** Connectors reach sources, and extractors are declarative rules that any org can extend.
+- **Agnostic core, org-specific rules.** Connectors reach sources, and declarative rules, bundled in rule packs, are what any org can extend.
 - **Fast by design.** Precomputed cards, routing to the right layer, server-side fan-out, and batch tools minimize agent round trips.
 - **Idempotent and incremental.** A one-time initial ingestion, then updates driven by commit ranges on every merge to main.
 
@@ -59,7 +59,7 @@ Agents are strong within one repository and blind beyond it. In a large enterpri
 
 - **Target scale:** a large enterprise, with thousands of repositories and many spaces.
 - **Phase 1 targets:** first **[Contextualized](https://github.com/KBavis/contextualized)** (public; Python, FastAPI, SQLAlchemy), which the author knows well enough to judge the graph by eye and which proves the design isn't tied to one language. Then one application in our own org (Spring Boot, Kafka, Bitbucket).
-- **Languages: multi-language by design.** Python comes first (Contextualized), then Java, which most of our org uses. Nothing in the graph model, pipeline, or MCP tools is Java-specific: each additional language needs extractor rule packs (ast-grep / Semgrep support many languages) and its own symbol resolver.
+- **Languages: multi-language by design.** Python comes first (Contextualized), then Java, which most of our org uses. Nothing in the graph model, pipeline, or MCP tools is Java-specific: each additional language needs rule packs (ast-grep / Semgrep support many languages) and its own symbol resolver.
 
 ---
 
@@ -103,7 +103,7 @@ flowchart TD
 
 | Work | Done by | When |
 |---|---|---|
-| Extracting facts | Deterministic rules (extractors) | Ingestion |
+| Extracting facts | Deterministic rules (rule packs) | Ingestion |
 | Decisions: classify, route, verify, gate, score | **Jev**, Steno's navigator | Ingestion and query |
 | Writing cards, flow summaries, glossary definitions | LLM: a stronger model for flow, app, and space cards; a small one for the rest | Ingestion only |
 | Reasoning and the final answer | The client's LLM | Query |
@@ -141,11 +141,11 @@ The UI (later) talks to an Admin API for connectors and runs, and uses the same 
 | Component | Responsibility |
 |---|---|
 | **MCP server** | Tools for agents. Stateless, reads Neo4j and Postgres, calls Jev for routing. |
-| **Admin / Onboarding API** | Connectors, extractors, space declarations, run status. Backs the UI. |
+| **Admin / Onboarding API** | Connectors, rule packs, space declarations, run status. Backs the UI. |
 | **Orchestrator** | Turns webhooks, schedules, and manual requests into ingestion runs. Tracks `last_ingested_sha`. |
-| **Ingestion workers** | Execute ingestion runs: clone, extract, resolve, derive flows, write facts, compute deltas, generate cards. They're separate from the MCP server so heavy work never slows queries, and several can run in parallel. In the POC, one process can play both orchestrator and worker. |
+| **Ingestion workers** | Execute ingestion runs: clone, extract, assemble, derive flows, write facts, compute deltas, generate cards. They're separate from the MCP server so heavy work never slows queries, and several can run in parallel. In the POC, one process can play both orchestrator and worker. |
 | **Neo4j** | The knowledge graph, summary cards, and the vector index |
-| **Postgres** | Application state: connectors, extractor registry, runs, deltas, Jev and LLM logs |
+| **Postgres** | Application state: connectors, rule packs, runs, deltas, Jev and LLM logs |
 
 ---
 
@@ -157,7 +157,7 @@ The UI (later) talks to an Admin API for connectors and runs, and uses the same 
 | Application state | **Postgres** | Relational data: connectors, runs, deltas, logs | Decided |
 | Code-pattern rules | **ast-grep / Semgrep** YAML rules (tree-sitter based) | Declarative, many languages, orgs can write their own | Decided |
 | Config rules | YAML / properties path rules | Kafka topics, URLs, and placeholders are in config | Decided |
-| Symbol resolution | **Our own, per language.** Java: JavaParser symbol solver + dependency JARs, run as a JVM helper. Python: a small resolver on tree-sitter. | Resolves calls, including through library types, without a full build | Decided (**SCIP not planned**) |
+| Symbol resolution | **Our own, per language.** Java: JavaParser symbol solver + dependency JARs, run as a JVM helper. Python: a small symbol resolver on Python's `ast` module (D51). | Resolves calls, including through library types, without a full build | Decided (**SCIP not planned**) |
 | DI resolution | Per-framework rule plugins (Spring first) + Jev I1 | The compiler can't know which bean gets injected | Decided |
 | Source access | **git clone** into temporary workspaces | Full source for resolution, rate limits, exact diffs | Decided |
 | Code access | Git host API at the ingested commit, with an in-memory cache. **No stored file contents.** | Simplest; code always matches the graph | Decided |
@@ -227,27 +227,30 @@ Full design: [ingestion.md](./ingestion.md).
 
 ```mermaid
 flowchart LR
-    C[Connector] --> W[Temporary clone] --> X[Extractors<br/>rules] --> CG[Call graph<br/>+ flows]
-    W --> SR[Symbol resolution<br/>JavaParser + JARs] --> CG
-    CG --> R[Resolver] --> GW[Graph writer<br/>MERGE by stable ID] --> D[Delta] --> CARD[Cards<br/>Jev-gated LLM]
+    C[Connector] --> W[Temporary clone] --> P[Parse<br/>trees + symbol index] --> X[Rule engine<br/>rule packs → facts + clues] --> A[Assemblers<br/>clues → complete facts] --> CG[Call graph<br/>+ flows]
+    P --> SR[Symbol resolver<br/>names, types, values] -. answers .-> X
+    SR -. answers .-> A
+    SR --> CG
+    CG --> GW[Graph writer<br/>MERGE by stable ID] --> D[Delta] --> CARD[Cards<br/>Jev-gated LLM]
 ```
 
 - **Connectors** are a source system plus a scope (a Bitbucket workspace or project, a GitHub org), with credentials stored as references into a secret manager. Repositories are selected separately: an explicit include list in Phase 1, discovery later.
-- **Extractors** are rules ("when you see X, emit Y"): an ast-grep pattern plus what it means in Steno's vocabulary (nodes, edges, clues, entry points), config path rules, or code plugins. They match **file types and patterns, not connectors**. Orgs add their own. Full format: [Extractor Rules](./extractor-rules.md).
+- **Rules** ("when you see X, emit Y"), bundled in **rule packs** and run by the **rule engine**, are an ast-grep pattern plus what it means in Steno's vocabulary (nodes, edges, clues, entry points), config path rules, or code plugins. They match **file types and patterns, not connectors**. Orgs add their own. Full format: [Rules and Rule Packs](./rule-packs.md).
   - Published as versioned **rule packs** (~40–60 rules for a Spring/Kafka stack), auto-enabled from build dependencies.
   - A **coverage report** after every ingestion ranks what no rule explained, which points straight at the internal frameworks worth a rule.
   - **Phase 1 is fully deterministic:** a person writes each rule, by hand or with the `rule-pack-author` skill, and every rule ships with test cases. Steno generating rules itself (templates, LLM drafting) is a future enhancement.
 - **Cloning** into a temporary workspace gives resolution the full source, avoids rate limits, and makes `git diff` exact. 
 - **Config files** become facts (topics, clusters, base URLs, datasources, schedules), plus a property map for placeholders.
-- **Resolution:**
-  - Symbols: Steno's own (JavaParser symbol solver + dependency JARs). SCIP is not planned.
-  - DI: framework rules, then Jev I1.
-  - Config placeholders are resolved. Secret values are never ingested.
+- **Resolving and assembling are different jobs (D56):**
+  - The **symbol resolver**, one per language, answers *what is this?*: which symbol a name refers to, a value's type, the constant it holds. Steno's own (Java: JavaParser symbol solver + dependency JARs; Python: D51). SCIP is not planned. Config placeholders and DI are answered here too: DI by framework rules, then Jev I1. Secret values are never ingested.
+  - **Assemblers**, one per clue type and the same for every language, combine clues found in different files into complete facts: a router's prefix + an endpoint's path → the full path.
+  - The **graph builder** gives facts stable IDs, creates stubs, and tells internal hosts from vendors.
 - **Passes:**
-  1. Per file.
-  2. Whole app (call graph → all flows at once).
-  3. Resolve.
-  4. Write.
+  1. Parse: read the code once (syntax trees, symbol index).
+  2. Extract: run every rule on every file → facts, facts with blanks, and clues.
+  3. Assemble: fill in the blanks from the clues.
+  4. Whole app (call graph → all flows at once).
+  5. Write.
 - **Idempotency:** stable IDs from natural keys. Re-ingesting a scope replaces its facts. Shared nodes are removed only when nothing references them.
 - **Incremental updates:**
   - Triggered by a merge to main.
@@ -363,7 +366,7 @@ Full design: [jev.md](./jev.md). **Decided:** Jev makes every decision that dete
 | Level | What the org does | What Steno gets |
 |---|---|---|
 | **Passive** (default) | Grants read access | Repos, config, and later deployment / infrastructure definitions |
-| **Annotate** (optional) | Adds a small `steno.yaml` where extractors get something wrong | Overrides and names |
+| **Annotate** (optional) | Adds a small `steno.yaml` where rules get something wrong | Overrides and names |
 | **Instrument** (optional, later) | Adopts OpenTelemetry, or exposes Splunk | Runtime-observed edges |
 
 **Onboarding flow (Decided):** on first run, the admin is walked through:
@@ -378,7 +381,7 @@ Everything entered here can be changed or extended afterward.
 1. **Declare** (Phase 1–2): a space is a list of repositories.
 2. **Admin-defined:** spaces are always defined by an admin. Automatic proposals (Jev I6, graph clustering) are a possible later addition, not planned.
 
-**Extending to a new org:** add connectors for its tools, and add extractor rules or plugins for its frameworks. The core model doesn't change.
+**Extending to a new org:** add connectors for its tools, and add rule packs or plugins for its frameworks. The core model doesn't change.
 
 ---
 
@@ -388,7 +391,7 @@ MCP is the primary interface. A UI comes later, for the tasks where people need 
 
 | Area | What it does |
 |---|---|
-| **Onboarding and connectors** | Add connectors, pick extractors, declare spaces, watch ingestion runs |
+| **Onboarding and connectors** | Add connectors, pick rule packs, declare spaces, watch ingestion runs |
 | **Space management** | Admins define spaces and assign repositories to them |
 | **Low-confidence review queue** | Humans resolve decisions Jev marked `ambiguous` |
 | **Flow tracer** | Visually follow a flow step by step, stitched across services, with its code |
@@ -459,7 +462,7 @@ Correctness comes first, so it has to be measured:
 |---|---|---|
 | Static call graphs miss DI, reflection, and dynamic dispatch | Missing or wrong flow steps | Symbol solver with dependency JARs + DI rules + Jev I1. Mark `ambiguous`. Coverage report. Runtime signals later. |
 | Flows can't be found from business-language questions | Search misses the right flow | Business-language flow cards from a stronger model, four retrieval signals, Jev Q4 verification, measured against a question → flow set |
-| Extractors overfit to our org | Not agnostic | Rules and plugins, a public second target, the core never depends on org rules |
+| Rules overfit to our org | Not agnostic | Rules and plugins, a public second target, the core never depends on org rules |
 | Enterprise scale (millions of functions) | Slow ingestion and queries | Incremental updates, derived tags, materialized rollups, measure early |
 | Jev is new | Wrong decisions | Calibration on a gold set, logging, a replaceable `Decision` interface |
 | Data egress policy | Blocks Jev / LLM | Confirm early. Minimal state. |
@@ -508,7 +511,7 @@ Correctness comes first, so it has to be measured:
 | D36 | Neo4j is rebuildable from Postgres + git without re-spending on the LLM (`llm_output` cache). Nothing is stored only in Neo4j. | Decided |
 | D37 | The organization is declared in Postgres as a single `organization` row (name, description), entered during onboarding and projected into Neo4j | Decided |
 | D38 | First-run onboarding: Organization → Spaces → Connectors → Repositories | Decided |
-| D40 | Extractor rule format: an ast-grep `match` plus a Steno `emit` of nodes, edges, clues, and entry points; `where` conditions on resolved types. Rules never reference each other: clues are joined by the symbol they're about, in the resolve pass. Clue types are a fixed set, each with a built-in resolver (prefix chain, config first). See [Extractor Rules](./extractor-rules.md). | Decided |
+| D40 | Rule format: an ast-grep `match` plus a Steno `emit` of nodes, edges, clues, and entry points; `where` conditions on resolved types. Rules never reference each other: clues are combined by the symbol they're about, in the assemble pass. Clue types are a fixed set, each with a built-in assembler (prefix chain, config first). See [Rules and Rule Packs](./rule-packs.md). | Decided |
 | D41 | Every rule ships with test cases (input code + expected facts), run by `steno rules test` | Decided |
 | D42 | A person owns every rule and may write it by hand or with the `rule-pack-author` skill. Steno generating rules on its own stays deferred (refines D25). | Decided |
 | D43 | Rule packs are grouped by ecosystem: `rule-packs/java/`, `python/`, `org/` | Decided |
@@ -524,6 +527,8 @@ Correctness comes first, so it has to be measured:
 | D53 | UI: semantic zoom through the containment tree (org → space → application → flow → code) with a details panel; full-window, one continuous camera zoom between levels; each level shows only its container's direct children and how they communicate; views built once in the backend and shared with MCP `get_node`; React Flow + ELK for structured views | Decided |
 | D54 | First MCP tools: `get_node`, `get_flow`, `find_dependents`, `search` (full-text first), `view_flow_code`; every call logged in `tool_call` | Decided |
 | D55 | POC staging: finish Contextualized → a stub organization we control → spring-petclinic-microservices → our org's application | Decided |
+| D56 | Terminology: "resolver" means only the per-language **symbol resolver** (what a name, type, or value is). The per-clue-type code that combines clues into complete facts is an **assembler**, run in the **assemble** stage (after extract, before flows, which need completed facts). The former "Resolver" component is split: config placeholders and DI → symbol resolver; identity, stubs, internal vs. vendor hosts → graph builder. | Decided |
+| D57 | Stages: **parse** (read the code once: file list, symbol index, syntax trees; no rules) is split from **extract** (the **rule engine** runs rule packs and emits facts, facts with blanks, and clues). Full order: clone → deps → parse → extract → assemble → flows → write → cards. "Extractor" is no longer a component name: the units are **rules** in **rule packs**. | Decided |
 | D39 | A connector's scope is access only. Repository selection and placement are separate; at org scale, placement rules (connector + host grouping + optional name pattern → space) place repositories, an explicit assignment wins, and unmatched repositories go to an unassigned queue. Rules are built with discovery. | Decided |
 | D25 | Rule packs, auto-enabled from dependencies, plus a coverage report after every ingestion. Phase 1 rules are hand-written; templates and LLM-drafted rules are deferred. | Decided |
 
@@ -562,10 +567,14 @@ Correctness comes first, so it has to be measured:
 | **Stub** | A placeholder node for a target that isn't ingested yet. It merges with the real node by stable ID. |
 | **Delta** | The facts added, removed, or changed by one ingestion run |
 | **Connector** | Access to a source (where it is, and the credentials reference) |
-| **Extractor** | A rule or plugin: "when you see X, emit fact Y" |
+| **Rule** | One pattern and what it means: "when you see X, emit fact Y". Written in YAML; a code plugin covers what rules can't express. |
+| **Rule engine** | Runs every enabled rule pack over every file in the extract stage |
+| **Clue** | A partial fact a rule emits, such as "this router has prefix `/jobs`", labeled with the symbol it's about. Never stored; assemblers consume it. |
+| **Symbol resolver** | The per-language part that answers *what is this?*: which symbol a name refers to, a value's type, the constant it holds. The only thing called a resolver. |
+| **Assembler** | Code for one clue type that combines clues from different files into complete facts, e.g. prefix chains into an endpoint's full path. Language-agnostic. |
 | **Rollup** | A higher-layer fact derived from lower-layer facts |
 | **Digest** | A small, bounded summary of a node built from the graph (trigger, card, interactions), used as Jev's input |
-| **Rule pack** | A versioned bundle of extractor rules for one framework or org |
+| **Rule pack** | A versioned bundle of rules for one framework or org |
 | **Coverage report** | A per-ingestion list of what no rule explained, ranked by frequency |
 | **Entity anchor** | (Deferred) Retrieval that maps a question's nouns to Entity/Table nodes and its verb to an operation, then finds flows performing it |
 | **Citation** | The exact place a claim comes from: space, app, repo, module, file, lines, commit, and a link |

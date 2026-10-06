@@ -14,7 +14,7 @@ Part of the [Design Doc](./DESIGN_DOC.md). Status markers: **Decided** · **Prop
 | **Interfaces are nodes.** Endpoints, topics, and data stores are nodes of their own. Apps connect to them, and edges between apps appear automatically when two apps reference the same interface node. | Decided |
 | **Every node has exactly one owner in the tree.** A node's layer is where it sits, not a property of its type. | Decided |
 | **Abstraction uses labels, not `IS_A` edges.** Neo4j is a property graph: a node can have several labels. | Decided |
-| **Every fact records where it came from** (repo, symbol, ingested commit), what produced it (extractor, Jev decision), and its **confidence**. | Decided |
+| **Every fact records where it came from** (repo, symbol, ingested commit), what produced it (rule, Jev decision), and its **confidence**. | Decided |
 | **Every fact can be traced to its origin Project** through `Project -CHANGED-> element` edges, added once Contextualized supplies project deltas. | Decided |
 
 ### Three independent aspects of every node
@@ -125,14 +125,14 @@ Candidates for later: `Team`/owner, deployment `Environment`.
 
 ### Function properties
 
-**One schema for every language.** Nodes are not typed by language: a Java method, a Python function, and a Go method are all `Function` nodes with the same properties. Language differences live in the **extractors and resolvers** (one rule pack and resolver per language). Properties a language doesn't have are left empty, and anything truly language-specific goes in the `lang` bag.
+**One schema for every language.** Nodes are not typed by language: a Java method, a Python function, and a Go method are all `Function` nodes with the same properties. Language differences live in the **rule packs and symbol resolvers** (one rule pack and symbol resolver per language). Properties a language doesn't have are left empty, and anything truly language-specific goes in the `lang` bag.
 
 **How much to store:** only what's needed to (1) **identify** a function uniquely, (2) **resolve and traverse** calls, and (3) **display and summarize** it. Everything else is read from the source when needed.
 
 | Property | Meaning | Java example | Python example | Why |
 |---|---|---|---|---|
 | `id` | `fn:{repo}:{qualified_name}`, plus `({param types})` where the language has overloading | `fn:microservices:com.x.PassServiceImpl#callToFunction(com.x.ClientRequest)` | `fn:contextualized:app.services.job.JobService.run_data_source_job` | Identity |
-| `language` | Source language | `java` | `python` | Picks the rules and resolver |
+| `language` | Source language | `java` | `python` | Picks the rules and symbol resolver |
 | `name` | Short name | `callToFunction` | `run_data_source_job` | Display, keyword search |
 | `container` | What it's defined in: class, module, struct, object, or none | `com.x.PassServiceImpl` (class) | `app.services.job.JobService` (class) | Display, grouping |
 | `kind` | `function` / `method` / `static_method` / `constructor` / `lambda` | `method` | `method` | Resolution, display |
@@ -156,7 +156,7 @@ Candidates for later: `Team`/owner, deployment `Environment`.
 |---|---|
 | `id` | **Stable ID derived from natural keys**, e.g. `endpoint:{app}:{METHOD}:{path}`, `topic:{cluster}:{name}`, `fn:{repo}:{symbol}`, `table:{datastore}:{schema}:{name}` |
 | `source` | `{repo, symbol, commit}`: where the fact came from |
-| `extracted_by` | Extractor ID and version, or Jev decision ID |
+| `extracted_by` | Rule ID and version, or Jev decision ID |
 | `confidence` | 0–1. Deterministic rules produce 1.0. Jev-produced facts carry Jev's confidence. |
 | `ingestion_job` | ID of the job that last wrote the fact (used for idempotent replacement) |
 | `first_seen`, `last_seen`, `ingested_commit` | Cheap insurance toward version history later |
@@ -182,7 +182,7 @@ A role is an **optional label**. A module with no role is still an ordinary `Mod
 |---|---|---|
 | `:Service` | Produces a deployable: Spring Boot main class / boot packaging plugin, its own Dockerfile, its own deployment descriptor | Gets an `Application` |
 | `:Library` | Other modules depend on it; produces no deployable | Stored once, shared by the services that depend on it |
-| `:Contract` | Holds `.proto`, OpenAPI, or Avro definitions | Extractors read it for `Interface` definitions |
+| `:Contract` | Holds `.proto`, OpenAPI, or Avro definitions | Rules read it for `Interface` definitions |
 | `:Migrations` | Flyway / Liquibase scripts | Recognized in V1, parsed in V2 |
 | `:Test` | Test sources, integration-test modules | Excluded from flows |
 | `:Build` | Parent POM, BOM, aggregator, code generators, Helm / Terraform | Structure only |
@@ -214,7 +214,7 @@ A topic is shared infrastructure, so no Application owns it. It `BELONGS_TO` exa
 
 ## 4. Relationship types
 
-Every relationship is either **extracted** (read directly from code or config by an extractor) or **derived** (computed by Steno from other relationships, and stored only so traversals are faster). Derived relationships are recomputed whenever their inputs change.
+Every relationship is either **extracted** (read directly from code or config by a rule) or **derived** (computed by Steno from other relationships, and stored only so traversals are faster). Derived relationships are recomputed whenever their inputs change.
 
 | Relationship | From → To | Properties | Meaning | Source |
 |---|---|---|---|---|
@@ -302,7 +302,7 @@ RETURN s1.name, s2.name, count(*) AS calls
   - `(:Interface)-[:STARTS]->(:Flow)`: HTTP, gRPC, a consumed topic
   - `(:Schedule)-[:STARTS]->(:Flow)`: cron, Spring `@Scheduled`, Quartz, a Kubernetes CronJob
 
-  Sync vs. async isn't the dividing line (a Kafka consumer is async). Each org's scheduling mechanism is an extractor that emits the same `Schedule` node.
+  Sync vs. async isn't the dividing line (a Kafka consumer is async). Each org's scheduling mechanism is a rule (or plugin) that emits the same `Schedule` node.
 - **There is no `Subflow` type.** Shared logic ("identify client") is a `Function` that several flows reach.
 
 ### Flow levels and the flow card (Decided)

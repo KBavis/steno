@@ -3,10 +3,10 @@
 from pathlib import Path
 
 from steno.config import get_settings
-from steno.extractors.engine import Engine
-from steno.extractors.packs import is_enabled, load_packs
-from steno.extractors.structure import detect
 from steno.graph.build import Context, build
+from steno.graph.structure import detect
+from steno.ingestion.local import run_folder
+from steno.rule_packs.packs import is_enabled, load_packs
 
 CASE = (
     get_settings().rule_packs_dir
@@ -17,8 +17,8 @@ CASE = (
 def _plan(case: Path = CASE, repo_name: str = "demo"):
     repo = Path(case)
     packs = [p for p in load_packs(get_settings().rule_packs_dir) if is_enabled(p, repo)]
-    engine = Engine(repo, packs)
-    x = engine.run()
+    engine = run_folder(repo, packs)
+    x = engine.out
     structure = detect(repo, {ep.origin.file for ep in x.entry_points})
     return build(x, engine.resolver, structure, Context(repo_name, "space:1", "org:1", 7, "abc123"))
 

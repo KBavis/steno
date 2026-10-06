@@ -6,13 +6,13 @@ Rule packs teach Steno to recognize what code **does**. This folder holds every 
 
 Steno reads repositories without running them, so it has to recognize what code means from how it's written. In a FastAPI app, a function decorated with `@router.post("/projects")` is an HTTP endpoint. In a Spring app, a class with `@Entity @Table(name="users")` maps to the `users` table.
 
-An **extractor rule** captures one such pattern: **"when you see this code, it means this fact."** A **rule pack** is a versioned bundle of rules for one framework or one organization: `steno-pack-fastapi`, `steno-pack-spring-kafka`, `yourorg-internal`.
+A **rule** captures one such pattern: **"when you see this code, it means this fact."** A **rule pack** is a versioned bundle of rules for one framework or one organization: `steno-pack-fastapi`, `steno-pack-spring-kafka`, `yourorg-internal`.
 
 - Rules are **deterministic**. No AI runs when Steno ingests code; a rule matches or it doesn't.
 - Packs are **auto-enabled** from a repository's dependencies: `fastapi` in `requirements.txt` turns on `steno-pack-fastapi`.
 - The **coverage report** after every ingestion lists code that looked important but that no rule explained, ranked by how often it appears. It tells you which rule to write next.
 
-The full format is in **[docs/extractor-rules.md](../docs/extractor-rules.md)**. This page is the practical guide.
+The full format is in **[docs/rule-packs.md](../docs/rule-packs.md)**. This page is the practical guide.
 
 ## Layout
 
@@ -81,7 +81,7 @@ A rule can emit four things:
 | `clue` | A partial fact for Steno to combine later, e.g. "this router's prefix is `/jobs`" |
 | `entry_point` | "This function is started by this trigger." Steno derives flows from these. |
 
-**Clues** exist because some facts are spread across files. A FastAPI endpoint's full path comes from the decorator, the router's `prefix=`, and wherever the router is mounted. Each rule reports only what it sees, and Steno joins the pieces by the symbol they're about. Rules never refer to each other. See [Clues](../docs/extractor-rules.md#4-clues-decided).
+**Clues** exist because some facts are spread across files. A FastAPI endpoint's full path comes from the decorator, the router's `prefix=`, and wherever the router is mounted. Each rule reports only what it sees, and Steno joins the pieces by the symbol they're about. Rules never refer to each other. See [Clues](../docs/rule-packs.md#4-clues-decided).
 
 ## Writing a rule
 
@@ -105,7 +105,7 @@ You review and own the result. GitHub Copilot and other agents can follow the sa
 
 1. Find two or three real examples of the pattern, and one similar-looking case that must **not** match.
 2. Write the `match` half and try it in the ast-grep playground.
-3. Write the `emit` half using the vocabulary in [docs/extractor-rules.md §3–4](../docs/extractor-rules.md#3-what-a-rule-emits-decided).
+3. Write the `emit` half using the vocabulary in [docs/rule-packs.md §3–4](../docs/rule-packs.md#3-what-a-rule-emits-decided).
 4. Add a test case under `tests/<rule-id>/`.
 5. Check it against real code:
    ```sh

@@ -1,6 +1,6 @@
-"""Pass 3: join clues and resolve references (docs/ingestion.md §2, extractor-rules.md §4).
+"""The assemblers: fill in extracted facts' blanks from clues (ingestion.md §2, rule-packs.md §4).
 
-Each clue type has exactly one resolver here:
+Each clue type has exactly one assembler here:
 - prefix + mount → prefix chains (full endpoint paths)
 - client         → calls through SDK client objects
 - property       → config values (fed to the symbol resolver before values are read)
@@ -11,7 +11,7 @@ import ast
 from pathlib import Path
 from typing import Any
 
-from steno.extractors.facts import (
+from steno.extraction.facts import (
     UNRESOLVED_TEXT,
     AppRef,
     ClueFact,
@@ -26,7 +26,7 @@ from steno.extractors.facts import (
 from steno.resolvers.python import PythonResolver, Scope
 
 
-def resolve(x: Extraction, r: PythonResolver | None, repo: Path) -> None:
+def assemble(x: Extraction, r: PythonResolver | None, repo: Path) -> None:
     _dedupe_clues(x)
     _prefix_chains(x)
     if r is not None:

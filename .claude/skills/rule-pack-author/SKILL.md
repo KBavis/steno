@@ -1,17 +1,17 @@
 ---
 name: rule-pack-author
-description: Write or change Steno extractor rules and rule packs from a plain-language request, such as "topics under app.kafka.topics in application.yml are Kafka topics" or "SQLAlchemy models with __tablename__ map to tables". Finds real examples in the code, maps them to Steno's node, edge, clue, and entry-point vocabulary, proposes new types instead of inventing them, writes the rule and its test cases, and measures how often the pattern matches. Use whenever someone asks to recognize a framework pattern, add or fix a rule, create a rule pack, or act on a coverage-report item.
+description: Write or change Steno rules and rule packs from a plain-language request, such as "topics under app.kafka.topics in application.yml are Kafka topics" or "SQLAlchemy models with __tablename__ map to tables". Finds real examples in the code, maps them to Steno's node, edge, clue, and entry-point vocabulary, proposes new types instead of inventing them, writes the rule and its test cases, and measures how often the pattern matches. Use whenever someone asks to recognize a framework pattern, add or fix a rule, create a rule pack, or act on a coverage-report item.
 ---
 
 # Rule pack author
 
-You help a person write **extractor rules**: "when you see this code, it means this fact." The person owns the result; you do the legwork and explain your choices.
+You help a person write **rules**: "when you see this code, it means this fact." The person owns the result; you do the legwork and explain your choices.
 
 A rule is an ast-grep `match` (where the pattern is) plus a Steno `emit` (what it means). Rules are deterministic YAML; nothing you write runs an LLM at ingestion time.
 
 ## Read first, every time
 
-1. `docs/extractor-rules.md`: the rule format, emits, anchors, identity properties, clue types, config rules, pack layout, tests. **This is the source of truth for syntax.**
+1. `docs/rule-packs.md`: the rule format, emits, anchors, identity properties, clue types, config rules, pack layout, tests. **This is the source of truth for syntax.**
 2. `docs/knowledge-graph.md` §3 (node types) and §4 (relationship types, with what each connects): the vocabulary you may emit.
 3. The existing packs under `rule-packs/`, so you extend instead of duplicating.
 
@@ -46,7 +46,7 @@ Decide what to emit, using only types that exist in the docs:
 
 | Question | Emit |
 |---|---|
-| Is it a **thing** others can call, read, or depend on (endpoint, topic, table, entity, external system, schedule)? | `node`, with all **identity properties** from extractor-rules.md §3 |
+| Is it a **thing** others can call, read, or depend on (endpoint, topic, table, entity, external system, schedule)? | `node`, with all **identity properties** from rule-packs.md §3 |
 | Is it a **connection** (exposes, calls, produces, consumes, reads, writes, maps to)? | `edge`. Check the from → to pair is allowed in knowledge-graph.md §4. |
 | Is part of the fact **somewhere else** (a router's prefix, a mount point, a config value)? | `clue` of an existing clue type, labeled by the symbol it's about |
 | Does it **start work** (handles a request, consumes a message, runs on a schedule)? | `entry_point` with the trigger node and `@function` |
@@ -62,7 +62,7 @@ Rules never create `Flow` or `Step` nodes, and never reference another rule.
 ### 4. Choose the pack
 
 - Find the existing pack for the framework in `rule-packs/<ecosystem>/`.
-- Otherwise create one: `rule-packs/<java|python|…>/steno-pack-<framework>/` for public frameworks (`source: core`), or `rule-packs/org/<org>-<name>/` for internal ones (`source: org`). Fill in `pack.yaml` (see extractor-rules.md §6), including `enabled_when.dependencies` as they appear in the build file.
+- Otherwise create one: `rule-packs/<java|python|…>/steno-pack-<framework>/` for public frameworks (`source: core`), or `rule-packs/org/<org>-<name>/` for internal ones (`source: org`). Fill in `pack.yaml` (see rule-packs.md §6), including `enabled_when.dependencies` as they appear in the build file.
 
 ### 5. Write the rule
 
@@ -86,7 +86,7 @@ It prints every match with its captures (code rules through ast-grep, config rul
 
 Under `tests/<rule-id>/<case-name>/`:
 - `input/`: the **smallest** real snippet that shows the case, trimmed. Include every file the case needs; a rule that relies on clues needs the files that emit them (the router's `__init__.py` for an endpoint's prefix).
-- `expected.yaml`: the facts it must produce (format in extractor-rules.md §7).
+- `expected.yaml`: the facts it must produce (format in rule-packs.md §7).
 - At least one **negative case** (`expected.yaml` with nothing in it) when the pattern could over-match.
 - **Never copy secrets**, tokens, internal hostnames, or personal data into test inputs. Replace them with placeholders.
 
@@ -96,7 +96,7 @@ Then run the pack's tests until they pass:
 cd backend && uv run steno rules test <pack-name>
 ```
 
-It runs every case through the full engine (resolver, clues, `where:`) and shows what's missing or unexpected. To see everything a pack produces on a whole repository, use `uv run steno extract <folder> --json facts.json`.
+It runs every case through the full engine (symbol resolver, assemblers, `where:`) and shows what's missing or unexpected. To see everything a pack produces on a whole repository, use `uv run steno extract <folder> --json facts.json`.
 
 ### 8. Report back
 

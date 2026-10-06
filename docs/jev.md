@@ -110,7 +110,7 @@ Routing layer by layer (Q1, then Q2) keeps every Choice under the 255-option lim
 | # | Decision | Type | State | Runs only when… | Result |
 |---|---|---|---|---|---|
 | **I1** | Which implementation does this DI call resolve to? | Choice (candidates) | Call site + candidate digests + active config | The DI rules find more than one candidate | `INVOKES` to the choice, or to all of them, marked `ambiguous` |
-| **I2** | Which transport does this outbound call use? | Choice (HTTP, gRPC, Kafka, internal framework(s), DB, other) | Call site digest | No extractor rule matched | The `transport` on `CALLS` |
+| **I2** | Which transport does this outbound call use? | Choice (HTTP, gRPC, Kafka, internal framework(s), DB, other) | Call site digest | No rule matched | The `transport` on `CALLS` |
 | **I3** | Is this function an entry point? | Noul | Method, class, unrecognized annotations | An unrecognized framework looks like a trigger | A new `Flow`, or none |
 | **I4** | Is this host inside the org or a vendor? | Noul | The host + known org domains | The host isn't on the known-domains list | A stub `Interface` or an `ExternalSystem` |
 | **I5** | Does this change alter what the card says? | Noul | Old card + fact diff | Facts under an existing card changed | Regenerate the card or keep it. **Controls LLM spend.** |
@@ -118,9 +118,9 @@ Routing layer by layer (Q1, then Q2) keeps every Choice under the 255-option lim
 | **I10** | **Is this a business flow or technical plumbing?** | Noul | Flow digest | Every flow | Health checks, actuator, and admin endpoints are marked `technical` and ranked down in search |
 | *I6* | *Which space does this repository belong to?* | | | | **Not planned:** admins define spaces |
 | *I7* | *Which node does this glossary term refer to?* | | | | **Later:** the glossary is human-declared in V1 |
-| **I8** | Does this unexplained call look like I/O or an entry point? | Noul | Call site digest | A call site matched no rule | Whether it goes on the **coverage report** (see [Ingestion §4](./ingestion.md#4-extractors-rules-for-being-agnostic)) |
+| **I8** | Does this unexplained call look like I/O or an entry point? | Noul | Call site digest | A call site matched no rule | Whether it goes on the **coverage report** (see [Ingestion §4](./ingestion.md#4-rules-and-rule-packs)) |
 
-**Not a Jev decision:** "did this PR change structure?" Re-running the extractors and comparing facts answers it exactly.
+**Not a Jev decision:** "did this PR change structure?" Re-running the rules and comparing facts answers it exactly.
 
 ## 8. Risks and mitigations
 

@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from steno.extractors.facts import (
+from steno.extraction.facts import (
     UNRESOLVED_TEXT,
     AppRef,
     EdgeFact,
@@ -27,8 +27,8 @@ from steno.extractors.facts import (
     NodeRef,
     host_of,
 )
-from steno.extractors.structure import Module, Structure
 from steno.graph import ids
+from steno.graph.structure import Module, Structure
 from steno.resolvers.python import FunctionInfo, PythonResolver
 
 # Node types search will cover (they'll carry cards; knowledge-graph.md §3, Card properties)

@@ -1,4 +1,4 @@
-from steno.extractors.config_files import key_regex, read
+from steno.source.config_files import key_regex, read
 
 
 def test_key_pattern_captures_named_segments():

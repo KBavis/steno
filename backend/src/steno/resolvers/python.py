@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from steno.extractors.files import is_test_file, source_files
+from steno.source.files import is_test_file, source_files
 
 log = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ class Scope:
 
 
 class PythonResolver:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, files: list[Path] | None = None):
         self.root = root
         self.modules: dict[str, ModuleInfo] = {}
         self.by_path: dict[Path, ModuleInfo] = {}
@@ -108,8 +108,8 @@ class PythonResolver:
         self.properties: dict[str, Any] = {}
         self._busy: set[Any] = set()
         self.source_roots = find_source_roots(root)
-        for path in source_files(root, (".py",)):
-            if not is_test_file(path.relative_to(root)):
+        for path in files if files is not None else source_files(root):
+            if path.suffix == ".py" and not is_test_file(path.relative_to(root)):
                 self._index(path)
 
     # ---------------------------------------------------------------- indexing

@@ -1,6 +1,6 @@
-"""What the extractor engine produces: raw facts, before they're written to the graph.
+"""What the rule engine produces: raw facts, before they're written to the graph.
 
-docs/extractor-rules.md §3 defines the vocabulary; these are its in-memory form.
+docs/rule-packs.md §3 defines the vocabulary; these are its in-memory form.
 """
 
 import ast
@@ -12,7 +12,7 @@ from steno.resolvers.python import UNRESOLVED, Scope
 
 UNRESOLVED_TEXT = "<unresolved>"
 
-# Identity properties per label (extractor-rules.md §3); the most specific label wins
+# Identity properties per label (rule-packs.md §3); the most specific label wins
 IDENTITY = {
     "HttpEndpoint": ("method", "path"),
     "GrpcMethod": ("service", "method"),
@@ -69,7 +69,7 @@ class HttpRef:
 
 @dataclass
 class TableOfRef:
-    """The table an entity maps to; resolved in the resolve pass, dropped if it isn't an entity."""
+    """The table an entity maps to; filled in when assembling, dropped if it isn't an entity."""
 
     expr: ast.expr
     scope: Scope
@@ -86,7 +86,7 @@ class NodeFact:
     labels: list[str]
     props: dict[str, Any]
     origin: Origin
-    # Resolved by a clue resolver, e.g. prefixed_by → the router whose prefix chain applies
+    # Completed by an assembler, e.g. prefixed_by → the router whose prefix chain applies
     pending: dict[str, Any] = field(default_factory=dict)
 
     @property

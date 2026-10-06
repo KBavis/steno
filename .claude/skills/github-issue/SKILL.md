@@ -1,6 +1,6 @@
 ---
 name: github-issue
-description: Create well-formed GitHub issues for Steno from a plain-language request, such as "make an issue for the clone stage" or "break the extractor engine into issues". Grounds each issue in the design docs and code, checks for duplicates, assigns type, area, priority, and effort labels and a phase milestone, writes a structured body with acceptance criteria, links dependencies and sub-issues natively, and shows a draft for approval before creating anything. Use whenever someone asks to file, draft, or plan issues, a bug report, or an epic.
+description: Create well-formed GitHub issues for Steno from a plain-language request, such as "make an issue for the clone stage" or "break the rule engine into issues". Grounds each issue in the design docs and code, checks for duplicates, assigns type, area, priority, and effort labels and a phase milestone, writes a structured body with acceptance criteria, links dependencies and sub-issues natively, and shows a draft for approval before creating anything. Use whenever someone asks to file, draft, or plan issues, a bug report, or an epic.
 ---
 
 # GitHub issue
@@ -40,8 +40,8 @@ Pick exactly one **type**, one or two **areas**, one **priority**, and one **eff
 | Area | Covers |
 |---|---|
 | `area:ingestion` | Pipeline stages, job queue, worker |
-| `area:extractors` | Rule engine, rule packs, clue resolvers |
-| `area:resolver` | Symbol and DI resolution (JVM helper, Python resolver) |
+| `area:extractors` | Rule engine, rule packs, assemblers |
+| `area:resolver` | Symbol and DI resolution (symbol resolvers: JVM helper, Python) |
 | `area:graph` | Neo4j schema, stable IDs, projection, graph writes |
 | `area:db` | Postgres models and migrations |
 | `area:mcp` | MCP server and tools |
@@ -83,7 +83,7 @@ Pick exactly one **type**, one or two **areas**, one **priority**, and one **eff
 One or two sentences: what changes, for whom.
 
 ## Why
-The problem or goal. Link the design: [DESIGN_DOC D40](docs/DESIGN_DOC.md), [extractor-rules §4](docs/extractor-rules.md#4-clues-decided).
+The problem or goal. Link the design: [DESIGN_DOC D40](docs/DESIGN_DOC.md), [rule-packs §4](docs/rule-packs.md#4-clues-decided).
 
 ## Scope
 - [ ] Concrete task

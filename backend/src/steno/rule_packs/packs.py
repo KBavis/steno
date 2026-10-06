@@ -1,6 +1,6 @@
 """Load rule packs from `rule-packs/` and decide which ones apply to a repository.
 
-The format is defined in docs/extractor-rules.md §6; a pack is enabled when any of its
+The format is defined in docs/rule-packs.md §6; a pack is enabled when any of its
 `enabled_when` conditions holds (D49).
 """
 
@@ -12,7 +12,7 @@ from typing import Any
 
 import yaml
 
-from steno.extractors.files import source_files
+from steno.source.files import source_files
 
 # Language → file extensions the pack's code rules run on
 EXTENSIONS = {"python": (".py",), "java": (".java",)}

@@ -2,8 +2,8 @@
 
 from typing import Any
 
-from steno.extractors.facts import Extraction
-from steno.extractors.testing import edge_repr, node_repr, ref_repr
+from steno.extraction.facts import Extraction
+from steno.rule_packs.testing import edge_repr, node_repr, ref_repr
 
 
 def to_json(x: Extraction) -> dict[str, Any]:

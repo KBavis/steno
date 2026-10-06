@@ -3,8 +3,8 @@
 import pytest
 
 from steno.config import get_settings
-from steno.extractors.packs import load_packs
-from steno.extractors.testing import run_case
+from steno.rule_packs.packs import load_packs
+from steno.rule_packs.testing import run_case
 
 PACKS = load_packs(get_settings().rule_packs_dir)
 CASES = [

@@ -1,7 +1,7 @@
 """Neo4j labels, constraints, and indexes (docs/knowledge-graph.md §3).
 
 The graph's schema is code and documentation, not data in the graph. Labels are
-language-agnostic; language specifics live in rule packs and resolvers.
+language-agnostic; language specifics live in rule packs and symbol resolvers.
 """
 
 from neo4j import Driver

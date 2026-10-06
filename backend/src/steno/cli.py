@@ -11,7 +11,7 @@ app = typer.Typer(no_args_is_help=True, help="Steno: org-wide context engine for
 db_app = typer.Typer(no_args_is_help=True, help="Postgres schema.")
 graph_app = typer.Typer(no_args_is_help=True, help="Neo4j schema and projections.")
 job_app = typer.Typer(no_args_is_help=True, help="Ingestion jobs.")
-rules_app = typer.Typer(no_args_is_help=True, help="Extractor rule packs.")
+rules_app = typer.Typer(no_args_is_help=True, help="Rule packs.")
 app.add_typer(db_app, name="db")
 app.add_typer(rules_app, name="rules")
 app.add_typer(graph_app, name="graph")
@@ -98,8 +98,8 @@ def rules_test(
     packs: list[str] = typer.Argument(None, help="Pack names; all packs if omitted"),
 ) -> None:
     """Run rule packs' test cases and compare with expected.yaml."""
-    from steno.extractors.packs import load_packs
-    from steno.extractors.testing import run_pack_tests
+    from steno.rule_packs.packs import load_packs
+    from steno.rule_packs.testing import run_pack_tests
 
     all_packs = load_packs(get_settings().rule_packs_dir)
     selected = [p for p in all_packs if not packs or p.name in packs]
@@ -134,19 +134,19 @@ def extract(
     path: str = typer.Argument(..., help="A local repository or folder"),
     output: str = typer.Option(None, "--json", help="Write every fact to this JSON file"),
 ) -> None:
-    """Run the enabled rule packs over a local folder and summarize the facts (no database)."""
+    """Parse, extract and assemble a local folder and summarize the facts (no flows or database)."""
     import json
     from collections import Counter
     from pathlib import Path
 
-    from steno.extractors.engine import extract as run_extract
-    from steno.extractors.packs import is_enabled, load_packs
-    from steno.extractors.report import to_json
+    from steno.extraction.report import to_json
+    from steno.ingestion.local import run_folder
+    from steno.rule_packs.packs import is_enabled, load_packs
 
     repo = Path(path).resolve()
     packs = [p for p in load_packs(get_settings().rule_packs_dir) if is_enabled(p, repo)]
     typer.echo(f"packs: {', '.join(p.name for p in packs) or '(none enabled)'}")
-    x = run_extract(repo, packs)
+    x = run_folder(repo, packs).out
     by = Counter
     typer.echo(f"nodes: {dict(by(n.label for n in x.nodes))}")
     typer.echo(f"edges: {dict(by(e.type for e in x.edges))}")

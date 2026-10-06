@@ -207,9 +207,9 @@ pre .k-emit { color: var(--neo); font-weight: 500; }
       <li><a href="#astgrep">What ast-grep sees</a></li>
       <li><a href="#rule">Anatomy of a rule</a></li>
       <li><a href="#match">Life of one match</a></li>
-      <li><a href="#versus">Rules, resolver, clue resolvers</a></li>
+      <li><a href="#versus">Rules, resolver, assemblers</a></li>
       <li><a href="#resolver">The resolver's questions</a></li>
-      <li><a href="#resolve">The resolve stage</a></li>
+      <li><a href="#assemble">The assemble stage</a></li>
       <li><a href="#flows">The flows stage</a></li>
       <li><a href="#write">The write stage</a></li>
       <li><a href="#trace">One endpoint, end to end</a></li>
@@ -228,7 +228,7 @@ pre .k-emit { color: var(--neo); font-weight: 500; }
     <header class="intro">
       <div class="eyebrow">Steno · ingestion · as built on main, October 2026</div>
       <h1>How a repository becomes a graph</h1>
-      <p>This page follows one ingestion job through every stage, and separates the parts that are easy to blur together: ast-grep, rules, rule packs, the extractor engine, the symbol resolver, and the clue resolvers.</p>
+      <p>This page follows one ingestion job through every stage, and separates the parts that are easy to blur together: ast-grep, rules, rule packs, the rule engine, the symbol resolver, and the assemblers.</p>
       <p>Every example is real output from running Steno on <a href="https://github.com/KBavis/contextualized">Contextualized</a> at commit <code>ac93a3b</code>: 112 Python modules, 486 functions, 9 rule packs, 33 endpoints, 33 flows.</p>
     </header>
 
@@ -244,73 +244,76 @@ pre .k-emit { color: var(--neo); font-weight: 500; }
             <tr><td>Rule</td><td>One code shape and what it means: <code>match</code>, optional <code>where</code>, <code>emit</code></td><td>One phrasebook entry</td><td><code>rules/&lt;id&gt;.yaml</code></td></tr>
             <tr><td>Test case</td><td>A trimmed copy of real code and the facts it must produce</td><td>The entry's worked example</td><td><code>tests/&lt;rule&gt;/&lt;case&gt;/</code></td></tr>
             <tr><td>ast-grep</td><td>Finds code with a given shape in a syntax tree, and captures the pieces you named</td><td>Ctrl+F that understands code structure</td><td><code>ast_grep_py</code> (a library)</td></tr>
-            <tr><td>Extractor engine</td><td>Runs every enabled rule on every file, asks the resolver about each match, records facts</td><td>The clerk reading every page with the phrasebook</td><td><code>extractors/engine.py</code></td></tr>
+            <tr><td>Rule engine</td><td>Runs every enabled rule on every file, asks the resolver about each match, records facts</td><td>The clerk reading every page with the phrasebook</td><td><code>extraction/engine.py</code></td></tr>
             <tr><td>Symbol resolver</td><td>Knows what every name means and what type every value has, by reading imports, annotations and assignments</td><td>The directory of who's who</td><td><code>resolvers/python.py</code></td></tr>
-            <tr><td>Clue resolvers</td><td>Join facts that were found in different files: URL prefixes, entity tables, SDK clients</td><td>Pinning together index cards that belong together</td><td><code>extractors/resolve.py</code></td></tr>
+            <tr><td>Assemblers</td><td>Combine clues found in different files into complete facts: URL prefixes, entity tables, SDK clients</td><td>Pinning together index cards that belong together</td><td><code>assemblers/assemble.py</code></td></tr>
             <tr><td>Graph builder, writer</td><td>Turn facts and the call graph into nodes and edges with stable IDs, then save them in Neo4j</td><td>Filing the cards into the archive</td><td><code>graph/build.py</code>, <code>graph/writer.py</code></td></tr>
           </tbody>
         </table>
       </div>
       <div class="callout">
-        <h4>Three different things are called "resolver"</h4>
-        <ol>
-          <li><strong>The symbol resolver</strong> (<code>PythonResolver</code>). One per language. Answers questions about names, types and values. Built once at the start of parse and asked questions until flows ends.</li>
-          <li><strong>The clue resolvers</strong> (<code>resolve.py</code>, the <em>resolve</em> stage). One per clue type, the same for every language. They join facts; for the hard parts they ask the symbol resolver.</li>
-          <li><strong>The "Resolver" box</strong> in DESIGN_DOC §9 and ingestion.md §6: config placeholders, DI, stubs, internal vs vendor hosts. Mostly not built. The pieces that exist live inside the other two and the graph builder.</li>
-        </ol>
-        <p>On this page, "the resolver" always means the first one.</p>
+        <h4>Resolve and assemble are different jobs</h4>
+        <ul>
+          <li><strong>Resolve</strong> means answering <em>what is this?</em>: which symbol a name refers to, a value's type, the constant it holds. Only the <strong>symbol resolver</strong> (<code>PythonResolver</code>, one per language) does it. It's built once at the start of parse and asked questions until flows ends.</li>
+          <li><strong>Assemble</strong> means combining clues from different files into complete facts. <strong>Assemblers</strong> (<code>assemble.py</code>, the <em>assemble</em> stage) do it, one per clue type and the same for every language. For the hard parts they ask the symbol resolver.</li>
+        </ul>
+        <p>Config placeholders and DI belong to the symbol resolver; stable IDs, stubs and internal vs. vendor hosts belong to the graph builder. There's no other "resolver" (DESIGN_DOC D56).</p>
       </div>
-      <p>"Extractor" is the umbrella word for rules plus the engine that runs them. The symbol resolver isn't part of the extractor: it's a service the engine, the clue resolvers and the graph builder all ask.</p>
+      <p>No part is called an "extractor" (DESIGN_DOC D57). The units are <strong>rules</strong> in <strong>rule packs</strong>, the <strong>rule engine</strong> runs them, and <em>extract</em> is the stage where that happens. The symbol resolver isn't part of the rule engine: it's a service the engine, the assemblers and the graph builder all ask.</p>
     </section>
 
     <!-- 2 -->
     <section id="order">
       <h2><span class="num">02</span>The stages, in order</h2>
-      <p class="lede">Seven stages run one after another. What makes them fit together is what each one leaves in memory for the next.</p>
+      <p class="lede">Eight stages run one after another. What makes them fit together is what each one leaves in memory for the next.</p>
       <figure>
         <div class="diagram">
-          <svg viewBox="0 0 1000 380" role="img" aria-label="Seven stages left to right: clone, deps (skipped), parse, resolve, flows, write, cards (skipped). Below, how long each in-memory object lives: the workspace clone lives from clone through cards; the resolver index and the extraction of facts live from parse through flows; the structure lives in flows; the graph plan lives from flows through write. Outputs: the facts JSON is written at the end of resolve, Neo4j is written in write, and every stage writes a row to Postgres.">
-            <!-- stage heads: x = 20 + i*140, w = 124 -->
-            <rect class="box" x="20" y="20" width="124" height="46" rx="7"/><text class="t" x="82" y="40" text-anchor="middle">clone</text><text class="s" x="82" y="56" text-anchor="middle">git clone</text>
-            <rect class="box off" x="160" y="20" width="124" height="46" rx="7"/><text class="t" x="222" y="40" text-anchor="middle">deps</text><text class="s" x="222" y="56" text-anchor="middle">skipped (Java)</text>
-            <rect class="box mem" x="300" y="20" width="124" height="46" rx="7"/><text class="t" x="362" y="40" text-anchor="middle">parse</text><text class="s" x="362" y="56" text-anchor="middle">rules × files</text>
-            <rect class="box mem" x="440" y="20" width="124" height="46" rx="7"/><text class="t" x="502" y="40" text-anchor="middle">resolve</text><text class="s" x="502" y="56" text-anchor="middle">join clues</text>
-            <rect class="box mem" x="580" y="20" width="124" height="46" rx="7"/><text class="t" x="642" y="40" text-anchor="middle">flows</text><text class="s" x="642" y="56" text-anchor="middle">call graph, plan</text>
-            <rect class="box neo" x="720" y="20" width="124" height="46" rx="7"/><text class="t" x="782" y="40" text-anchor="middle">write</text><text class="s" x="782" y="56" text-anchor="middle">MERGE</text>
-            <rect class="box off" x="860" y="20" width="124" height="46" rx="7"/><text class="t" x="922" y="40" text-anchor="middle">cards</text><text class="s" x="922" y="56" text-anchor="middle">skipped (LLM)</text>
+          <svg viewBox="0 0 1000 424" role="img" aria-label="Eight stages left to right: clone, deps (skipped), parse, extract, assemble, flows, write, cards (skipped). Below, how long each in-memory object lives: the workspace clone lives from clone through cards; the symbol resolver's index lives from parse through flows; the syntax trees live from parse through extract; the extraction of facts lives from extract through flows; the structure lives in flows; the graph plan lives from flows through write. Outputs: the facts JSON is written at the end of assemble, Neo4j is written in write, and every stage writes a row to Postgres.">
+            <!-- stage heads: x = 20 + i*122, w = 110 -->
+            <rect class="box" x="20" y="20" width="110" height="46" rx="7"/><text class="t" x="75" y="40" text-anchor="middle">clone</text><text class="s" x="75" y="56" text-anchor="middle">git clone</text>
+            <rect class="box off" x="142" y="20" width="110" height="46" rx="7"/><text class="t" x="197" y="40" text-anchor="middle">deps</text><text class="s" x="197" y="56" text-anchor="middle">skipped (Java)</text>
+            <rect class="box mem" x="264" y="20" width="110" height="46" rx="7"/><text class="t" x="319" y="40" text-anchor="middle">parse</text><text class="s" x="319" y="56" text-anchor="middle">read the code</text>
+            <rect class="box mem" x="386" y="20" width="110" height="46" rx="7"/><text class="t" x="441" y="40" text-anchor="middle">extract</text><text class="s" x="441" y="56" text-anchor="middle">rules × files</text>
+            <rect class="box mem" x="508" y="20" width="110" height="46" rx="7"/><text class="t" x="563" y="40" text-anchor="middle">assemble</text><text class="s" x="563" y="56" text-anchor="middle">fill blanks</text>
+            <rect class="box mem" x="630" y="20" width="110" height="46" rx="7"/><text class="t" x="685" y="40" text-anchor="middle">flows</text><text class="s" x="685" y="56" text-anchor="middle">call graph, plan</text>
+            <rect class="box neo" x="752" y="20" width="110" height="46" rx="7"/><text class="t" x="807" y="40" text-anchor="middle">write</text><text class="s" x="807" y="56" text-anchor="middle">MERGE</text>
+            <rect class="box off" x="874" y="20" width="110" height="46" rx="7"/><text class="t" x="929" y="40" text-anchor="middle">cards</text><text class="s" x="929" y="56" text-anchor="middle">skipped (LLM)</text>
 
             <text class="ms" x="20" y="98">LIVES IN MEMORY OR ON DISK</text>
             <!-- lifetimes -->
             <rect class="bar code" x="20" y="108" width="964" height="10" rx="5"/>
             <text class="m" x="20" y="134">workspace clone  /tmp/steno-workspaces/job-N/  (deleted when the job ends)</text>
 
-            <rect class="bar mem" x="300" y="150" width="404" height="10" rx="5"/>
-            <text class="m" x="300" y="176">resolver index  (PythonResolver)</text>
+            <rect class="bar mem" x="264" y="150" width="476" height="10" rx="5"/>
+            <text class="m" x="264" y="176">symbol resolver index  (PythonResolver)</text>
 
-            <rect class="bar mem" x="300" y="192" width="404" height="10" rx="5"/>
-            <text class="m" x="300" y="218">Extraction: nodes · edges · clues · entry points · dropped</text>
-            <text class="s" x="306" y="234">filled</text>
-            <text class="s" x="446" y="234">completed</text>
-            <text class="s" x="586" y="234">read</text>
+            <rect class="bar mem" x="264" y="192" width="232" height="10" rx="5"/>
+            <text class="m" x="264" y="218">syntax trees  (one per file)</text>
 
-            <rect class="bar mem" x="580" y="250" width="124" height="10" rx="5"/>
-            <text class="m" x="580" y="276">Structure (modules)</text>
+            <rect class="bar mem" x="386" y="234" width="354" height="10" rx="5"/>
+            <text class="m" x="386" y="260">Extraction: nodes · edges · clues · entry points · dropped</text>
+            <text class="s" x="392" y="276">filled</text>
+            <text class="s" x="514" y="276">completed</text>
+            <text class="s" x="636" y="276">read</text>
 
-            <rect class="bar mem" x="580" y="292" width="264" height="10" rx="5"/>
-            <text class="m" x="580" y="318">GraphPlan (nodes, edges, IDs)</text>
+            <rect class="bar mem" x="630" y="292" width="110" height="10" rx="5"/>
+            <text class="m" x="630" y="318">Structure (modules)</text>
 
-            <line class="ln soft" x1="20" y1="334" x2="984" y2="334"/>
-            <text class="ms" x="20" y="352">WRITES</text>
-            <rect class="box code" x="440" y="340" width="124" height="30" rx="6"/><text class="m" x="502" y="360" text-anchor="middle">facts JSON</text>
-            <rect class="box neo" x="720" y="340" width="124" height="30" rx="6"/><text class="m" x="782" y="360" text-anchor="middle">Neo4j</text>
-            <text class="lbl" x="90" y="360">every stage → one ingestion_stage row in Postgres</text>
+            <rect class="bar mem" x="630" y="334" width="232" height="10" rx="5"/>
+            <text class="m" x="630" y="360">GraphPlan (nodes, edges, IDs)</text>
+
+            <line class="ln soft" x1="20" y1="376" x2="984" y2="376"/>
+            <text class="ms" x="20" y="394">WRITES</text>
+            <rect class="box code" x="508" y="384" width="110" height="30" rx="6"/><text class="m" x="563" y="404" text-anchor="middle">facts JSON</text>
+            <rect class="box neo" x="752" y="384" width="110" height="30" rx="6"/><text class="m" x="807" y="404" text-anchor="middle">Neo4j</text>
+            <text class="lbl" x="90" y="404">every stage → one ingestion_stage row in Postgres</text>
           </svg>
         </div>
-        <figcaption><b>The resolver and the facts are built once and shared.</b> Parse builds both; resolve completes the facts; flows reads the facts and asks the resolver for the call graph. Nothing is re-read from disk after parse except to build the structure.</figcaption>
+        <figcaption><b>Parse reads, everything after it works from memory.</b> Parse lists the files once and builds the symbol resolver's index and the syntax trees; extract runs the rules over the trees and fills the facts; assemble completes them; flows reads the facts and asks the resolver for the call graph. Nothing is re-read from disk after parse except to build the structure.</figcaption>
       </figure>
       <div class="callout">
-        <h4>Why the docs say "pass 3" before "pass 2"</h4>
-        <p>The design numbers the passes by what they are: 1 per file, 2 whole application (call graph and flows), 3 resolve, 4 write. The code runs them in the order they need each other: parse (pass 1), resolve (pass 3), flows (pass 2), write (pass 4). Flows must run after resolve because it needs completed facts, such as an endpoint's full path, to name each flow.</p>
+        <h4>Why assemble runs before flows</h4>
+        <p>The stages run in this order: parse, extract, assemble, flows (the whole application), write. Flows must come after assemble because it needs completed facts, such as an endpoint's full path, to name each flow.</p>
       </div>
     </section>
 
@@ -407,9 +410,9 @@ id: fastapi-endpoint
             <tr><td><code>$X</code></td><td>clue <code>type</code></td><td>the class it names; dropped if it isn't a class</td><td><code>class_of</code></td></tr>
             <tr><td><code>"@function"</code>, <code>"@class"</code>, <code>"@file"</code></td><td>anywhere</td><td>the function, class or file the match sits in</td><td><code>enclosing</code></td></tr>
             <tr><td><code>"@app"</code></td><td>edge end</td><td>the application whose module contains the file, decided later in flows</td><td>the graph builder</td></tr>
-            <tr><td><code>{table_of: $X}</code></td><td>edge end</td><td>a placeholder resolved in the resolve stage to the table the entity maps to, or dropped</td><td>clue resolver + <code>class_of</code> / <code>type_of</code></td></tr>
+            <tr><td><code>{table_of: $X}</code></td><td>edge end</td><td>a placeholder filled in the assemble stage with the table the entity maps to, or dropped</td><td>assembler + <code>class_of</code> / <code>type_of</code></td></tr>
             <tr><td><code>{http: {method, url}}</code></td><td>edge end</td><td>an outbound target, later an <code>ExternalSystem</code> keyed by the URL's host</td><td><code>value_of</code> for the URL</td></tr>
-            <tr><td><code>{DataStore: {vendor: chroma}}</code></td><td>edge end</td><td>a partial reference, matched in resolve to the app's one node that fits</td><td>clue resolver</td></tr>
+            <tr><td><code>{DataStore: {vendor: chroma}}</code></td><td>edge end</td><td>a partial reference, matched in assemble to the app's one node that fits</td><td>assembler</td></tr>
           </tbody>
         </table>
       </div>
@@ -418,7 +421,7 @@ id: fastapi-endpoint
     <!-- 6 -->
     <section id="match">
       <h2><span class="num">06</span>Life of one match</h2>
-      <p class="lede">Inside parse, the engine runs each rule over each file. For every match ast-grep finds, five things happen.</p>
+      <p class="lede">In the extract stage, the rule engine runs each rule over each file. For every match ast-grep finds, five things happen.</p>
       <figure>
         <div class="diagram">
           <svg viewBox="0 0 1000 300" role="img" aria-label="A match goes through five steps: ast-grep finds it, enclosing sets its scope, captures are parsed into Python expressions, the where check runs, and the emit fields are filled in. The where step and the emit step ask the resolver. A failed where check skips the match silently; an emit field that can't be resolved drops the fact and records the reason. Otherwise the facts go into the Extraction.">
@@ -482,11 +485,24 @@ id: fastapi-endpoint
         <li><span><strong>emit</strong> an <code>INVOKES</code> edge. <code>from: "@function"</code> → <code>run_project_jobs</code>. <code>to: {Function: {symbol: $FN}}</code> → <code>symbol_of(svc.run_project_jobs)</code>: <code>svc</code> isn't a module or class, so the resolver asks <code>type_of(svc)</code> → <code>app.services.job.JobService</code> and finds the method → <code>app.services.job.JobService.run_project_jobs</code>. Property <code>async: true</code> is a literal.</span></li>
       </ol>
       <p>Config rules run before all code rules, so their <code>property</code> clues can feed <code>value_of</code>. No pack ships a config rule today, so that step does nothing yet (see <a href="#noticed">What I noticed</a>).</p>
+      <h3>What comes out: three kinds</h3>
+      <p>A rule doesn't decide whether it's producing a "fact" or a "clue". It reports what it sees, and that's one of three kinds:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Kind</th><th>Example</th><th>Done?</th></tr></thead>
+          <tbody>
+            <tr><td>Fact</td><td>Class <code>Job</code> maps to table <code>job</code></td><td><span class="tag yes">yes</span> goes on to the graph as it is</td></tr>
+            <tr><td>Fact with a blank</td><td>Endpoint <code>POST /projects/{project_id}</code>, prefixed by <code>router</code></td><td><span class="tag part">not yet</span> its full path waits for the router's prefixes</td></tr>
+            <tr><td>Clue</td><td><code>router</code> has prefix <code>/jobs</code></td><td><span class="tag no">never stored</span> a note that fills another fact's blank</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The assemble stage (section 09) fills in the blanks. Why not find the clues first? No single file has the whole story, and files can be read in any order: the endpoint and its router's prefix are in <code>job.py</code>, the <code>/api</code> mount is in <code>__init__.py</code>. Collecting everything first and combining afterwards works whatever order things are found in, and rules never have to know about each other.</p>
     </section>
 
     <!-- 7 -->
     <section id="versus">
-      <h2><span class="num">07</span>Rules, resolver, clue resolvers</h2>
+      <h2><span class="num">07</span>Rules, resolver, assemblers</h2>
       <p class="lede">They all work on the same code, but each answers a different kind of question. The fastest way to keep them apart is to ask who answers what.</p>
       <div class="grid3">
         <div class="card code">
@@ -502,15 +518,15 @@ id: fastapi-endpoint
           <p>Knows nothing about FastAPI or SQLAlchemy. It answers questions about any code and never decides what a fact is.</p>
         </div>
         <div class="card neo">
-          <h4>The clue resolvers</h4>
+          <h4>The assemblers</h4>
           <span class="kind">Python code · one per clue type · Steno core</span>
-          <p>Know how to join facts that no single match could see: a prefix in one file, a mount in another, an endpoint in a third.</p>
+          <p>Know how to combine facts that no single match could see: a prefix in one file, a mount in another, an endpoint in a third.</p>
           <p>Language-agnostic: they join on the qualified names the resolver produced.</p>
         </div>
       </div>
       <div class="table-wrap">
         <table class="matrix">
-          <thead><tr><th>Question</th><th>ast-grep</th><th>Rule</th><th>Symbol resolver</th><th>Clue resolver</th><th>Graph builder</th></tr></thead>
+          <thead><tr><th>Question</th><th>ast-grep</th><th>Rule</th><th>Symbol resolver</th><th>Assembler</th><th>Graph builder</th></tr></thead>
           <tbody>
             <tr><td>Is there code shaped like <code>x.add_task(f, …)</code> here?</td><td><span class="dot" title="answers"></span></td><td><span class="dot ask" title="asks"></span></td><td></td><td></td><td></td></tr>
             <tr><td>What does that shape mean in graph terms?</td><td></td><td><span class="dot" title="answers"></span></td><td></td><td></td><td></td></tr>
@@ -530,7 +546,7 @@ id: fastapi-endpoint
       <p><span class="dot" style="vertical-align:-1px"></span> answers the question &nbsp; <span class="dot ask" style="vertical-align:-1px"></span> asks it, or is asked as part of the answer</p>
       <div class="callout">
         <h4>Why the split matters</h4>
-        <p>Adding a framework means writing rules, never touching the resolver. Adding a language means writing a resolver (Java's will be the JVM helper) and rules, never touching the clue resolvers or the graph. That's how the graph stays language-agnostic.</p>
+        <p>Adding a framework means writing rules, never touching the resolver. Adding a language means writing a resolver (Java's will be the JVM helper) and rules, never touching the assemblers or the graph. That's how the graph stays language-agnostic.</p>
       </div>
     </section>
 
@@ -581,7 +597,7 @@ id: fastapi-endpoint
         <h4>type_of(expr, scope)</h4>
         <p class="sig">→ the type of the value an expression produces, or nothing</p>
         <div class="rows">
-          <div>Asked by</div><p><code>where: type</code> checks, <code>symbol_of</code> on attributes, <code>table_of</code>, the client resolver.</p>
+          <div>Asked by</div><p><code>where: type</code> checks, <code>symbol_of</code> on attributes, <code>table_of</code>, the client assembler.</p>
           <div>How</div><p><code>self</code> → its class; a parameter → its annotation; <code>x = Cls()</code> → <code>Cls</code>; <code>x = f()</code> → <code>f</code>'s return annotation; <code>with f() as x</code> → what <code>f</code> yields; <code>self.x</code> → how the class set it; a library method → a <code>returns</code> hint from a client clue.</p>
           <div>Examples</div>
           <div class="qa">
@@ -637,7 +653,7 @@ id: fastapi-endpoint
         <h4>is_subclass(type, targets)</h4>
         <p class="sig">→ true if the type is a target or inherits from one</p>
         <div class="rows">
-          <div>Asked by</div><p>Every <code>where</code> check and the client resolver.</p>
+          <div>Asked by</div><p>Every <code>where</code> check and the client assembler.</p>
           <div>Why</div><p>So a rule about a library class also catches the app's own subclass of it. Repository base classes are walked; library bases are compared by name only.</p>
         </div>
       </div>
@@ -663,9 +679,9 @@ id: fastapi-endpoint
     </section>
 
     <!-- 9 -->
-    <section id="resolve">
-      <h2><span class="num">09</span>The resolve stage</h2>
-      <p class="lede">After parse, the Extraction holds facts that are only partly known. Resolve runs six steps over it, always in this order, then writes the facts JSON.</p>
+    <section id="assemble">
+      <h2><span class="num">09</span>The assemble stage</h2>
+      <p class="lede">After extract, the Extraction holds facts with blanks and the clues that fill them (section 06). Assemble runs six steps over it, always in this order, then writes the facts JSON.</p>
       <ol class="steps">
         <li><span><strong>Deduplicate clues.</strong> The same prefix seen twice counts once.</span></li>
         <li><span><strong>Prefix chains.</strong> For each node with a pending <code>prefixed_by</code>, walk its owner's <code>prefix</code> and <code>mount</code> clues up to the top and prepend them to <code>path</code>.</span></li>
@@ -722,7 +738,7 @@ id: fastapi-endpoint
         </div>
         <figcaption><b>Three rules, three files, no rule knows about another.</b> <code>fastapi-router-prefix</code> pinned the two prefixes, <code>fastapi-include-router</code> pinned the two mounts, <code>fastapi-endpoint</code> pinned the endpoint. They line up only because the resolver gave <code>router</code> in <code>job.py</code> and <code>job_router</code> in <code>__init__.py</code> the same name.</figcaption>
       </figure>
-      <h3>What resolve produced for Contextualized</h3>
+      <h3>What assemble produced for Contextualized</h3>
       <div class="table-wrap">
         <table>
           <thead><tr><th>Kind</th><th>Count</th><th>Notes</th></tr></thead>
@@ -862,11 +878,11 @@ id: fastapi-endpoint
       <ol class="steps">
         <li><span><span class="stage">clone</span>The repository lands in <code>/tmp/steno-workspaces/job-N/</code>.</span></li>
         <li><span><span class="stage">parse</span><code>fastapi</code> is in <code>requirements.txt</code>, so <code>steno-pack-fastapi</code> is on. The resolver indexes 112 modules; <code>job.py</code> becomes <code>app.api.routers.job</code>.</span></li>
-        <li><span><span class="stage">parse</span><code>fastapi-router-prefix</code> matches <code>router = APIRouter(prefix="/jobs")</code> and pins a prefix clue on <code>app.api.routers.job.router</code>. Same for <code>/api</code> on <code>app_router</code>.</span></li>
-        <li><span><span class="stage">parse</span><code>fastapi-include-router</code> pins mount clues: <code>job.router</code> inside <code>app_router</code>, <code>app_router</code> inside the app.</span></li>
-        <li><span><span class="stage">parse</span><code>fastapi-endpoint</code> matches line 16. <code>where</code>: <code>type_of(router)</code> is <code>fastapi.APIRouter</code>. Emits an HttpEndpoint <code>POST /projects/{project_id}</code> pending its prefix, an <code>EXPOSES</code> from <code>@app</code>, and an entry point into <code>run_project_jobs</code>.</span></li>
-        <li><span><span class="stage">parse</span><code>fastapi-background-task</code> matches line 28 and emits an async <code>INVOKES</code> to <code>JobService.run_project_jobs</code>.</span></li>
-        <li><span><span class="stage">resolve</span>The prefix chain makes the path <code>/api/jobs/projects/{project_id}</code>.</span></li>
+        <li><span><span class="stage">extract</span><code>fastapi-router-prefix</code> matches <code>router = APIRouter(prefix="/jobs")</code> and pins a prefix clue on <code>app.api.routers.job.router</code>. Same for <code>/api</code> on <code>app_router</code>.</span></li>
+        <li><span><span class="stage">extract</span><code>fastapi-include-router</code> pins mount clues: <code>job.router</code> inside <code>app_router</code>, <code>app_router</code> inside the app.</span></li>
+        <li><span><span class="stage">extract</span><code>fastapi-endpoint</code> matches line 16. <code>where</code>: <code>type_of(router)</code> is <code>fastapi.APIRouter</code>. Emits an HttpEndpoint <code>POST /projects/{project_id}</code> pending its prefix, an <code>EXPOSES</code> from <code>@app</code>, and an entry point into <code>run_project_jobs</code>.</span></li>
+        <li><span><span class="stage">extract</span><code>fastapi-background-task</code> matches line 28 and emits an async <code>INVOKES</code> to <code>JobService.run_project_jobs</code>.</span></li>
+        <li><span><span class="stage">assemble</span>The prefix chain makes the path <code>/api/jobs/projects/{project_id}</code>.</span></li>
         <li><span><span class="stage">flows</span><code>apps/backend</code> holds entry points, so it's a Service; the application is <code>contextualized-backend</code>.</span></li>
         <li><span><span class="stage">flows</span>The call graph, plus the async edge, reaches 22 functions. Their effects roll up: reads of <code>data_source</code>, <code>diff_task</code>, <code>embed_task</code>, <code>job</code>; writes to <code>job</code> and <code>record_lock</code>.</span></li>
         <li><span><span class="stage">write</span><code>MERGE (n:Interface {id: "endpoint:contextualized-backend:POST:/api/jobs/projects/{project_id}"})</code>, then the Flow, 22 Functions, and their edges.</span></li>
@@ -901,7 +917,7 @@ id: fastapi-endpoint
         <div>
           <h4>The pydantic-settings pack's clues are never used</h4>
           <p>It emits 62 <code>property</code> clues in Contextualized (11 in Steno). The engine copies property clues into the resolver only before code rules run, and only config rules' clues exist then; this pack is a code rule. <code>settings.X</code> resolves anyway, through the <code>Settings</code> class defaults, so today the pack only adds to clue counts.</p>
-          <p class="where">extractors/engine.py collect</p>
+          <p class="where">extraction/engine.py extract</p>
         </div>
       </div>
 
@@ -909,17 +925,17 @@ id: fastapi-endpoint
         <div class="sev"><span class="tag part">doc gap</span></div>
         <div>
           <h4>Config values don't feed resolution</h4>
-          <p>extractor-rules.md §5 says every config key becomes a <code>property</code> clue automatically. That isn't built, and no pack has a config rule, so <code>os.getenv("OLLAMA_BASE_URL", …)</code> always uses its code default even if a <code>.env</code> in the repository sets it.</p>
-          <p class="where">extractors/config_files.py (only used by config rules)</p>
+          <p>rule-packs.md §5 says every config key becomes a <code>property</code> clue automatically. That isn't built, and no pack has a config rule, so <code>os.getenv("OLLAMA_BASE_URL", …)</code> always uses its code default even if a <code>.env</code> in the repository sets it.</p>
+          <p class="where">source/config_files.py (only used by config rules)</p>
         </div>
       </div>
 
       <div class="finding">
-        <div class="sev"><span class="tag part">doc gap</span></div>
+        <div class="sev"><span class="tag part">ordering</span></div>
         <div>
-          <h4><code>where</code> runs in parse, not resolve</h4>
-          <p>extractor-rules.md §2 says <code>where</code> is evaluated in the resolve pass. The engine checks it at match time. One consequence: a client clue's <code>returns</code> hints are registered during resolve, so a <code>where: type</code> on a value returned by an SDK method can't see them.</p>
-          <p class="where">extractors/engine.py _where · extractors/resolve.py _clients</p>
+          <h4><code>where</code> can't see <code>returns</code> hints</h4>
+          <p>The engine checks <code>where</code> at match time, in extract (rule-packs.md §2 says so). A client clue's <code>returns</code> hints are registered later, during assemble, so a <code>where: type</code> on a value returned by an SDK method can't see them.</p>
+          <p class="where">extraction/engine.py _where · assemblers/assemble.py _clients</p>
         </div>
       </div>
 

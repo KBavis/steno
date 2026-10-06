@@ -16,7 +16,7 @@ match:
     TYPE: { not: { regex: "^ClassVar" } }      # model_config: ClassVar[...] is configuration, not a setting
 emit:
   # The code default. An environment variable or .env file can override it at runtime,
-  # and the config resolver prefers those when they're present in the repository.
+  # and the symbol resolver prefers those when they're present in the repository.
   - clue: property
     key: $FIELD
     value: $VALUE

@@ -1,7 +1,9 @@
-"""The extractor engine: run rule packs over a repository and produce facts.
+"""The rule engine: run rule packs over a repository and produce facts (docs/ingestion.md §2).
 
-Pass 1 (docs/ingestion.md §2): every rule runs on every file and emits nodes, edges,
-clues, and entry points. Pass 3 (`resolve.py`) then joins clues and resolves references.
+- parse:    list the files once, build the symbol resolver's index and every syntax tree
+- extract:  run every rule on every file; each match emits facts, facts with blanks, and clues
+
+The assemblers (`steno.assemblers`) then fill in the blanks from the clues.
 """
 
 import ast
@@ -13,8 +15,7 @@ from typing import Any
 
 from ast_grep_py import SgNode, SgRoot
 
-from steno.extractors import config_files
-from steno.extractors.facts import (
+from steno.extraction.facts import (
     UNRESOLVED_TEXT,
     AppRef,
     ClueFact,
@@ -29,21 +30,21 @@ from steno.extractors.facts import (
     TableOfRef,
     host_of,
 )
-from steno.extractors.files import is_test_file, source_files
-from steno.extractors.packs import EXTENSIONS, Pack, Rule
-from steno.extractors.resolve import resolve
 from steno.resolvers.python import UNRESOLVED, ClassInfo, FunctionInfo, PythonResolver, Scope
+from steno.rule_packs.packs import EXTENSIONS, Pack, Rule
+from steno.source import config_files
+from steno.source.files import is_test_file, source_files
 
 log = logging.getLogger(__name__)
 
-# How each clue field is read from a capture (extractor-rules.md §4)
+# How each clue field is read from a capture (rule-packs.md §4)
 CLUE_FIELDS: dict[str, dict[str, str]] = {
     "prefix": {"owner": "symbol", "value": "value"},
     "mount": {"parent": "symbol", "child": "symbol", "prefix": "value"},
     "property": {"key": "text", "value": "value"},
     "client": {"type": "class", "target": "ref", "operations": "literal", "returns": "literal"},
 }
-NODE_SYMBOL_PROPS = {"prefixed_by"}  # resolved later by a clue resolver, not stored on the node
+NODE_SYMBOL_PROPS = {"prefixed_by"}  # completed later by an assembler, not stored on the node
 
 _OMIT = object()  # an optional capture that wasn't bound: the field is left out
 
@@ -73,22 +74,25 @@ class Engine:
         self.repo = repo
         self.packs = packs
         self.out = Extraction()
-        self.resolver = PythonResolver(repo) if any(p.language == "python" for p in packs) else None
-        if self.resolver:
-            self.out.errors += [f"{p.relative_to(repo)}: {msg}" for p, msg in self.resolver.errors]
+        self.resolver: PythonResolver | None = None
+        self.files: list[Path] = []
         self._roots: dict[Path, SgNode] = {}
 
-    def run(self) -> Extraction:
-        self.collect()
-        self.resolve()
-        return self.out
+    def parse(self) -> None:
+        """Read the code once: list the files, index them for the symbol resolver, and build
+        a syntax tree for every file a code rule will look at. No rules run here."""
+        self.files = list(source_files(self.repo))
+        if any(p.language == "python" for p in self.packs):
+            self.resolver = PythonResolver(self.repo, self.files)
+            self.out.errors += [
+                f"{p.relative_to(self.repo)}: {msg}" for p, msg in self.resolver.errors
+            ]
+        for language in {r.language for p in self.packs for r in p.rules if r.kind == "code"}:
+            for path in self._code_files(language):
+                self._root(path, language)
 
-    def resolve(self) -> None:
-        """Pass 3: join clues and resolve references."""
-        resolve(self.out, self.resolver, self.repo)
-
-    def collect(self) -> Extraction:
-        """Pass 1: run every rule on every file."""
+    def extract(self) -> Extraction:
+        """Run every rule on every file."""
         rules = [r for p in self.packs for r in p.rules]
         for rule in rules:  # config first: its property clues feed value resolution
             if rule.kind == "config":
@@ -104,15 +108,19 @@ class Engine:
 
     # ------------------------------------------------------------ code rules
 
+    def _code_files(self, language: str) -> list[Path]:
+        exts = EXTENSIONS.get(language, ())
+        return [
+            p for p in self.files if p.suffix in exts and not is_test_file(p.relative_to(self.repo))
+        ]
+
     def _run_code(self, rule: Rule) -> None:
         config = {
             k: rule.match[k]
             for k in ("rule", "constraints", "utils", "transform")
             if k in rule.match
         }
-        for path in source_files(self.repo, EXTENSIONS.get(rule.language, ())):
-            if is_test_file(path.relative_to(self.repo)):
-                continue
+        for path in self._code_files(rule.language):
             root = self._root(path, rule.language)
             if root is None:
                 continue
@@ -180,7 +188,7 @@ class Engine:
     def _run_config(self, rule: Rule) -> None:
         pattern = config_files.key_regex(rule.match.get("key", ""))
         globs = rule.files or config_files.DEFAULT_GLOBS
-        for path in source_files(self.repo):
+        for path in self.files:
             rel = path.relative_to(self.repo).as_posix()
             if not any(
                 fnmatch.fnmatch(rel, g) or fnmatch.fnmatch(path.name, g.rsplit("/", 1)[-1])
@@ -435,7 +443,3 @@ def _strip_quotes(text: str) -> str:
     if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
         return text[1:-1]
     return text
-
-
-def extract(repo: Path, packs: list[Pack]) -> Extraction:
-    return Engine(repo, packs).run()

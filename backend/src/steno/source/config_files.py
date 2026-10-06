@@ -1,4 +1,4 @@
-"""Read config files as flat key → value maps, and match key paths (extractor-rules.md §5).
+"""Read config files as flat key → value maps, and match key paths (rule-packs.md §5).
 
 Config rules don't care whether a setting came from YAML, a .properties file, or a .env file.
 Every file is turned into the same shape, a flat map of dotted keys to values, e.g.

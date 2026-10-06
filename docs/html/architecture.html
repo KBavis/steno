@@ -182,7 +182,7 @@ pre .c { color: var(--muted); }
       <li><a href="#parts">Each part</a></li>
       <li><a href="#data">Where data lives</a></li>
       <li><a href="#job">A job, end to end</a></li>
-      <li><a href="#stages">The seven stages</a></li>
+      <li><a href="#stages">The eight stages</a></li>
       <li><a href="#read">Reading the graph back</a></li>
       <li><a href="#debug">When the graph looks wrong</a></li>
       <li><a href="#status">Built and not built</a></li>
@@ -287,13 +287,14 @@ pre .c { color: var(--muted); }
             <text class="t memt" x="816" y="164">Worker</text>
             <text class="s" x="816" y="182">polls the queue every 2 s</text>
             <line class="ln soft" x1="800" y1="196" x2="980" y2="196"/>
-            <text class="m" x="816" y="220">clone</text>
-            <text class="m" x="816" y="240">deps      (skipped)</text>
-            <text class="m" x="816" y="260">parse</text>
-            <text class="m" x="816" y="280">resolve</text>
-            <text class="m" x="816" y="300">flows</text>
-            <text class="m" x="816" y="320">write</text>
-            <text class="m" x="816" y="340">cards     (skipped)</text>
+            <text class="m" x="816" y="216">clone</text>
+            <text class="m" x="816" y="234">deps      (skipped)</text>
+            <text class="m" x="816" y="252">parse</text>
+            <text class="m" x="816" y="270">extract</text>
+            <text class="m" x="816" y="288">assemble</text>
+            <text class="m" x="816" y="306">flows</text>
+            <text class="m" x="816" y="324">write</text>
+            <text class="m" x="816" y="342">cards     (skipped)</text>
 
             <rect class="box code" x="800" y="410" width="180" height="62" rx="8"/>
             <text class="t codet" x="816" y="432">Workspace</text>
@@ -361,13 +362,13 @@ pre .c { color: var(--muted); }
         </div>
         <div class="card mem">
           <h4>Worker <span class="tag yes">built</span></h4>
-          <p>A loop: claim the oldest queued job, run seven stages in order, mark the job succeeded or failed. One job at a time per process; run more processes for parallelism.</p>
+          <p>A loop: claim the oldest queued job, run eight stages in order, mark the job succeeded or failed. One job at a time per process; run more processes for parallelism.</p>
           <span class="where">ingestion/worker.py · queue.py · pipeline.py</span>
         </div>
         <div class="card mem">
-          <h4>Extractor engine + resolver <span class="tag yes">built</span></h4>
-          <p>Runs rule packs over the clone (ast-grep), asks the Python symbol resolver what names and types mean, and joins clues. Everything stays in memory for the job.</p>
-          <span class="where">extractors/*  ·  resolvers/python.py</span>
+          <h4>Rule engine + symbol resolver <span class="tag yes">built</span></h4>
+          <p>Runs rule packs over the clone (ast-grep), asks the Python symbol resolver what names and types mean, and assembles clues into complete facts. Everything stays in memory for the job.</p>
+          <span class="where">extraction/*  ·  resolvers/python.py  ·  assemblers/*</span>
         </div>
         <div class="card mem">
           <h4>Graph builder + writer <span class="tag yes">built</span></h4>
@@ -430,7 +431,7 @@ pre .c { color: var(--muted); }
       <p class="lede">From clicking "dry run" to seeing the graph. Read down; each arrow is one real call.</p>
       <figure>
         <div class="diagram">
-          <svg viewBox="0 0 1000 640" role="img" aria-label="Sequence of a dry run. Setup: the UI saves the organization and spaces through the API into Postgres, and the API projects them into Neo4j. Then the UI posts a job, the API inserts a queued row, the worker claims it with SKIP LOCKED, clones from the git host, runs parse, resolve and flows in memory, writes a stage row after each stage, merges the plan into Neo4j, and marks the job succeeded. The UI polls the job, then asks graph views, which run Cypher against Neo4j.">
+          <svg viewBox="0 0 1000 640" role="img" aria-label="Sequence of a dry run. Setup: the UI saves the organization and spaces through the API into Postgres, and the API projects them into Neo4j. Then the UI posts a job, the API inserts a queued row, the worker claims it with SKIP LOCKED, clones from the git host, runs parse, extract, assemble and flows in memory, writes a stage row after each stage, merges the plan into Neo4j, and marks the job succeeded. The UI polls the job, then asks graph views, which run Cypher against Neo4j.">
             <defs>
               <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker>
               <marker id="a2pg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head pg" d="M0,0 L10,5 L0,10 z"/></marker>
@@ -473,10 +474,11 @@ pre .c { color: var(--muted); }
             <line class="ln" x1="600" y1="276" x2="778" y2="276" marker-end="url(#a2)"/>
             <text class="lbl" x="608" y="270">clone: git clone --depth 1</text>
             <rect class="box mem" x="560" y="292" width="80" height="94" rx="6"/>
-            <text class="m" x="600" y="314" text-anchor="middle">parse</text>
-            <text class="m" x="600" y="334" text-anchor="middle">resolve</text>
-            <text class="m" x="600" y="354" text-anchor="middle">flows</text>
-            <text class="s" x="600" y="374" text-anchor="middle">in memory</text>
+            <text class="m" x="600" y="310" text-anchor="middle">parse</text>
+            <text class="m" x="600" y="326" text-anchor="middle">extract</text>
+            <text class="m" x="600" y="342" text-anchor="middle">assemble</text>
+            <text class="m" x="600" y="358" text-anchor="middle">flows</text>
+            <text class="s" x="600" y="377" text-anchor="middle">in memory</text>
             <line class="ln pg dash" x1="558" y1="340" x2="422" y2="340" marker-end="url(#a2pg)"/>
             <text class="lbl" x="440" y="334">ingestion_stage row</text>
             <text class="lbl" x="440" y="356">after every stage</text>
@@ -508,7 +510,7 @@ pre .c { color: var(--muted); }
 
     <!-- 5 -->
     <section id="stages">
-      <h2><span class="num">05</span>The seven stages</h2>
+      <h2><span class="num">05</span>The eight stages</h2>
       <p class="lede">The worker's whole job is this list, in this order. Each stage is a function in <code>ingestion/pipeline.py</code> that returns its metrics.</p>
       <div class="table-wrap">
         <table>
@@ -516,8 +518,9 @@ pre .c { color: var(--muted); }
           <tbody>
             <tr><td><code>clone</code></td><td>Shallow clone of the default branch; records the commit SHA</td><td>the workspace folder</td></tr>
             <tr><td><code>deps</code></td><td>Skipped: dependency JARs are only for Java</td><td>nothing</td></tr>
-            <tr><td><code>parse</code></td><td>Picks the rule packs that apply, indexes every Python file, runs every rule on every file</td><td>the engine, holding the resolver and the raw facts</td></tr>
-            <tr><td><code>resolve</code></td><td>Joins clues across files: URL prefix chains, entity → table, SDK clients, partial references; writes the facts JSON</td><td>completed facts</td></tr>
+            <tr><td><code>parse</code></td><td>Picks the rule packs that apply, lists the files once, indexes every Python file for the symbol resolver, builds a syntax tree per file. No rules run.</td><td>the rule engine, holding the symbol resolver and the trees</td></tr>
+            <tr><td><code>extract</code></td><td>Runs every rule on every file: facts, facts with blanks, and clues</td><td>the raw facts</td></tr>
+            <tr><td><code>assemble</code></td><td>Combines clues across files into complete facts: URL prefix chains, entity → table, SDK clients, partial references; writes the facts JSON</td><td>completed facts</td></tr>
             <tr><td><code>flows</code></td><td>Finds modules and applications, builds the call graph, one Flow per entry point, rolls effects up onto flows</td><td>the graph plan</td></tr>
             <tr><td><code>write</code></td><td>MERGE the plan into Neo4j by stable ID, then delete what earlier runs of this repository left</td><td>the graph</td></tr>
             <tr><td><code>cards</code></td><td>Skipped: LLM purposes and narratives aren't built</td><td>nothing</td></tr>
@@ -527,18 +530,18 @@ pre .c { color: var(--muted); }
       <h3>Where the time goes</h3>
       <p>Seconds per stage in job 1, Steno ingesting itself (255 files, 55 Python modules, 25 flows):</p>
       <figure>
-        <div class="bars" role="img" aria-label="Seconds per stage in job 1: clone 0.50, deps skipped, parse 2.46, resolve 0.01, flows 8.48, write 4.60, cards skipped. Flows takes the longest.">
+        <div class="bars" role="img" aria-label="Seconds per stage in job 1: clone 0.50, deps skipped, parse and extract together 2.46, assemble 0.01, flows 8.48, write 4.60, cards skipped. Flows takes the longest.">
           <div class="row" title="clone: 0.501 s"><span class="name">clone</span><span class="track"><span class="fill" style="display:block;width:5.9%"></span></span><span class="val">0.50 s</span></div>
           <div class="row" title="deps: skipped"><span class="name">deps</span><span class="track"><span class="fill skip" style="display:block"></span></span><span class="val">skip</span></div>
-          <div class="row" title="parse: 2.461 s"><span class="name">parse</span><span class="track"><span class="fill" style="display:block;width:29%"></span></span><span class="val">2.46 s</span></div>
-          <div class="row" title="resolve: 0.012 s"><span class="name">resolve</span><span class="track"><span class="fill" style="display:block;width:0.2%"></span></span><span class="val">0.01 s</span></div>
+          <div class="row" title="parse + extract: 2.461 s"><span class="name">parse*</span><span class="track"><span class="fill" style="display:block;width:29%"></span></span><span class="val">2.46 s</span></div>
+          <div class="row" title="assemble: 0.012 s"><span class="name">assemble</span><span class="track"><span class="fill" style="display:block;width:0.2%"></span></span><span class="val">0.01 s</span></div>
           <div class="row" title="flows: 8.477 s"><span class="name">flows</span><span class="track"><span class="fill" style="display:block;width:100%"></span></span><span class="val">8.48 s</span></div>
           <div class="row" title="write: 4.596 s"><span class="name">write</span><span class="track"><span class="fill" style="display:block;width:54.2%"></span></span><span class="val">4.60 s</span></div>
           <div class="row" title="cards: skipped"><span class="name">cards</span><span class="track"><span class="fill skip" style="display:block"></span></span><span class="val">skip</span></div>
         </div>
-        <figcaption><b>Flows is the slow stage</b>, because it asks the resolver for every call in every function, not only the reachable ones. On a clean clone of Contextualized (112 modules, 486 functions) the same stages took parse 4.8 s, resolve 3.4 s, flows 8.5 s.</figcaption>
+        <figcaption><b>Flows is the slow stage</b>, because it asks the symbol resolver for every call in every function, not only the reachable ones. On a clean clone of Contextualized (112 modules, 486 functions) the same stages took parse 4.8 s, assemble 3.4 s, flows 8.5 s. *Measured before parse and extract were split: the parse bar covers both.</figcaption>
       </figure>
-      <p>The internals of parse, resolve, flows and write are on the <a href="ingestion.html">Ingestion Internals</a> page.</p>
+      <p>The internals of parse, extract, assemble, flows and write are on the <a href="ingestion.html">Ingestion Internals</a> page.</p>
     </section>
 
     <!-- 6 -->
@@ -567,17 +570,17 @@ pre .c { color: var(--muted); }
       <ol class="ladder">
         <li><b>Source</b><span>Is it really in the code at that commit?</span><code>/graph/node</code> source link</li>
         <li><b>Facts</b><span>Did a rule match, or get dropped, and why?</span><code>job-N-facts.json</code></li>
-        <li><b>Stage counts</b><span>Did the numbers jump between parse, resolve, flows, write?</span><code>ingestion_stage.metrics</code></li>
+        <li><b>Stage counts</b><span>Did the numbers jump between parse, extract, assemble, flows, write?</span><code>ingestion_stage.metrics</code></li>
         <li><b>Graph</b><span>Is the node or edge in Neo4j, with the right ID?</span>Neo4j Browser :7474</li>
         <li><b>View JSON</b><span>Did the view roll it up, hide it, or merge it?</span><code>/api/graph/*</code></li>
         <li><b>Layout</b><span>Is it in the JSON but drawn badly?</span><code>components/graph/</code></li>
       </ol>
       <p>Steps 1–4 are ingestion problems. Steps 5–6 are visualization problems. The facts file is the most useful single artifact: every node, edge, clue and entry point with the rule and line that produced it, plus every match that was dropped and the reason. You can produce it without a database:</p>
 <pre>cd backend
-uv run steno extract ~/projects/contextualized --json out.json   <span class="c"># parse + resolve only</span></pre>
+uv run steno extract ~/projects/contextualized --json out.json   <span class="c"># parse, extract, assemble only</span></pre>
       <div class="callout">
-        <h4>Run <code>extract</code> on a clean clone</h4>
-        <p>File discovery walks every directory and filters afterwards, once per rule. On a working copy with <code>node_modules</code> and <code>.venv</code> (59,000 files for Contextualized) <code>extract</code> took 3.5 minutes; on a fresh <code>git clone</code> of the same commit, about 8 seconds. The worker always uses a fresh clone, so jobs aren't affected.</p>
+        <h4>A working copy is fine now</h4>
+        <p>File discovery used to walk into <code>node_modules</code> and <code>.venv</code> before filtering them out, once per rule: 3.5 minutes on Contextualized's working copy (59,000 files). Parse now lists the files once and never enters skipped folders, so the same working copy takes about 7 seconds.</p>
       </div>
     </section>
 

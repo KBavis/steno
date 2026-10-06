@@ -3,13 +3,13 @@
 docs/knowledge-graph.md §3, Module roles. A Module is the ecosystem's build unit (a Python
 project, an npm package, a Maven/Gradle module); a `:Service` module produces a deployable
 and gets an Application. Phase 1 detection (Proposed; DESIGN_DOC §21 lists the signals as
-Open): a module is a Service when the extractors found entry points in it.
+Open): a module is a Service when rules found entry points in it.
 """
 
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from steno.extractors.files import SKIP_DIRS
+from steno.source.files import SKIP_DIRS
 
 # Build file → (build tool, language)
 BUILD_FILES = {
@@ -55,7 +55,7 @@ class Structure:
 
 
 def detect(repo: Path, entry_files: set[str]) -> Structure:
-    """Find build units. `entry_files` are files where the extractors found entry points."""
+    """Find build units. `entry_files` are files where rules found entry points."""
     modules: dict[str, Module] = {}
     for path in sorted(repo.rglob("*")):
         rel = path.relative_to(repo)

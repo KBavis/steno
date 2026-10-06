@@ -18,7 +18,7 @@ emit:
     as: endpoint
     method: $METHOD
     path: $PATH
-    prefixed_by: $ROUTER     # the prefix-chain resolver adds the router's prefixes and mounts
+    prefixed_by: $ROUTER     # the prefix-chain assembler adds the router's prefixes and mounts
   - edge: EXPOSES
     from: "@app"
     to: endpoint

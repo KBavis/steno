@@ -117,7 +117,7 @@ Phase 1 starts with a **dry run that writes no LLM cards**, to see the real numb
 
 1. **Deterministic ingestion only** for one application: clone, dependencies, parsing, resolution, flow derivation, graph write, signature-only flow cards.
 2. **Ingestion report:**
-   - **time per stage** (clone, dependency fetch, parse, resolve, derive flows, write)
+   - **time per stage** (clone, dependency fetch, parse, assemble, derive flows, write)
    - **graph size**: nodes and edges by label, number of flows, and business vs. technical flows
    - **projected LLM cost**: the input tokens every flow's purpose and narrative *would* need (token counting, not generation), times each model's price, with and without prompt caching
 3. **A sample:** purposes and narratives for ~50 flows with a small and a stronger model. Compare retrieval quality on the question → flow set, and against signature-only cards.
@@ -233,7 +233,7 @@ A raw diff is too narrow. It misses the PR's context, and the other PRs this cha
 
 **How it's analyzed: a dry-run ingestion.**
 
-1. Run the **same extractors** used for incremental updates on each PR's changed files at its head commit.
+1. Run the **same rule packs** used for incremental updates on each PR's changed files at its head commit.
 2. Compute the **fact diff against main's graph**, but write it to a temporary overlay, never to the main graph.
 3. **Combine the overlays** of all related PRs, then analyze them together:
    - "The producer PR changes `order.created`. Consumers A and B are updated by PR #45; **consumer C isn't covered by any PR**."

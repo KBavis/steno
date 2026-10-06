@@ -1,8 +1,8 @@
-# Extractor Rules
+# Rules and Rule Packs
 
-The format of Steno's extractor rules and rule packs: how a rule finds code, what it emits, how facts from different rules are combined, and how a rule proves it works.
+The format of Steno's rules and rule packs: how a rule finds code, what it emits, how facts from different rules are combined, and how a rule proves it works.
 
-Part of the [Design Doc](./DESIGN_DOC.md); it details [Ingestion §4](./ingestion.md#4-extractors-rules-for-being-agnostic). Status markers: **Decided** · **Proposed** · **Open**.
+Part of the [Design Doc](./DESIGN_DOC.md); it details [Ingestion §4](./ingestion.md#4-rules-and-rule-packs). Status markers: **Decided** · **Proposed** · **Open**.
 
 ---
 
@@ -49,7 +49,7 @@ emit:                                 # one or more outputs
     $CLS:    { class: [llama_index.llms.ollama.Ollama] }    # the class itself, or a subclass (for constructor calls)
   ```
 
-  `type` is about **instances** (`client.get(...)` on an httpx client, not `dict.get(...)`); `class` is about **classes**, so a constructor rule also catches a subclass the app defines (`class Gateway(OpenAILike)`). `where` is evaluated in the resolve pass; a match whose condition fails is dropped.
+  `type` is about **instances** (`client.get(...)` on an httpx client, not `dict.get(...)`); `class` is about **classes**, so a constructor rule also catches a subclass the app defines (`class Gateway(OpenAILike)`). `where` is checked as soon as the match is found (extract stage), by asking the symbol resolver; a match whose condition fails is skipped.
 
 ## 3. What a rule emits (Decided)
 
@@ -57,10 +57,10 @@ emit:                                 # one or more outputs
 |---|---|---|
 | **`node`** | A thing: an endpoint, a topic, a table, an entity | Yes |
 | **`edge`** | A connection between two things: `EXPOSES`, `CALLS`, `MAPS_TO`, … | Yes |
-| **`clue`** | A partial fact that helps complete other facts: "this router has prefix `/jobs`" | No, it's consumed by a resolver |
+| **`clue`** | A partial fact that helps complete other facts: "this router has prefix `/jobs`" | No, it's consumed by an assembler |
 | **`entry_point`** | "This function is started by this trigger" | Indirectly: flows are derived from entry points |
 
-**Rules never create `Flow` or `Step` nodes.** Flows are derived in pass 2 by walking the call graph from every entry point ([Ingestion §2](./ingestion.md#passes-per-application-decided)). A rule only marks where a flow starts.
+**Rules never create `Flow` or `Step` nodes.** Flows are derived in the flows stage by walking the call graph from every entry point ([Ingestion §2](./ingestion.md#passes-per-application-decided)). A rule only marks where a flow starts.
 
 ### Referring to things inside `emit`
 
@@ -72,7 +72,7 @@ emit:                                 # one or more outputs
 | `as: name` | Names an emitted node so later lines in the same rule can refer to it | `as: endpoint` … `to: endpoint` |
 | `{Label: {key: value}}` | An inline reference to a node by its identity; a stub is created if it doesn't exist yet | `to: { KafkaTopic: { name: $TOPIC } }` |
 | `{Label: {some: value}}` with only **some** identity properties | The app's single node that matches. Several matches: marked `ambiguous`; none: a stub. For when code reaches a store without naming it (a framework wrapper around "the" vector store). | `to: { DataStore: { vendor: chroma } }` |
-| `{http: {method, url}}` | An outbound HTTP target; the resolver decides whether it's another app's endpoint or an `ExternalSystem` | `to: { http: { method: $VERB, url: $URL } }` |
+| `{http: {method, url}}` | An outbound HTTP target; the graph builder decides whether it's another app's endpoint or an `ExternalSystem` | `to: { http: { method: $VERB, url: $URL } }` |
 | `{Function: {symbol: $X}}` | A function that's **referenced, not called** here: a callback, a background task. Symbol resolution turns `$X` into the function's identity. | `to: { Function: { symbol: $TASK } }` |
 | `{table_of: $X}` | The `Table` an entity maps to (through `MAPS_TO`). `$X` may be the entity class, an instance of it, or one of its attributes (`Job.status`). **If `$X` isn't a mapped entity, the emit is dropped**, so a rule can match broadly (`select(...)`) without producing noise. | `to: { table_of: $MODEL }` |
 
@@ -80,7 +80,7 @@ emit:                                 # one or more outputs
 
 **Optional captures.** A capture bound in only one branch of an `any:` (for example an optional `prefix=` keyword) is simply left out of the emit when that branch didn't match.
 
-**Captured values are resolved, not taken literally.** When a capture is a variable, a constant, an f-string, a `${placeholder}`, or a settings lookup, the resolver follows it as far as it can (local assignments, constants, config properties). What it can't resolve, such as a URL built from a runtime value, is recorded as **unresolved** with lower confidence and shows up in the coverage report.
+**Captured values are resolved, not taken literally.** When a capture is a variable, a constant, an f-string, a `${placeholder}`, or a settings lookup, the symbol resolver follows it as far as it can (local assignments, constants, config properties). What it can't resolve, such as a URL built from a runtime value, is recorded as **unresolved** with lower confidence and shows up in the coverage report.
 
 ### Identity: what each node needs
 
@@ -96,7 +96,7 @@ Steno builds every node's stable ID from its identity properties ([Knowledge Gra
 | `Entity` | `name` (the symbol) | |
 | `Table` | `name` | `schema`, `datastore` when known |
 | `DataStore` | `vendor`, `host`, `database` | |
-| `ExternalSystem` | `host`, or `name` when the host can't be resolved | A URL is accepted; the resolver keeps its host |
+| `ExternalSystem` | `host`, or `name` when the host can't be resolved | A URL is accepted; the engine keeps its host |
 
 ### Example: an endpoint (node + edge + entry point)
 
@@ -106,7 +106,7 @@ emit:
     as: endpoint
     method: $METHOD
     path: $PATH
-    prefixed_by: $ROUTER            # the prefix-chain resolver adds /api/jobs (§5)
+    prefixed_by: $ROUTER            # the prefix-chain assembler adds /api/jobs (§4)
   - edge: EXPOSES
     from: "@app"
     to: endpoint
@@ -130,39 +130,47 @@ router = APIRouter(prefix="/jobs")
 async def run_project_jobs(...): ...
 ```
 
-No single pattern sees all of it. So each rule reports what it sees, and a **resolver** combines the pieces afterward.
+No single pattern sees all of it. So each rule reports what it sees, and an **assembler** combines the pieces afterward. A match produces one of three kinds of output:
+
+| Kind | Example | Done? |
+|---|---|---|
+| **Fact** | Class `Job` maps to table `job` | Yes: goes on to the graph as it is |
+| **Fact with a blank** | Endpoint `POST /projects/{project_id}`, prefixed by `router` | Not yet: its full path waits for the router's prefixes |
+| **Clue** | `router` has prefix `/jobs` | Never stored: a note that fills another fact's blank |
+
+Assembling is filling in the blanks. Blanks today: `prefixed_by` (a prefix chain), `table_of` (an entity's table), and partial references like `{DataStore: {vendor: chroma}}`. `client` clues work a little differently: their assembler turns method calls on SDK objects into new edges.
 
 ### Rules never reference each other
 
 A rule never calls another rule or names another rule's ID. Rules meet through a **shared label: the identity of the code a clue is about**. Picture a bulletin board:
 
-1. **Pass 1 (per file):** every rule runs on every file, in any order, and pins notes. Each note is labeled with the *thing* it's about, by its fully qualified symbol, never with which rule wrote it:
+1. **Extract:** every rule runs on every file, in any order, and pins notes. Each note is labeled with the *thing* it's about, by its fully qualified symbol, never with which rule wrote it:
    ```
    📌 prefix  about app.api.routers.job.router   → "/jobs"
    📌 prefix  about app.api.routers.app_router   → "/api"
    📌 mount   app.api.routers.job.router is inside app.api.routers.app_router
    📌 endpoint POST "/projects/{project_id}", prefixed by app.api.routers.job.router
    ```
-2. **Pass 3 (resolve):** each clue type's resolver reads the board and joins notes with the same label, producing `/api` + `/jobs` + `/projects/{project_id}`.
+2. **Assemble:** each clue type's assembler reads the board and combines notes with the same label, producing `/api` + `/jobs` + `/projects/{project_id}`.
 
-Notes from different files line up because **symbol resolution** gives the same object the same label: `router` in `job.py` and `job_router` imported in `__init__.py` are both `app.api.routers.job.router`.
+Notes from different files line up because the **symbol resolver** gives the same object the same label: `router` in `job.py` and `job_router` imported in `__init__.py` are both `app.api.routers.job.router`.
 
 This is why a new pack never has to be wired to existing ones: a pack that pins a `prefix` clue on a class or router automatically feeds every endpoint prefixed by it.
 
 ### Clue types are a fixed set, owned by Steno
 
-Each clue type has exactly one built-in resolver that knows how to combine it. A pack author can **emit** these in YAML but can't define new ones; a new clue type means new resolver code (a plugin or a core change).
+Each clue type has exactly one built-in **assembler** that knows how to combine it. A pack author can **emit** these in YAML but can't define new ones; a new clue type means new assembler code (a plugin or a core change).
 
-| Clue | Fields | Resolver | Used for |
+| Clue | Fields | Assembler | Used for |
 |---|---|---|---|
 | `prefix` | `owner`, `value` | **Prefix chain** | URL prefixes on routers, controllers, blueprints: FastAPI `APIRouter(prefix=…)`, Spring class-level `@RequestMapping` |
 | `mount` | `parent`, `child`, `prefix?` | **Prefix chain** | One router mounted inside another: `include_router`, Express `app.use("/x", router)` |
-| `client` | `type`, `target`, `operations?`, `returns?` | **Client** | SDK client objects that talk to something outside the app without a visible URL: LLM APIs, vector stores, cloud SDKs. A method call on an object of `type` (or a subclass) becomes `CALLS` to `target` when it's an `ExternalSystem`, or `READS_FROM` / `WRITES_TO` per `operations` (method → `read` / `write`) when it's a `DataStore`. Methods not listed produce nothing. `returns` (method → type) tells the resolver what a method hands back, so chained calls keep their type: `client.get_collection(...)` returns a `Collection`, whose `query(...)` is then a read. When a receiver is typed only as a base class, every client clue whose `type` is a subclass is a candidate; more than one is marked `ambiguous`, like DI. |
-| `property` | `key`, `value`, `profile?` | **Config** | Configuration values, for resolving `${placeholders}` and settings lookups. Steno emits these automatically for recognized config files; rules emit them only for unusual sources. |
+| `client` | `type`, `target`, `operations?`, `returns?` | **Client** | SDK client objects that talk to something outside the app without a visible URL: LLM APIs, vector stores, cloud SDKs. A method call on an object of `type` (or a subclass) becomes `CALLS` to `target` when it's an `ExternalSystem`, or `READS_FROM` / `WRITES_TO` per `operations` (method → `read` / `write`) when it's a `DataStore`. Methods not listed produce nothing. `returns` (method → type) tells the symbol resolver what a method hands back, so chained calls keep their type: `client.get_collection(...)` returns a `Collection`, whose `query(...)` is then a read. When a receiver is typed only as a base class, every client clue whose `type` is a subclass is a candidate; more than one is marked `ambiguous`, like DI. |
+| `property` | `key`, `value`, `profile?` | **Config** | Configuration values, handed to the symbol resolver for `${placeholders}` and settings lookups. Steno emits these automatically for recognized config files; rules emit them only for unusual sources. |
 
-More clue types arrive with the resolvers that need them, e.g. DI bindings with the DI resolver ([Ingestion §5](./ingestion.md#5-symbol-and-di-resolution)).
+More clue types arrive with the assemblers that need them, e.g. DI bindings with DI resolution ([Ingestion §5](./ingestion.md#5-symbol-and-di-resolution)).
 
-**If no clue is found,** nothing is added: a router without a prefix simply contributes no prefix, which is correct. If the label itself can't be worked out (the router came from a call symbol resolution couldn't follow), the fact is still recorded, marked lower-confidence, and listed in the coverage report.
+**If no clue is found,** nothing is added: a router without a prefix simply contributes no prefix, which is correct. If the label itself can't be worked out (the router came from a call the symbol resolver couldn't follow), the fact is still recorded, marked lower-confidence, and listed in the coverage report.
 
 ## 5. Config rules (Decided)
 
@@ -179,7 +187,7 @@ emit:
     name: $VALUE                          # $KEY and $VALUE are always available
 ```
 
-Most configuration needs **no rule**. Every key and value becomes a `property` clue automatically, so a code rule like `@KafkaListener(topics = "${app.kafka.topics.orders}")` gets the real topic name from the config resolver. Config rules are for when **the config alone states a fact**: a declared topic, a datasource URL (a `DataStore`), a downstream base URL.
+Most configuration needs **no rule**. Every key and value becomes a `property` clue automatically, so a code rule like `@KafkaListener(topics = "${app.kafka.topics.orders}")` gets the real topic name from the symbol resolver, which reads the `property` clues. Config rules are for when **the config alone states a fact**: a declared topic, a datasource URL (a `DataStore`), a downstream base URL.
 
 ## 6. Packs and layout (Decided)
 
@@ -255,10 +263,11 @@ The person who adds a rule owns it, whether they write the YAML by hand or use a
 
 This is different from Steno *generating* rules on its own from the coverage report (templates, LLM drafting), which stays deferred ([Ingestion §4](./ingestion.md#turning-a-coverage-item-into-a-rule-deferred-future-enhancement)).
 
-## 9. Rules, resolvers, and plugins
+## 9. Rules, assemblers, and plugins
 
 | Mechanism | Covers | Written as |
 |---|---|---|
 | **Rules** | "See this pattern, emit this fact": most of what a framework does | YAML in a pack |
-| **Built-in resolvers** | Joins many frameworks share: prefix chains, config placeholders, constants and f-strings, symbol and DI resolution | Steno core code |
+| **Assemblers** | Combining clues the same way for many frameworks: prefix chains, SDK clients, entity tables | Steno core code |
+| **Symbol resolver** | What names, types, and values are: imports, constants and f-strings, config placeholders, DI | Steno core code, one per language |
 | **Plugins** | Anything beyond both, such as an internal messaging framework with unusual routing. Rare. | Code, shipped with an org pack |

@@ -12,8 +12,8 @@ Today's coding agents are strong inside one repository and blind beyond it. Most
 
 - **Built bottom-up, searched top-down.** Each application is ingested in depth: endpoints, outbound calls, transports, flows, entities, data store access, and code structure. Space and organization views are **rollups** of those facts. Queries enter at the right layer and drill down.
 - **Flows are the core unit.** A flow is a unit of work started by a trigger (an endpoint, a consumed topic, a schedule). It's an ordered tree of steps, linked to other applications' flows across interfaces.
-- **Deterministic first.** Declarative extractor rules produce the facts. [Jev](docs/jev.md) makes typed, calibrated decisions where rules can't. An LLM only writes summary cards.
-- **Company-agnostic.** Connectors reach sources (Bitbucket, GitHub, GitLab, …). Extractor rule packs cover frameworks, and organizations add their own. Applications don't have to opt in to anything.
+- **Deterministic first.** Declarative rules produce the facts. [Jev](docs/jev.md) makes typed, calibrated decisions where rules can't. An LLM only writes summary cards.
+- **Company-agnostic.** Connectors reach sources (Bitbucket, GitHub, GitLab, …). Rule packs cover frameworks, and organizations add their own. Applications don't have to opt in to anything.
 - **Idempotent and incremental.** A one-time initial ingestion, then updates on every merge to main, driven by the commit range since the last ingested commit.
 - **Fast for agents.** Precomputed summary cards, Jev routing, parallel search across spaces, and batch tools keep agent round trips to a minimum.
 
@@ -24,7 +24,7 @@ Today's coding agents are strong inside one repository and blind beyond it. Most
 | `backend/` | Python 3.12 (uv). Admin API (`/api`) and MCP server (`/mcp`) in one FastAPI process, plus the ingestion worker |
 | `frontend/` | Vite + React + TypeScript UI |
 | `resolver-jvm/` | JavaParser symbol-resolution helper, called by the worker |
-| `rule-packs/` | Extractor rule packs |
+| `rule-packs/` | Rule packs |
 | `deploy/` | docker-compose for Postgres and Neo4j |
 
 Prerequisites: Docker (on WSL, enable Docker Desktop's WSL integration), [uv](https://docs.astral.sh/uv/), Node 20+, Java 21.
@@ -53,8 +53,8 @@ Connect an agent: `claude mcp add --transport http steno http://localhost:8000/m
 |---|---|
 | [Design Doc](docs/DESIGN_DOC.md) | The overview: architecture, technology choices, roadmap, decision log, open questions |
 | [Knowledge Graph](docs/knowledge-graph.md) | Neo4j labels, relationships, ownership, flows, data stores |
-| [Ingestion](docs/ingestion.md) | Connectors, extractor rules, symbol resolution, idempotency, incremental updates, Postgres schema |
-| [Extractor Rules](docs/extractor-rules.md) | The rule format: patterns, emits, clues, tests, and rule packs |
+| [Ingestion](docs/ingestion.md) | Connectors, parse and extract, rule packs, symbol resolution, idempotency, incremental updates, Postgres schema |
+| [Rules and Rule Packs](docs/rule-packs.md) | The rule format: patterns, emits, clues, tests, and rule packs |
 | [Retrieval & MCP](docs/retrieval-and-mcp.md) | Routing, summary cards, MCP tools, latency |
 | [Jev](docs/jev.md) | Every decision Jev makes, and its confidence thresholds |
 | [Use Cases](docs/use-cases.md) | What Steno enables: agentic development, planning, testing, operations |

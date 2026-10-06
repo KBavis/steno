@@ -18,8 +18,8 @@ label "type:epic"    3e4b9e "A larger goal tracked through sub-issues"
 # area: which part of Steno
 for a in \
   "ingestion:Pipeline stages, job queue, worker" \
-  "extractors:Rule engine, rule packs, clue resolvers" \
-  "resolver:Symbol and DI resolution (JVM helper, Python resolver)" \
+  "extractors:Rule engine, rule packs, assemblers" \
+  "resolver:Symbol and DI resolution (symbol resolvers: JVM helper, Python)" \
   "graph:Neo4j schema, stable IDs, projection, graph writes" \
   "db:Postgres models and migrations" \
   "mcp:MCP server and tools" \

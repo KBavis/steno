@@ -5,7 +5,7 @@ import { usePoll } from '../hooks/usePoll'
 import { duration, timeAgo } from '../lib/time'
 import { EmptyState, ErrorAlert } from './ui'
 
-const STAGES: StageName[] = ['clone', 'deps', 'parse', 'resolve', 'flows', 'write', 'cards']
+const STAGES: StageName[] = ['clone', 'deps', 'parse', 'extract', 'assemble', 'flows', 'write', 'cards']
 
 const STATUS_BADGE: Record<JobStatus, string> = {
   queued: 'badge',

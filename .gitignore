@@ -22,3 +22,5 @@ docs/next-steps.md
 # Editors / OS
 .idea/
 .DS_Store
+
+facts.json

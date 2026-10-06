@@ -1,6 +1,6 @@
 """`steno rules test`: run each rule's test cases and compare with expected.yaml.
 
-Conventions (docs/extractor-rules.md §7): a case lists only the output of the rule it's filed
+Conventions (docs/rule-packs.md §7): a case lists only the output of the rule it's filed
 under; every pack enabled for the case's input runs, so clues from other rules are available.
 A section the case omits isn't checked; a listed one (even `[]`) must match exactly.
 An expected item matches an actual one when every property it lists is equal (extra actual
@@ -13,9 +13,9 @@ from typing import Any
 
 import yaml
 
-from steno.extractors.engine import extract
-from steno.extractors.facts import AppRef, Extraction, HttpRef, NodeFact, NodeRef
-from steno.extractors.packs import Pack, is_enabled
+from steno.extraction.facts import AppRef, Extraction, HttpRef, NodeFact, NodeRef
+from steno.ingestion.local import run_folder
+from steno.rule_packs.packs import Pack, is_enabled
 
 SECTIONS = ("nodes", "edges", "clues", "entry_points")
 
@@ -49,7 +49,7 @@ def run_case(pack: Pack, rule_id: str, case_dir: Path, all_packs: list[Pack]) ->
         return result
     repo = case_dir / "input"
     packs = [p for p in all_packs if p.name == pack.name or is_enabled(p, repo)]
-    extraction = extract(repo, packs)
+    extraction = run_folder(repo, packs).out
     result.errors += extraction.errors
     actual = facts_of_rule(extraction, rule_id)
     expected = yaml.safe_load((case_dir / "expected.yaml").read_text()) or {}

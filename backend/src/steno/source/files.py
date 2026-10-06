@@ -1,3 +1,4 @@
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -20,12 +21,17 @@ SKIP_DIRS = {
 
 
 def source_files(root: Path, suffixes: tuple[str, ...] | None = None) -> Iterator[Path]:
-    """Files under `root`, skipping dependency and build directories, in a stable order."""
-    for path in sorted(root.rglob("*")):
-        if not path.is_file() or SKIP_DIRS & set(path.relative_to(root).parts):
-            continue
-        if suffixes is None or path.suffix in suffixes:
-            yield path
+    """Files under `root`, skipping dependency and build directories, in a stable order.
+
+    Skipped directories are never entered: a working copy's node_modules or .venv can hold
+    tens of thousands of files.
+    """
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
+        for name in sorted(filenames):
+            path = Path(dirpath) / name
+            if (suffixes is None or path.suffix in suffixes) and path.is_file():
+                yield path
 
 
 def is_test_file(rel: Path) -> bool:

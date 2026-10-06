@@ -9,7 +9,7 @@
 Code rules run through ast-grep (via `uvx --from ast-grep-cli`); config rules match key
 paths in YAML, .properties, and .env files. This checks *where* a rule matches and what
 it captures. It doesn't check `where:` conditions (they need symbol resolution) or the
-emitted facts; `steno rules test` does that once the extractor engine exists.
+emitted facts; `steno rules test` does that once the rule engine exists.
 """
 
 import argparse

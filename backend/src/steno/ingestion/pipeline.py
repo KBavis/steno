@@ -18,6 +18,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from steno.assemblers.assemble import assemble as run_assemblers
 from steno.config import get_settings
 from steno.connectors.git import clone as git_clone
 from steno.db.models import (
@@ -30,15 +31,15 @@ from steno.db.models import (
     StageName,
     StageStatus,
 )
-from steno.extractors.engine import Engine
-from steno.extractors.packs import is_enabled, load_packs
-from steno.extractors.report import to_json
-from steno.extractors.structure import detect as detect_structure
+from steno.extraction.engine import Engine
+from steno.extraction.report import to_json
 from steno.graph import ids
 from steno.graph.build import Context as GraphContext
 from steno.graph.build import build as build_graph
 from steno.graph.driver import database, get_driver
+from steno.graph.structure import detect as detect_structure
 from steno.graph.writer import write_plan
+from steno.rule_packs.packs import is_enabled, load_packs
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ class JobContext:
     connector: Connector
     session: Session
     workspace: Path | None = None
-    # Handed from one stage to the next (the extractor engine, facts, call graph, ...)
+    # Handed from one stage to the next (the rule engine, facts, call graph, ...)
     state: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -90,24 +91,36 @@ def deps(ctx: JobContext) -> dict[str, Any]:
 
 
 def parse(ctx: JobContext) -> dict[str, Any]:
-    """Pass 1, per file: run the enabled rule packs and collect facts and clues."""
+    """Pick the rule packs that apply, then read the code once: the symbol resolver's index
+    and a syntax tree per file. No rules run yet."""
     assert ctx.workspace is not None
     packs = [p for p in load_packs(get_settings().rule_packs_dir) if is_enabled(p, ctx.workspace)]
     engine = Engine(ctx.workspace, packs)
-    x = engine.collect()
+    engine.parse()
     ctx.state["engine"] = engine
     return {
         "packs": [p.name for p in packs],
+        "files": len(engine.files),
         "python_modules": len(engine.resolver.modules) if engine.resolver else 0,
+        "errors": len(engine.out.errors),
+    }
+
+
+def extract(ctx: JobContext) -> dict[str, Any]:
+    """Run every rule on every file: facts, facts with blanks, and clues."""
+    engine: Engine = ctx.state["engine"]
+    x = engine.extract()
+    return {
         "matched": {"nodes": len(x.nodes), "edges": len(x.edges), "clues": len(x.clues)},
         "errors": len(x.errors),
     }
 
 
-def resolve(ctx: JobContext) -> dict[str, Any]:
-    """Pass 3: prefix chains, table_of, SDK clients, partial identities."""
+def assemble(ctx: JobContext) -> dict[str, Any]:
+    """Fill in the blanks from the clues: prefix chains, table_of, SDK clients, partial
+    identities."""
     engine: Engine = ctx.state["engine"]
-    engine.resolve()
+    run_assemblers(engine.out, engine.resolver, engine.repo)
     x = engine.out
     # Kept for review alongside the graph: every fact with its source line
     facts_path = get_settings().workspace_dir / f"job-{ctx.job.id}-facts.json"
@@ -168,7 +181,8 @@ STAGES: list[tuple[StageName, StageFn]] = [
     (StageName.CLONE, clone),
     (StageName.DEPS, deps),
     (StageName.PARSE, parse),
-    (StageName.RESOLVE, resolve),
+    (StageName.EXTRACT, extract),
+    (StageName.ASSEMBLE, assemble),
     (StageName.FLOWS, flows),
     (StageName.WRITE, write),
     (StageName.CARDS, cards),
