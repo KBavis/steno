@@ -518,7 +518,7 @@ pre .c { color: var(--muted); }
           <tbody>
             <tr><td><code>clone</code></td><td>Shallow clone of the default branch; records the commit SHA</td><td>the workspace folder</td></tr>
             <tr><td><code>deps</code></td><td>Skipped: dependency JARs are only for Java</td><td>nothing</td></tr>
-            <tr><td><code>parse</code></td><td>Picks the rule packs that apply, lists the files once, indexes every Python file for the symbol resolver, builds a syntax tree per file. No rules run.</td><td>the rule engine, holding the symbol resolver and the trees</td></tr>
+            <tr><td><code>parse</code></td><td>Picks the rule packs that apply, lists the files once, reads every Python file into the symbol resolver's symbol table, builds a syntax tree per file. No rules run.</td><td>the rule engine, holding the symbol resolver and the trees</td></tr>
             <tr><td><code>extract</code></td><td>Runs every rule on every file: facts, facts with blanks, and clues</td><td>the raw facts</td></tr>
             <tr><td><code>assemble</code></td><td>Combines clues across files into complete facts: URL prefix chains, entity → table, SDK clients, partial references; writes the facts JSON</td><td>completed facts</td></tr>
             <tr><td><code>flows</code></td><td>Finds modules and applications, builds the call graph, one Flow per entry point, rolls effects up onto flows</td><td>the graph plan</td></tr>
