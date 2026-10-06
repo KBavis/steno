@@ -91,7 +91,7 @@ def deps(ctx: JobContext) -> dict[str, Any]:
 
 
 def parse(ctx: JobContext) -> dict[str, Any]:
-    """Pick the rule packs that apply, then read the code once: the symbol resolver's index
+    """Pick the rule packs that apply, then read the code once: the symbol resolver's symbol table
     and a syntax tree per file. No rules run yet."""
     assert ctx.workspace is not None
     packs = [p for p in load_packs(get_settings().rule_packs_dir) if is_enabled(p, ctx.workspace)]

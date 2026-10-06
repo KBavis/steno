@@ -25,7 +25,7 @@ Part of the [Design Doc](./DESIGN_DOC.md). Status markers: **Decided** · **Prop
 ```mermaid
 flowchart LR
     C[Connector<br/><i>access</i>] --> W[Workspace<br/><i>temporary clone</i>]
-    W --> P[Parse<br/><i>syntax trees + symbol index</i>]
+    W --> P[Parse<br/><i>syntax trees + symbol table</i>]
     P --> X[Rule engine<br/><i>rule packs → facts + clues</i>]
     P --> SR[Symbol resolver<br/><i>names, types, values</i>]
     SR -. answers .-> X
@@ -45,7 +45,7 @@ flowchart LR
 
 Flows are **derived**, not extracted one by one:
 
-1. **Parse:** read the code once. Every file is listed once, the symbol resolver builds its index (modules, imports, classes, functions), and every file a rule will look at becomes a syntax tree. No rules run.
+1. **Parse:** read the code once. Every file is listed once, the symbol resolver builds its symbol table (modules, imports, classes, functions), and every file a rule will look at becomes a syntax tree. No rules run.
 2. **Extract:** the **rule engine** runs every rule of every enabled rule pack over every file. File order doesn't matter. Each match produces one of three kinds of output:
 
 | Kind | Example | Done? |
@@ -310,7 +310,7 @@ Steno's own small symbol resolver, built on Python's `ast` module (D51); rules s
 
 What it can't follow (dynamic attribute access, values built at runtime, untyped parameters) is marked unresolved and shows up in the coverage report. Pyright or Jedi are options only if those gaps turn out to matter.
 
-**How it works.** At the start of the parse stage the resolver reads every source file once into an index: source roots and module names, and per module its imports, classes (bases, methods, class values, `self.x` attributes), functions (parameters, annotations, return types, line spans), and module-level values. Nothing is resolved in advance; each question is answered when the engine, an assembler, or the call graph asks it, by recursively asking smaller questions. Clues teach it two things during the run: configuration values (`property`) and library return types (`client` … `returns`).
+**How it works.** At the start of the parse stage the resolver reads every source file once into a symbol table: source roots and module names, and per module its imports, classes (bases, methods, class values, `self.x` attributes), functions (parameters, annotations, return types, line spans), and module-level values. Nothing is resolved in advance; each question is answered when the engine, an assembler, or the call graph asks it, by recursively asking smaller questions. Clues teach it two things during the run: configuration values (`property`) and library return types (`client` … `returns`).
 
 | Question | Answers | Gives up on |
 |---|---|---|

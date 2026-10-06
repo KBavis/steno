@@ -227,7 +227,7 @@ Full design: [ingestion.md](./ingestion.md).
 
 ```mermaid
 flowchart LR
-    C[Connector] --> W[Temporary clone] --> P[Parse<br/>trees + symbol index] --> X[Rule engine<br/>rule packs → facts + clues] --> A[Assemblers<br/>clues → complete facts] --> CG[Call graph<br/>+ flows]
+    C[Connector] --> W[Temporary clone] --> P[Parse<br/>trees + symbol table] --> X[Rule engine<br/>rule packs → facts + clues] --> A[Assemblers<br/>clues → complete facts] --> CG[Call graph<br/>+ flows]
     P --> SR[Symbol resolver<br/>names, types, values] -. answers .-> X
     SR -. answers .-> A
     SR --> CG
@@ -246,7 +246,7 @@ flowchart LR
   - **Assemblers**, one per clue type and the same for every language, combine clues found in different files into complete facts: a router's prefix + an endpoint's path → the full path.
   - The **graph builder** gives facts stable IDs, creates stubs, and tells internal hosts from vendors.
 - **Passes:**
-  1. Parse: read the code once (syntax trees, symbol index).
+  1. Parse: read the code once (syntax trees, symbol table).
   2. Extract: run every rule on every file → facts, facts with blanks, and clues.
   3. Assemble: fill in the blanks from the clues.
   4. Whole app (call graph → all flows at once).
@@ -528,7 +528,7 @@ Correctness comes first, so it has to be measured:
 | D54 | First MCP tools: `get_node`, `get_flow`, `find_dependents`, `search` (full-text first), `view_flow_code`; every call logged in `tool_call` | Decided |
 | D55 | POC staging: finish Contextualized → a stub organization we control → spring-petclinic-microservices → our org's application | Decided |
 | D56 | Terminology: "resolver" means only the per-language **symbol resolver** (what a name, type, or value is). The per-clue-type code that combines clues into complete facts is an **assembler**, run in the **assemble** stage (after extract, before flows, which need completed facts). The former "Resolver" component is split: config placeholders and DI → symbol resolver; identity, stubs, internal vs. vendor hosts → graph builder. | Decided |
-| D57 | Stages: **parse** (read the code once: file list, symbol index, syntax trees; no rules) is split from **extract** (the **rule engine** runs rule packs and emits facts, facts with blanks, and clues). Full order: clone → deps → parse → extract → assemble → flows → write → cards. "Extractor" is no longer a component name: the units are **rules** in **rule packs**. | Decided |
+| D57 | Stages: **parse** (read the code once: file list, symbol table, syntax trees; no rules) is split from **extract** (the **rule engine** runs rule packs and emits facts, facts with blanks, and clues). Full order: clone → deps → parse → extract → assemble → flows → write → cards. "Extractor" is no longer a component name: the units are **rules** in **rule packs**. | Decided |
 | D39 | A connector's scope is access only. Repository selection and placement are separate; at org scale, placement rules (connector + host grouping + optional name pattern → space) place repositories, an explicit assignment wins, and unmatched repositories go to an unassigned queue. Rules are built with discovery. | Decided |
 | D25 | Rule packs, auto-enabled from dependencies, plus a coverage report after every ingestion. Phase 1 rules are hand-written; templates and LLM-drafted rules are deferred. | Decided |
 

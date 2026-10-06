@@ -1,6 +1,6 @@
 """The rule engine: run rule packs over a repository and produce facts (docs/ingestion.md §2).
 
-- parse:    list the files once, build the symbol resolver's index and every syntax tree
+- parse:    list the files once, build the symbol resolver's symbol table and every syntax tree
 - extract:  run every rule on every file; each match emits facts, facts with blanks, and clues
 
 The assemblers (`steno.assemblers`) then fill in the blanks from the clues.
@@ -79,7 +79,7 @@ class Engine:
         self._roots: dict[Path, SgNode] = {}
 
     def parse(self) -> None:
-        """Read the code once: list the files, index them for the symbol resolver, and build
+        """Read the code once: list the files, read them into the symbol table, and build
         a syntax tree for every file a code rule will look at. No rules run here."""
         self.files = list(source_files(self.repo))
         if any(p.language == "python" for p in self.packs):

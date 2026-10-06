@@ -1,5 +1,7 @@
 """Send a graph plan to Neo4j: MERGE by stable ID, then remove what an earlier run of the
-same repository left behind (docs/ingestion.md §7, Stable IDs and replacement by scope)."""
+same repository left behind (docs/ingestion.md §7, Stable IDs and replacement by scope).
+
+All of it is one transaction: a failed write changes nothing."""
 
 import logging
 import re
@@ -44,27 +46,38 @@ def write_plan(
             dst = _existing_label(e.dst)
         by_type[(e.type, src, dst)].append({"src": e.src, "dst": e.dst, "props": _clean(e.props)})
 
+    # One transaction: if anything fails, Neo4j keeps exactly what the previous run wrote
     with driver.session(database=database) as session:
-        for labels, rows in by_labels.items():
-            main = _safe(_primary(list(labels)))
-            extra = "".join(f":{_safe(lbl)}" for lbl in labels if lbl != main)
-            query = (
-                f"UNWIND $rows AS row MERGE (n:{main} {{id: row.id}}) "
-                "ON CREATE SET n.first_seen = row.props.last_seen "
-                f"SET n += row.props {('SET n' + extra) if extra else ''}"
-            )
-            for chunk in _chunks(rows):
-                session.execute_write(lambda tx, q=query, c=chunk: tx.run(q, rows=c).consume())
-        for (etype, src, dst), rows in by_type.items():
-            query = (
-                f"UNWIND $rows AS row "
-                f"MATCH (a:{_safe(src)} {{id: row.src}}) MATCH (b:{_safe(dst)} {{id: row.dst}}) "
-                f"MERGE (a)-[r:{_safe(etype)}]->(b) SET r += row.props"
-            )
-            for chunk in _chunks(rows):
-                session.execute_write(lambda tx, q=query, c=chunk: tx.run(q, rows=c).consume())
-        removed = session.execute_write(_remove_stale, repo, job_id)
+        removed = session.execute_write(_write_all, by_labels, by_type, repo, job_id)
     return {**plan.counts(), "removed": removed}
+
+
+def _write_all(
+    tx: Any,
+    by_labels: dict[tuple[str, ...], list[dict[str, Any]]],
+    by_type: dict[tuple[str, str, str], list[dict[str, Any]]],
+    repo: str,
+    job_id: int,
+) -> dict[str, int]:
+    for labels, rows in by_labels.items():
+        main = _safe(_primary(list(labels)))
+        extra = "".join(f":{_safe(lbl)}" for lbl in labels if lbl != main)
+        query = (
+            f"UNWIND $rows AS row MERGE (n:{main} {{id: row.id}}) "
+            "ON CREATE SET n.first_seen = row.props.last_seen "
+            f"SET n += row.props {('SET n' + extra) if extra else ''}"
+        )
+        for chunk in _chunks(rows):
+            tx.run(query, rows=chunk).consume()
+    for (etype, src, dst), rows in by_type.items():
+        query = (
+            f"UNWIND $rows AS row "
+            f"MATCH (a:{_safe(src)} {{id: row.src}}) MATCH (b:{_safe(dst)} {{id: row.dst}}) "
+            f"MERGE (a)-[r:{_safe(etype)}]->(b) SET r += row.props"
+        )
+        for chunk in _chunks(rows):
+            tx.run(query, rows=chunk).consume()
+    return _remove_stale(tx, repo, job_id)
 
 
 def _remove_stale(tx: Any, repo: str, job_id: int) -> dict[str, int]:
