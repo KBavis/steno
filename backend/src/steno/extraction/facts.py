@@ -135,6 +135,26 @@ class Extraction:
     errors: list[str] = field(default_factory=list)
 
 
+def split_url(value: Any) -> tuple[str | None, str]:
+    """A URL, or a URL template, split into its host (None when unknown) and path:
+    `https://{domain}/rest/api/content/{id}` → (None, `/rest/api/content/{id}`);
+    `{base_url}/rest/api/2/search` → (None, `/rest/api/2/search`)."""
+    if not isinstance(value, str) or value == UNRESOLVED_TEXT:
+        return None, ""
+    if "://" in value:
+        host, _, path = value.split("://", 1)[1].partition("/")
+        path = "/" + path
+    elif value.startswith("{"):
+        host, path = "", value[value.find("}") + 1 :] if "}" in value else ""
+    elif value.startswith("/"):
+        host, path = "", value
+    else:
+        host, _, path = value.partition("/")
+        path = "/" + path
+    host = host.rsplit("@", 1)[-1]
+    return (host if host and "{" not in host else None), path
+
+
 def host_of(value: Any) -> str | None:
     """`https://api.example.com/v1` → `api.example.com`; `localhost:11434` stays as is."""
     if not isinstance(value, str) or value is UNRESOLVED or value == UNRESOLVED_TEXT:

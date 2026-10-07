@@ -1,4 +1,5 @@
-# A URL built from a runtime value stays unresolved; a literal URL resolves.
+# A URL built from a runtime value keeps its constant parts, with the rest as placeholders
+# (the host is runtime data here, but the path still names the API); a literal URL resolves.
 edges:
-  - CALLS: { from: jira.JiraIssueTracker.search, to: { http: { method: POST, url: "<unresolved>" } } }
+  - CALLS: { from: jira.JiraIssueTracker.search, to: { http: { method: POST, url: "{base_url}/rest/api/2/search" } } }
   - CALLS: { from: jira.JiraIssueTracker.status, to: { http: { method: GET, url: "https://status.atlassian.com/api/v2/status.json" } } }

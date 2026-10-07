@@ -32,6 +32,15 @@ class Rule:
 
 
 @dataclass
+class HttpSystem:
+    """A service recognized by the hosts it's called at (docs/rule-packs.md, HTTP signatures):
+    `api.github.com`, with `*` wildcards allowed."""
+
+    name: str
+    hosts: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Pack:
     name: str
     version: str
@@ -41,6 +50,7 @@ class Pack:
     enabled_when: dict[str, Any]
     path: Path
     rules: list[Rule]
+    http_systems: list[HttpSystem] = field(default_factory=list)
 
 
 def load_pack(path: Path) -> Pack:
@@ -73,7 +83,15 @@ def load_pack(path: Path) -> Pack:
         enabled_when=meta.get("enabled_when") or {},
         path=path,
         rules=rules,
+        http_systems=_http_systems(path / "http.yaml"),
     )
+
+
+def _http_systems(file: Path) -> list[HttpSystem]:
+    if not file.exists():
+        return []
+    raw = yaml.safe_load(file.read_text()) or {}
+    return [HttpSystem(s["name"], list(s.get("hosts") or [])) for s in raw.get("systems") or []]
 
 
 def load_packs(root: Path) -> list[Pack]:
@@ -118,6 +136,8 @@ def declared_dependencies(repo: Path) -> set[str]:
 
 
 def _has_language(language: str, repo: Path) -> bool:
+    if language == "any":  # e.g. HTTP signatures: they read URLs, not one language's code
+        return True
     exts = EXTENSIONS.get(language, ())
     return any(f.suffix in exts for f in source_files(repo))
 

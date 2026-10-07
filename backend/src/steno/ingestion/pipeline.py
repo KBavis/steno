@@ -159,6 +159,7 @@ def flows(ctx: JobContext) -> dict[str, Any]:
             job_id=ctx.job.id,
             commit=ctx.job.to_sha,
         ),
+        http_systems=[s for p in engine.packs for s in p.http_systems],
     )
     ctx.state["plan"] = plan
     flow_nodes = [n for n in plan.nodes.values() if n.labels[0] == "Flow"]
@@ -168,6 +169,8 @@ def flows(ctx: JobContext) -> dict[str, Any]:
         "steps": sum(1 for n in plan.nodes.values() if n.labels[0] == "Step"),
         "trace_entries": sum(n.props.get("trace", "").count('"path"') for n in flow_nodes),
         **plan.stats,
+        "unmet_joins": len(plan.stats.get("unmet_joins", [])),
+        "unmet_join_samples": plan.stats.get("unmet_joins", [])[:20],
     }
 
 

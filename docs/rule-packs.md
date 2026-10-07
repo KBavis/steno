@@ -233,6 +233,8 @@ rule-packs/
 │  └─ steno-pack-jpa/
 ├─ python/
 │  └─ steno-pack-fastapi/
+├─ http/                        HTTP signatures: services named by the URLs they're called at
+│  └─ steno-pack-saas-http/
 └─ org/                         org-specific packs, any language
 ```
 
@@ -264,6 +266,23 @@ enabled_when:                   # any one of these turns the pack on
 ```
 
 A pack is **auto-enabled** when any `enabled_when` condition holds (D25). Checking imports as well as declared dependencies matters: a library often arrives indirectly (Contextualized uses `requests` without listing it).
+
+### HTTP signatures (Decided, D64)
+
+A pack may also include an `http.yaml` that names services by the **hosts** they're called at. It has no rules or tests of its own: the graph builder reads it when it decides where an outbound HTTP call goes. Packs that only hold signatures use `language: any` and `enabled_when: { always: true }`.
+
+```yaml
+# rule-packs/http/steno-pack-saas-http/http.yaml
+systems:
+  - name: GitHub
+    hosts: [api.github.com, raw.githubusercontent.com]   # * wildcards allowed
+```
+
+- **A host match** names the system and keys it by service, so `api.github.com` and `raw.githubusercontent.com` are one `GitHub` node.
+- **Only hosts count.** An API path (`/rest/api/content`) only resembles a vendor's API, and an internal service can use the same one, so paths never name a service.
+- **No match:** the node is the host (`localhost:11434`). With no host at all, see [Knowledge Graph §4, Stubs](./knowledge-graph.md#stubs).
+
+An organization adds its internal services' hosts the same way, in an org pack.
 
 ## 7. Tests (Decided)
 

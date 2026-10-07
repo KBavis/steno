@@ -12,6 +12,8 @@ None / UNRESOLVED instead of a guess.
 
 import ast
 import logging
+import os
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -111,6 +113,7 @@ class PythonResolver:
         self.properties: dict[str, Any] = {}
         self._busy: set[Any] = set()
         self._subclasses: dict[str, list[ClassInfo]] | None = None
+        self._callers: dict[str, list[tuple[FunctionInfo, ast.Call]]] | None = None
         self.source_roots = find_source_roots(root)
         for path in files if files is not None else source_files(root):
             if path.suffix == ".py" and not is_test_file(path.relative_to(root)):
@@ -684,6 +687,142 @@ class PythonResolver:
             return UNRESOLVED
         return "".join(f"{{{p.name}}}" if isinstance(p, _Placeholder) else p for p in parts)
 
+    # --------------------------------------------------------------- templates
+
+    def template_of(self, expr: ast.expr, scope: Scope) -> str | None:
+        """A string with its runtime parts left as named placeholders, when `value_of` can't
+        give the whole value: `https://{domain}/rest/api/content/{page_id}`. Each placeholder
+        is named after where the value comes from (a parameter, attribute, or variable), or
+        `{?}`. None when no part of it is constant.
+
+        For URLs: the path is often in the code even when the host is runtime data, and the
+        host is often constant even when the path isn't. Follows what `value_of` does, plus
+        parameters (through the function's call sites, when the callers that say anything
+        agree) and `self.x` set in any method.
+        """
+        out = self._template(expr, scope, 0)
+        return out if out is not None and _has_constant(out) else None
+
+    def _template(self, expr: ast.expr, scope: Scope, depth: int) -> str | None:
+        if depth > 8:
+            return None
+        key = ("template", id(expr), id(scope.function), scope.self_type)
+        if key in self._busy:
+            return None
+        self._busy.add(key)
+        try:
+            return self._template_of(expr, scope, depth + 1)
+        finally:
+            self._busy.discard(key)
+
+    def _template_of(self, expr: ast.expr, scope: Scope, depth: int) -> str | None:
+        value = self.value_of(expr, scope)
+        if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+            return str(value)
+        if isinstance(expr, ast.JoinedStr):
+            parts = []
+            for part in expr.values:
+                if isinstance(part, ast.Constant):
+                    parts.append(str(part.value))
+                elif isinstance(part, ast.FormattedValue):
+                    sub = self._template(part.value, scope, depth)
+                    parts.append(sub if sub is not None else f"{{{_placeholder_name(part.value)}}}")
+            return "".join(parts)
+        if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Add):
+            left = self._template(expr.left, scope, depth)
+            right = self._template(expr.right, scope, depth)
+            if left is None and right is None:
+                return None
+            return (left or f"{{{_placeholder_name(expr.left)}}}") + (
+                right or f"{{{_placeholder_name(expr.right)}}}"
+            )
+        if isinstance(expr, ast.Name):
+            return self._name_template(expr.id, scope, depth)
+        if isinstance(expr, ast.Attribute):
+            return self._attribute_template(expr, scope, depth)
+        if isinstance(expr, ast.IfExp):  # `base if start is None else f"{base}&start={start}"`
+            return _agree(
+                [self._template(expr.body, scope, depth), self._template(expr.orelse, scope, depth)]
+            )
+        if (
+            isinstance(expr, ast.Call)
+            and isinstance(expr.func, ast.Attribute)
+            and expr.func.attr in ("rstrip", "lstrip", "strip")
+        ):
+            base = self._template(expr.func.value, scope, depth)
+            chars = self.value_of(expr.args[0], scope) if expr.args else None
+            if base is not None and (chars is None or isinstance(chars, str)):
+                return getattr(base, expr.func.attr)(chars)
+            return base
+        return None
+
+    def _name_template(self, name: str, scope: Scope, depth: int) -> str | None:
+        fn = scope.function
+        if fn is not None:
+            if name in fn.params:
+                return self._parameter_template(fn, name, depth)
+            assigned = [
+                n.value
+                for n in _walk_body(fn.node)
+                if isinstance(n, (ast.Assign, ast.AnnAssign))
+                and n.value is not None
+                and any(isinstance(t, ast.Name) and t.id == name for t in _targets(n))
+            ]
+            if assigned:  # reassigned in a loop (next page URLs): what the values share
+                return _agree([self._template(a, scope, depth) for a in assigned])
+        mod = scope.module
+        if name in mod.values:
+            return self._template(mod.values[name], Scope(mod), depth)
+        return None
+
+    def _attribute_template(self, expr: ast.Attribute, scope: Scope, depth: int) -> str | None:
+        """`self.base_api_url`: a class value, or the value assigned to `self.x` in a method
+        (in `__init__`, or a helper it calls such as `_construct_base_urls`)."""
+        if self._is_module_ref(expr.value, scope):
+            return None
+        owner = self.type_of(expr.value, scope) or self.class_of(expr.value, scope)
+        found = self.lookup(owner) if owner else None
+        if not isinstance(found, ClassInfo):
+            return None
+        for c in self._mro(found):
+            if expr.attr in c.values:
+                return self._template(c.values[expr.attr], Scope(c.module), depth)
+            if expr.attr in c.self_attrs:
+                value, method, is_annotation = c.self_attrs[expr.attr]
+                if is_annotation:
+                    return None
+                return self._template(value, self.scope_of(method, found.qualname), depth)
+        return None
+
+    def _parameter_template(self, fn: FunctionInfo, name: str, depth: int) -> str | None:
+        """A parameter's template, from the arguments its callers pass. Callers that pass
+        nothing constant (a URL read from a response, say) say nothing; the rest must agree."""
+        params = list(fn.params)
+        position = params.index(name)
+        templates = []
+        for caller, call in self.callers_of(fn):
+            arg = _argument(
+                call, name, position, bound=fn.cls is not None and params[:1] == ["self"]
+            )
+            if arg is not None:
+                caller_type = caller.cls.qualname if caller.cls else None
+                templates.append(self._template(arg, self.scope_of(caller, caller_type), depth))
+        return _agree(templates)
+
+    def callers_of(self, fn: FunctionInfo) -> list[tuple[FunctionInfo, ast.Call]]:
+        """Every call in the repository that runs `fn`, with the function it's in."""
+        if self._callers is None:
+            index: dict[str, list[tuple[FunctionInfo, ast.Call]]] = {}
+            for caller in list(self.functions()):
+                scope = self.scope_of(caller)
+                for node in _walk_body(caller.node):
+                    if isinstance(node, ast.Call):
+                        target, _ = self._call_target(node.func, scope)
+                        if target is not None:
+                            index.setdefault(target.qualname, []).append((caller, node))
+            self._callers = index
+        return self._callers.get(fn.qualname, [])
+
     # -------------------------------------------------------------- call sites
 
     def functions(self) -> Iterator[FunctionInfo]:
@@ -868,6 +1007,45 @@ def _is_self_attr(target: ast.expr) -> bool:
         and isinstance(target.value, ast.Name)
         and target.value.id == "self"
     )
+
+
+def _has_constant(template: str) -> bool:
+    """Whether a template says anything beyond its placeholders."""
+    return bool(re.sub(r"\{[^{}]*\}", "", template))
+
+
+def _agree(templates: list[str | None]) -> str | None:
+    """One template for a value that can be several things (a parameter's callers, a variable
+    reassigned in a loop). Those that say nothing constant (a URL read from a response) are
+    left out; if the rest differ, what they share at the start, so a common host and path
+    survive: `https://h/a/{id}` and `https://h/a/{id}&start={s}` → `https://h/a/{id}{?}`."""
+    known = sorted({t for t in templates if t is not None and _has_constant(t)})
+    if len(known) <= 1:
+        return known[0] if known else None
+    prefix = os.path.commonprefix(known)
+    if "{" in prefix and "}" not in prefix[prefix.rfind("{") :]:
+        prefix = prefix[: prefix.rfind("{")]  # don't cut a placeholder in half
+    return prefix + "{?}" if _has_constant(prefix) else None
+
+
+def _placeholder_name(expr: ast.expr) -> str:
+    if isinstance(expr, ast.Name):
+        return expr.id
+    if isinstance(expr, ast.Attribute):
+        return expr.attr
+    return "?"
+
+
+def _argument(call: ast.Call, name: str, position: int, bound: bool) -> ast.expr | None:
+    """The expression a call passes for parameter `name` (at `position`; a method's `self`
+    isn't passed explicitly)."""
+    for kw in call.keywords:
+        if kw.arg == name:
+            return kw.value
+    index = position - 1 if bound else position
+    if 0 <= index < len(call.args) and not isinstance(call.args[index], ast.Starred):
+        return call.args[index]
+    return None
 
 
 def _targets(node: ast.Assign | ast.AnnAssign) -> list[ast.expr]:

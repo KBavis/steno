@@ -1,0 +1,16 @@
+# Services recognized by the hosts they're called at (docs/rule-packs.md, HTTP signatures).
+# A host is proof of where a call goes, so a match names the system. API paths aren't used:
+# a path only resembles a vendor's API, and an internal service can use the same one.
+systems:
+  - name: GitHub
+    hosts: [api.github.com, raw.githubusercontent.com, github.com, uploads.github.com]
+  - name: GitLab
+    hosts: [gitlab.com]
+  - name: Bitbucket Cloud
+    hosts: [api.bitbucket.org, bitbucket.org]
+  - name: OpenAI
+    hosts: [api.openai.com]
+  - name: Anthropic
+    hosts: [api.anthropic.com]
+  - name: Slack
+    hosts: [slack.com, hooks.slack.com]

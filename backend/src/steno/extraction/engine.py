@@ -327,6 +327,14 @@ class Engine:
         value = self.resolver.value_of(cap.expr, ctx.scope) if self.resolver else UNRESOLVED
         return UNRESOLVED_TEXT if value is UNRESOLVED else value
 
+    def _url_template(self, ctx: Ctx, spec: Any) -> str | None:
+        """A URL the resolver can't fully know, with its runtime parts as placeholders
+        (`https://{domain}/rest/api/content`): the host or the path is often still there."""
+        cap = self._cap(ctx, spec)
+        if not isinstance(cap, Capture) or cap.expr is None or ctx.scope is None:
+            return None
+        return self.resolver.template_of(cap.expr, ctx.scope) if self.resolver else None
+
     def _text(self, ctx: Ctx, spec: Any) -> Any:
         cap = self._cap(ctx, spec)
         if cap is None:
@@ -388,6 +396,8 @@ class Engine:
         if kind == "http":
             method = self._value(ctx, body.get("method", "GET"))
             url = self._value(ctx, body.get("url"))
+            if not isinstance(url, str) or url == UNRESOLVED_TEXT:
+                url = self._url_template(ctx, body.get("url"))
             return HttpRef(str(method).upper(), url if isinstance(url, str) else UNRESOLVED_TEXT)
         if kind == "Function":
             symbol = self._symbol(ctx, body.get("symbol"))

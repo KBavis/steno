@@ -533,6 +533,7 @@ Correctness comes first, so it has to be measured:
 | D60 | **No `Function` nodes or `INVOKES` edges are stored.** The call graph exists only in memory during a run. Each flow stores its **trace** (L3): every function it runs, in order (symbol, file, lines, depth, call-site flags, effects, tags). `Step` nodes (L2) carry their function's symbol and lines instead of `RUNS`, and effects hang off Steps. Repository, Module, and File stay as code nodes. Cards are written from the run's in-memory analysis, not from stored functions. Revises D8, D18, D31, D58. | Decided |
 | D61 | **Communication is modeled generally:** a sender (a call that puts something somewhere), a receiver (an entry point the framework runs), and a shared key (channel, queue, subject, URL, table) that joins them. An org's own messaging framework, whether or not it wraps Kafka, gets an org-defined `Interface` label plus one sender rule and one receiver rule; apps connect through matching keys. Extends D3. | Decided |
 | D63 | **Traces live in Neo4j, on the `Flow` node:** `trace` (the ordered entries as a JSON string, since Neo4j properties can't nest) plus `trace_files` and `trace_symbols` (string lists for lookups). Not Postgres (D33: Neo4j holds what Steno knows; the UI and MCP read one database), and not a node per entry. A trace lists **every first-party function the flow calls**, helpers included, once per call site; a `utility` function's own callees aren't expanded. | Decided |
+| D64 | **Outbound HTTP calls are never merged into one unknown target.** The symbol resolver keeps a URL's constant parts as a template (runtime parts become placeholders), following parameters through their callers and `self.x` set in any method. The target is the host when it's constant, named by an **HTTP signature** when it's a known service's own host (an `http.yaml` in a rule pack, hosts only; core pack `rule-packs/http/steno-pack-saas-http`). API paths never name a service: they only resemble one. Otherwise the call goes to a stub per calling class, named after the class and its file, keeping its URL template, and is listed as an unmet join. Resolves P3. | Decided |
 | D62 | **The coverage report is aggregated across the organization** (one item per target, ranked by total occurrences across repositories) and every item carries a triage state (unexplained / ignored / explained) that persists across runs, so the report converges instead of staying noisy. Refines D25. | Decided |
 
 ## 21. Open questions
@@ -546,6 +547,7 @@ Correctness comes first, so it has to be measured:
 - [ ] Jev: calibration on our data, and our org's data policy
 
 
+- [ ] Naming the service behind an unknown-host call (`Unknown host · JiraDataProvider`): an LLM or decision model reading the calling code, or a person's declaration in an org pack (D64 leaves it unnamed)
 - [ ] How a flow's trace continues into an **ingested library in another repository**, now that library functions aren't stored as nodes (e.g. a per-library summary of each public function's effects, read by dependents' runs)
 
 **Not yet discussed**

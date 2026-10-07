@@ -20,6 +20,7 @@ import json
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from fnmatch import fnmatch
 from typing import Any
 
 from steno.extraction.facts import (
@@ -30,11 +31,12 @@ from steno.extraction.facts import (
     HttpRef,
     NodeFact,
     NodeRef,
-    host_of,
+    split_url,
 )
 from steno.graph import ids
 from steno.graph.structure import Module, Structure
 from steno.resolvers.python import FunctionInfo, Invocation, PythonResolver
+from steno.rule_packs.packs import HttpSystem
 
 # Node types search will cover (they'll carry cards; knowledge-graph.md §3, Card properties)
 SEARCHABLE = {"Flow", "Application", "Space", "Organization", "Interface", "Entity", "Table"}
@@ -150,14 +152,28 @@ class Context:
 
 
 def build(
-    x: Extraction, resolver: PythonResolver | None, structure: Structure, ctx: Context
+    x: Extraction,
+    resolver: PythonResolver | None,
+    structure: Structure,
+    ctx: Context,
+    http_systems: list[HttpSystem] | None = None,
 ) -> GraphPlan:
-    return _Builder(x, resolver, structure, ctx).run()
+    """`http_systems`: the enabled packs' HTTP signatures, which name the services calls go to."""
+    return _Builder(x, resolver, structure, ctx, http_systems or []).run()
 
 
 class _Builder:
-    def __init__(self, x: Extraction, r: PythonResolver | None, s: Structure, ctx: Context):
+    def __init__(
+        self,
+        x: Extraction,
+        r: PythonResolver | None,
+        s: Structure,
+        ctx: Context,
+        http_systems: list[HttpSystem],
+    ):
         self.x, self.r, self.s, self.ctx = x, r, s, ctx
+        self.http_systems = http_systems
+        self.unmet: list[dict[str, Any]] = []  # coverage: calls whose target can't be named
         self.plan = GraphPlan()
         self.now = datetime.now(UTC).isoformat()
         self.apps: dict[str, str] = {}  # module path → application node id
@@ -181,6 +197,7 @@ class _Builder:
         self._call_graph()
         self._flows()
         self._file_nodes()
+        self.plan.stats["unmet_joins"] = self.unmet
         return self.plan
 
     # ----------------------------------------------------------- provenance
@@ -336,15 +353,23 @@ class _Builder:
             self.plan.edge("BELONGS_TO", sid, self.ctx.space_id, **prov)
         return sid
 
-    def _external(self, host: str | None, name: str | None, prov: dict[str, Any]) -> str:
-        key = host or name or UNRESOLVED_SYSTEM
+    def _external(
+        self,
+        host: str | None,
+        name: str | None,
+        prov: dict[str, Any],
+        key: str | None = None,
+        **props: Any,
+    ) -> str:
+        key = key or host or name or UNRESOLVED_SYSTEM
         eid = self.plan.node(
             ids.external_system_id(key),
             ["ExternalSystem"],
             host=host,
             name=name or host or "Unresolved HTTP target",
-            stub=key == UNRESOLVED_SYSTEM,
+            stub=key == UNRESOLVED_SYSTEM or props.pop("stub", False),
             shared=True,
+            **props,
             **prov,
         )
         if self.ctx.org_id:
@@ -367,6 +392,43 @@ class _Builder:
             self.plan.edge("BELONGS_TO", cid, owner, **prov)
         return cid
 
+    def _http_target(self, ref: HttpRef, prov: dict[str, Any], caller: str | None = None) -> str:
+        """Where an HTTP call goes. A known host is the identity, and an HTTP signature names
+        the service when it's one of that service's own hosts. A call whose host is runtime
+        data (a customer's own Jira site) isn't merged with anything: it goes to a node for
+        the class that makes it, named after that class and its file, and the call keeps its
+        URL template (`{domain}/rest/api/content/{page_id}`). It's also listed as an unmet
+        join for the coverage report. Which service that is stays unnamed for now."""
+        host, _ = split_url(ref.url)
+        if host:
+            system = next(
+                (s for s in self.http_systems if any(fnmatch(host, h) for h in s.hosts)), None
+            )
+            if system:  # the service's own host: one system, however many hosts it has
+                return self._external(host, system.name, prov, key=system.name)
+            return self._external(host, host, prov)
+        fn = self.functions.get(caller or "")
+        owner = (fn.cls.qualname if fn.cls else fn.module.name) if fn else caller or self.ctx.repo
+        file = (prov.get("source_file") or "").rsplit("/", 1)[-1]
+        self.unmet.append(
+            {
+                "kind": "http_host",
+                "function": caller,
+                "file": prov.get("source_file"),
+                "line": prov.get("source_line"),
+                "url": ref.url,
+            }
+        )
+        short = owner.rsplit(".", 1)[-1]
+        return self._external(
+            None,
+            f"Unknown host · {short} ({file})" if file else f"Unknown host · {short}",
+            prov,
+            key=f"{UNRESOLVED_SYSTEM}:{owner}",
+            stub=True,
+            called_from=owner,
+        )
+
     def _fact_edge(self, e: EdgeFact) -> None:
         o = e.origin
         prov = self._prov(o.rule, o.file, o.line)
@@ -375,12 +437,14 @@ class _Builder:
             # in _call_graph. Function → anything else is an effect, placed on the steps that
             # run that function.
             if _is_function(e.src) and not _is_function(e.dst):
-                dst = self._end(e.dst, o.file, prov)
+                symbol = e.src.as_dict["symbol"]  # type: ignore[union-attr]
+                props = _scalars(e.props)
+                if isinstance(e.dst, HttpRef):
+                    props |= {"method": e.dst.method, "url": e.dst.url}
+                    dst: str | None = self._http_target(e.dst, prov, symbol)
+                else:
+                    dst = self._end(e.dst, o.file, prov)
                 if dst is not None:
-                    props = _scalars(e.props)
-                    if isinstance(e.dst, HttpRef):
-                        props |= {"method": e.dst.method, "url": e.dst.url}
-                    symbol = e.src.as_dict["symbol"]  # type: ignore[union-attr]
                     effect = Effect(e.type, dst, tuple(sorted({**props, **prov}.items())))
                     if effect not in self.effects[symbol]:
                         self.effects[symbol].append(effect)
@@ -400,8 +464,7 @@ class _Builder:
         if isinstance(ref, AppRef):
             return self._app_for(file)
         if isinstance(ref, HttpRef):
-            host = host_of(ref.url) if ref.url != UNRESOLVED_TEXT else None
-            return self._external(host, None, prov)
+            return self._http_target(ref, prov)
         if isinstance(ref, NodeRef):
             props = ref.as_dict
             if ref.label == "Table":

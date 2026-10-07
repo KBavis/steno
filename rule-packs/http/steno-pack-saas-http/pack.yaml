@@ -1,0 +1,7 @@
+name: steno-pack-saas-http
+version: 0.1.0
+language: any
+source: core
+description: Well-known services recognized by the host an HTTP call uses
+enabled_when:
+  always: true

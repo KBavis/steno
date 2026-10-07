@@ -367,6 +367,9 @@ There is no separate resolver component (D56). These jobs belong to the parts ab
 | **DI candidates** | Symbol resolver + per-framework DI rules (§5), then Jev I1 | See §5 |
 | **Identity and stubs** | Graph builder | Outbound calls and topics get stable IDs, and stubs are created for targets not yet ingested |
 | **Internal vs. vendor hosts** | Graph builder | A list of known org domains, with Jev I4 for anything not on it |
+| **Which service an HTTP call reaches** | Symbol resolver + graph builder | The resolver keeps a URL's constant parts as a template (`https://{domain}/rest/api/2/search`), following parameters and attributes; the builder names the target by its host (an [HTTP signature](./rule-packs.md#http-signatures-decided-d64) names a known service's own hosts), else a stub per calling class that keeps each call's URL template (D64) |
+
+**A host that's runtime data can't be found statically.** Some hosts are configuration (an `OLLAMA_URL`): deployment values, an admin supplying what the code reads at runtime, would resolve those (Proposed, later). Others are **data**: a customer's own Jira site, stored per row in the application's database. No reading of code or config finds those. For now the call is described by the class that makes it and its URL template; naming the service (an LLM or decision model reading the calling code) and runtime signals (deferred) are later steps.
 
 **Secret values are never ingested.** A value that comes from a vault is recorded as an **unresolved reference** with low confidence. Topic names and URLs are rarely secrets.
 

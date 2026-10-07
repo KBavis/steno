@@ -116,7 +116,7 @@ Other points:
 | `Table` | Schema, or DataStore when there's no schema | `name`, `kind` (table / collection / index), `stub` | V1: stubs. V2: filled in. See [Data stores](#7-data-stores). |
 | `Column` | Table | `name`, `type`, `nullable`, `purpose` | V2 |
 | `Entity` | Application | `name`, `symbol`, `fields` [{name, type}] | Domain models and payloads in any language: JPA classes, SQLAlchemy / Pydantic models, protobuf / Avro messages, DTOs |
-| `ExternalSystem` | Organization | `host`, `name` | Vendor and third-party APIs |
+| `ExternalSystem` | Organization | `host`, `name`, `called_from` (when the host is unknown) | Vendor and third-party APIs. Keyed by host, or by service name when an [HTTP signature](./rule-packs.md#http-signatures-decided-d64) recognizes the host. |
 | `KafkaCluster` (and other brokers) | Organization | `name` | Infrastructure, attached with `HOSTED_ON` |
 
 Candidates for later: `Team`/owner, deployment `Environment`.
@@ -279,6 +279,8 @@ Walk both ends of a call up the tree to their lowest common ancestor:
 ### Stubs
 
 When a call's target isn't ingested yet, it points at a **stub** node keyed by its natural key (URL + method, topic name, table name), with `stub: true`. When the owning application is ingested, the real node **merges** into the stub by stable ID. The same pattern is used for `Table` nodes in V1.
+
+**An HTTP call whose target can't be named is never merged with others (D64).** The symbol resolver keeps every constant part of a URL, with runtime parts as placeholders (`https://{domain}/rest/api/content/{page_id}`), following values through parameters and attributes. The target is the host when it's constant (named by an [HTTP signature](./rule-packs.md#http-signatures-decided-d64) when it's a known service's own host). When the host is runtime data, the call goes to a stub **per calling class**, named after the class and its file (`Unknown host · ConfluenceDataProvider (confluence.py)`, keyed `external:unresolved:{class}`); each call keeps its URL template (`{domain}/rest/api/content/{page_id}`), and it's listed as an unmet join for the coverage report. Steno doesn't guess the service from the path. Naming it is a later step (Open).
 
 ---
 
