@@ -93,6 +93,19 @@ def job_enqueue(
         typer.echo(f"queued job {job.id} ({mode}) for {repo}")
 
 
+@job_app.command("nightly")
+def job_nightly() -> None:
+    """Run the nightly check now: queue a full run for every repository whose default branch
+    moved since it was last ingested (D59). Workers also do this on schedule."""
+    from steno.db.session import session_scope
+    from steno.ingestion import nightly
+
+    with session_scope() as session:
+        result = nightly.run(session)
+    for key in ("queued", "unchanged", "busy", "failed"):
+        typer.echo(f"{key}: {', '.join(result[key]) or '-'}")
+
+
 @rules_app.command("test")
 def rules_test(
     packs: list[str] = typer.Argument(None, help="Pack names; all packs if omitted"),

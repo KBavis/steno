@@ -92,13 +92,13 @@ class RulePackReason(StrEnum):
 
 class JobTrigger(StrEnum):
     INITIAL = "initial"
-    MERGE = "merge"
+    NIGHTLY = "nightly"  # D59: the nightly run, for a repository whose default branch moved
     MANUAL = "manual"
 
 
 class JobMode(StrEnum):
+    # Every run analyzes the whole repository and writes only what changed (D59)
     FULL = "full"
-    INCREMENTAL = "incremental"
     DRY_RUN = "dry_run"
 
 
@@ -128,14 +128,22 @@ class StageStatus(StrEnum):
 
 
 class CoverageKind(StrEnum):
-    CALL_SITE = "call_site"
-    ANNOTATION = "annotation"
+    """The coverage report's signals (docs/ingestion.md §4)."""
+
+    EXTERNAL_CALL = "external_call"  # a call leaving first-party code that no rule explains
+    LIBRARY = "library"  # a declared or imported library no rule pack covers
+    UNREACHABLE = "unreachable"  # code (or an effect) no entry point reaches
+    UNMET_JOIN = "unmet_join"  # a blank an assembler couldn't fill, an unresolved call
+    INCONSISTENCY = "inconsistency"  # produced but never consumed, a call to a missing endpoint
+    CONFIG = "config"  # a config key that looks like a host, URL, topic, or queue, unread
 
 
 class CoverageStatus(StrEnum):
-    OPEN = "open"
-    IGNORED = "ignored"
-    COVERED = "covered"
+    """Triage state, kept across runs (D62)."""
+
+    UNEXPLAINED = "unexplained"
+    IGNORED = "ignored"  # looked at: not I/O
+    EXPLAINED = "explained"  # a rule now covers it
 
 
 class ChangeKind(StrEnum):
@@ -286,6 +294,15 @@ class IngestionStage(Base):
     jev_cost: Mapped[Decimal] = mapped_column(Cost, default=Decimal(0))
 
 
+class ScheduledRun(Base):
+    """When each scheduled task last ran, so only one worker runs it per slot (D59)."""
+
+    __tablename__ = "scheduled_run"
+
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class CoverageItem(Base):
     """What no rule explained but looks like it matters."""
 
@@ -301,7 +318,7 @@ class CoverageItem(Base):
     occurrences: Mapped[int] = mapped_column(Integer, default=0)
     samples: Mapped[list[Any]] = mapped_column(default=list)
     status: Mapped[CoverageStatus] = mapped_column(
-        _enum(CoverageStatus, "coverage_status"), default=CoverageStatus.OPEN
+        _enum(CoverageStatus, "coverage_status"), default=CoverageStatus.UNEXPLAINED
     )
 
 

@@ -54,6 +54,8 @@ Decide what to emit, using only types that exist in the docs:
 
 Rules never create `Flow` or `Step` nodes, and never reference another rule.
 
+**An org's own messaging framework is not a new type (D61).** Communication is a **sender**, a **receiver**, and the **shared key** that joins them. For an internal framework (Kafka-based or not), use an org-defined `Interface` label (for example `PxChannel`), identified by `name`, and write two rules in the org pack: the sender (`edge: PRODUCES` from `@function` to `{ PxChannel: { name: $CHANNEL } }`) and the receiver (`entry_point` with that channel as the trigger). Applications connect wherever the names match. Only say the label you chose; no design proposal is needed.
+
 **If nothing fits, stop and propose.** If the fact needs a node type, edge type, property, or clue type that doesn't exist, or a join no clue type covers (that would be a plugin), don't invent it and don't write the rule yet. Tell the person:
 - what's missing, and why the existing types don't fit,
 - what you'd add (name, identity properties, what it connects to),

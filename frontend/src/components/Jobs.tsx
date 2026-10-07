@@ -14,7 +14,7 @@ const STATUS_BADGE: Record<JobStatus, string> = {
   failed: 'badge badge-fail',
 }
 
-const MODE_LABEL = { dry_run: 'Dry run', full: 'Full', incremental: 'Incremental' }
+const MODE_LABEL = { dry_run: 'Dry run', full: 'Full' }
 
 export function Jobs({ jobs, error, repoName }: { jobs?: Job[]; error?: string; repoName: (id: number) => string }) {
   const [open, setOpen] = useState<number>()

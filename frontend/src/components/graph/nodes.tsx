@@ -295,6 +295,12 @@ export function StepRowNode({ id, data, selected }: NodeProps<Node<EntityData>>)
             </span>
           ) : null}
           {node.conditional ? <span className="step-tag">if</span> : null}
+          {node.utility ? (
+            <span className="step-tag" title="A helper called from many places; what it calls isn't listed">helper</span>
+          ) : null}
+          {node.repeat ? (
+            <span className="step-tag" title="Called again; its calls are listed where it first runs">again</span>
+          ) : null}
           {node.is_async ? <span className="step-tag">async</span> : null}
           {node.sub}
         </span>

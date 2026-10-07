@@ -7,10 +7,14 @@ Every view returns the same shape:
 Groups are boxes that contain nodes (a space, a resource such as /api/jobs, a folder).
 """
 
+import json
 from collections import defaultdict
 from typing import Any
 
 from neo4j import Driver
+
+from steno.graph import ids
+from steno.graph.build import step_of
 
 # The most specific label wins
 KINDS = [
@@ -18,6 +22,7 @@ KINDS = [
     ("Space", "space"),
     ("Application", "application"),
     ("Flow", "flow"),
+    ("Step", "step"),
     ("HttpEndpoint", "endpoint"),
     ("Interface", "interface"),
     ("Entity", "entity"),
@@ -27,7 +32,6 @@ KINDS = [
     ("Repository", "repository"),
     ("Module", "module"),
     ("File", "file"),
-    ("Function", "function"),
 ]
 # Stable-ID prefix → label with a uniqueness index, so lookups by ID use it
 ID_LABELS = {
@@ -35,6 +39,7 @@ ID_LABELS = {
     "space": "Space",
     "app": "Application",
     "flow": "Flow",
+    "step": "Step",
     "endpoint": "Interface",
     "entity": "Entity",
     "table": "Table",
@@ -43,7 +48,6 @@ ID_LABELS = {
     "repo": "Repository",
     "module": "Module",
     "file": "File",
-    "fn": "Function",
 }
 PROVENANCE = {
     "repo",
@@ -58,6 +62,8 @@ PROVENANCE = {
     "id",
     "name",
 }
+# Shown through the flow view, not as raw properties
+HIDDEN = {"trace", "trace_files", "trace_symbols", "shared"}
 EFFECT_TYPES = ["READS_FROM", "WRITES_TO", "CALLS", "PRODUCES", "CONSUMES"]
 LEVEL_UNITS = {"CALLS": "calls", "READS_FROM": "tables", "WRITES_TO": "tables"}
 
@@ -269,8 +275,7 @@ class GraphViews:
         for row in self._read(
             """
             MATCH (fl:Flow)-[:BELONGS_TO]->(:Application {id: $id})
-            OPTIONAL MATCH (fl)-[:ENTRY]->(f:Function)
-            RETURN fl, f.name AS entry ORDER BY fl.name
+            RETURN fl, last(split(fl.entry_symbol, '.')) AS entry ORDER BY fl.name
             """,
             id=app_id,
         ):
@@ -338,20 +343,20 @@ class GraphViews:
         }
 
     def application_code(self, app_id: str) -> dict[str, Any]:
-        """The code behind an application: files grouped by folder, and the calls between them."""
-        nodes, edges = [], []
+        """The code behind an application: the files its flows run through, grouped by folder,
+        and the calls between them, counted from the flows' traces."""
+        nodes = []
         folders: set[str] = set()
+        repo = None
         for row in self._read(
             """
             MATCH (:Application {id: $id})-[:BUILT_FROM]->(m:Module)<-[:BELONGS_TO]-(fi:File)
-            OPTIONAL MATCH (fn:Function)-[:BELONGS_TO]->(fi)
-            RETURN fi, m.path AS module, count(fn) AS functions,
-                   sum(CASE WHEN fn.significant THEN 1 ELSE 0 END) AS significant
-            ORDER BY fi.path
+            RETURN fi, m.path AS module ORDER BY fi.path
             """,
             id=app_id,
         ):
             fi = row["fi"]
+            repo = fi.get("repo")
             rel = (
                 fi["path"][len(row["module"]) + 1 :]
                 if fi["path"].startswith(row["module"] + "/")
@@ -362,22 +367,32 @@ class GraphViews:
             nodes.append(
                 _node(
                     fi,
-                    f"{row['functions']} functions · {row['significant']} with effects",
+                    f"{fi.get('functions', 0)} functions · {fi.get('significant', 0)} with effects",
                     parent=f"group:{folder}",
                     label=rel.rsplit("/", 1)[-1],
                 )
             )
+        # A call between files: a trace entry whose caller is in another file. Each pair of
+        # functions counts once, however many flows make that call.
+        pairs: dict[tuple[str, str], set[tuple[str, str]]] = defaultdict(set)
         for row in self._read(
-            """
-            MATCH (:Application {id: $id})-[:BUILT_FROM]->(m:Module)<-[:BELONGS_TO]-(f1:File)
-            MATCH (a:Function)-[:BELONGS_TO]->(f1)
-            MATCH (a)-[:INVOKES]->(b:Function)-[:BELONGS_TO]->(f2:File)
-            WHERE f1 <> f2
-            RETURN f1.id AS src, f2.id AS dst, 'INVOKES' AS type, count(*) AS n
-            """,
+            "MATCH (fl:Flow)-[:BELONGS_TO]->(:Application {id: $id}) RETURN fl.trace AS trace",
             id=app_id,
         ):
-            edges.append(row.data())
+            trace = _trace(row["trace"])
+            by_path = {t["path"]: t for t in trace}
+            for t in trace:
+                if "." not in t["path"]:
+                    continue
+                caller = by_path.get(t["path"].rsplit(".", 1)[0])
+                if caller and caller["file"] != t["file"]:
+                    pairs[(caller["file"], t["file"])].add((caller["symbol"], t["symbol"]))
+        shown = {n["id"] for n in nodes}
+        edges = []
+        for (f1, f2), calls in pairs.items():
+            src, dst = ids.file_id(repo or "", f1), ids.file_id(repo or "", f2)
+            if src in shown and dst in shown:
+                edges.append({"src": src, "dst": dst, "type": "INVOKES", "n": len(calls)})
         groups = [
             {"id": f"group:{f}", "kind": "folder", "label": f, "parent": None}
             for f in sorted(folders)
@@ -397,116 +412,95 @@ class GraphViews:
         """A flow as a sequence: a header (its trigger and what it does overall), its steps in
         the order they run, and the data each step reads and writes.
 
-        Steps are the functions reached from the entry, depth-first in source order, so the
-        list reads top to bottom as the code runs. With `significant_only`, functions with no
-        effect at or below them are skipped, but their calls are still followed.
+        Read from the flow's trace (D60): every function it calls, depth-first in source
+        order. With `significant_only`, only its Steps are shown (functions with an effect at
+        or below them); the others pass their calls through. Significant entries are drawn
+        as their Step node; the rest are named by their place in the trace.
         """
         rows = self._read(
             """
-            MATCH (fl:Flow {id: $id})-[:ENTRY]->(entry:Function)
+            MATCH (fl:Flow {id: $id})
             OPTIONAL MATCH (t:Interface)-[:STARTS]->(fl)
-            RETURN fl, entry, t
+            RETURN fl, t
             """,
             id=flow_id,
         )
         if not rows:
             raise KeyError(flow_id)
-        fl, entry, trigger = rows[0]["fl"], rows[0]["entry"], rows[0]["t"]
-        reach = self._read(
-            """
-            MATCH (entry:Function {id: $entry})
-            MATCH p = (entry)-[:INVOKES*0..12]->(f:Function)
-            WITH DISTINCT f
-            OPTIONAL MATCH (f)-[:BELONGS_TO]->(fi:File)
-            RETURN f, fi.path AS file
-            """,
-            entry=entry["id"],
-        )
-        funcs = {row["f"]["id"]: (row["f"], row["file"]) for row in reach}
-        calls: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        for row in self._read(
-            "MATCH (a:Function)-[r:INVOKES]->(b:Function) WHERE a.id IN $ids AND b.id IN $ids "
-            "RETURN a.id AS a, b.id AS b, r.seq AS seq, r.conditional AS cond, r.async AS async, "
-            "r.candidate AS candidate",
-            ids=list(funcs),
-        ):
-            calls[row["a"]].append(row.data())
-        for out in calls.values():
-            out.sort(key=lambda c: c["seq"] if c["seq"] is not None else 1_000_000)
+        fl, trigger = rows[0]["fl"], rows[0]["t"]
+        trace = _trace(fl.get("trace"))
 
-        keep = set(funcs)
-        if significant_only:
-            keep = {
-                fid for fid, (f, _) in funcs.items() if f.get("significant") or fid == entry["id"]
-            }
-
-        # Execution order: depth-first from the entry; hidden helpers pass their calls through
         steps: list[dict[str, Any]] = []
-        seen: set[str] = set()
+        shown_depth: dict[str, int] = {}  # trace path → depth it's drawn at
+        conditional: dict[str, bool] = {}
+        for t in trace:
+            path = t["path"]
+            parent = path.rsplit(".", 1)[0] if "." in path else None
+            conditional[path] = bool(t.get("conditional")) or conditional.get(parent or "", False)
+            # Depth = how many shown ancestors it has
+            depth, p = 0, parent
+            while p is not None:
+                if p in shown_depth:
+                    depth = shown_depth[p] + 1
+                    break
+                p = p.rsplit(".", 1)[0] if "." in p else None
+            if significant_only and "step" not in t:
+                continue
+            shown_depth[path] = depth
+            steps.append(
+                {
+                    "id": step_of(flow_id, t) if "step" in t else ids.trace_entry_id(flow_id, path),
+                    "kind": "function",
+                    "label": t["name"],
+                    "sub": t["file"],
+                    "stub": False,
+                    "container": t.get("container"),
+                    "order": len(steps) + 1,
+                    "depth": depth,
+                    "conditional": conditional[path],
+                    "is_async": bool(t.get("async")),
+                    "significant": bool(t.get("significant")),
+                    "bound_to": t.get("bound_to"),
+                    "candidate": bool(t.get("candidate")),
+                    "utility": bool(t.get("utility")),
+                    "repeat": bool(t.get("repeat")),
+                    "effects_of": t.get("effects", []),
+                }
+            )
 
-        def walk(
-            fid: str, depth: int, conditional: bool, is_async: bool, candidate: bool = False
-        ) -> None:
-            if fid in seen:
-                return
-            seen.add(fid)
-            shown = fid in keep
-            if shown:
-                f, file = funcs[fid]
-                steps.append(
-                    _node(
-                        f,
-                        file,
-                        container=f.get("container"),
-                        order=len(steps) + 1,
-                        depth=depth,
-                        conditional=conditional,
-                        is_async=is_async or bool(f.get("is_async")),
-                        significant=bool(f.get("significant")),
-                        bound_to=f.get("bound_to"),
-                        candidate=candidate,
-                    )
-                )
-            for c in calls.get(fid, []):
-                walk(
-                    c["b"],
-                    depth + 1 if shown else depth,
-                    conditional or bool(c["cond"]),
-                    bool(c["async"]),
-                    bool(c["candidate"]),
-                )
-
-        walk(entry["id"], 0, False, False)
-
+        target_ids = sorted({e["target"] for st in steps for e in st["effects_of"]})
         groups: list[dict[str, Any]] = []
         targets: dict[str, dict[str, Any]] = {}
-        edges = []
-        by_id = {st["id"]: st for st in steps}
         for row in self._read(
             """
-            MATCH (f:Function)-[r]->(t) WHERE f.id IN $ids AND type(r) IN $types
+            MATCH (t) WHERE t.id IN $ids
             OPTIONAL MATCH (t)-[:BELONGS_TO]->(d:DataStore)
             OPTIONAL MATCH (owner:Application)-[:EXPOSES]->(t)
-            RETURN f.id AS src, t, d, owner, type(r) AS type, r.operation AS op
+            RETURN t, d, owner
             """,
-            ids=list(by_id),
-            types=EFFECT_TYPES,
+            ids=target_ids,
         ):
             t = row["t"]
-            if t["id"] not in targets:
-                parent, sub = _place_target(t, row["d"], row["owner"], groups)
-                targets[t["id"]] = _node(t, sub, parent=parent)
-            edges.append(
-                {"src": row["src"], "dst": t["id"], "type": row["type"], "n": 1, "op": row["op"]}
-            )
-            by_id[row["src"]].setdefault("does", []).append(
-                {"type": row["type"], "op": row["op"], "target": targets[t["id"]]["label"]}
-            )
+            parent, sub = _place_target(t, row["d"], row["owner"], groups)
+            targets[t["id"]] = _node(t, sub, parent=parent)
+        edges = []
+        for st in steps:
+            for e in st.pop("effects_of"):
+                if e["target"] not in targets:
+                    continue
+                op = e.get("operation")
+                edges.append(
+                    {"src": st["id"], "dst": e["target"], "type": e["edge"], "n": 1, "op": op}
+                )
+                st.setdefault("does", []).append(
+                    {"type": e["edge"], "op": op, "target": targets[e["target"]]["label"]}
+                )
 
         # Each target sits next to the first step that uses it
+        order = {st["id"]: st["order"] for st in steps}
         first_use: dict[str, int] = {}
         for e in edges:
-            first_use[e["dst"]] = min(first_use.get(e["dst"], 10**6), by_id[e["src"]]["order"])
+            first_use[e["dst"]] = min(first_use.get(e["dst"], 10**6), order[e["src"]])
         for tid, target in targets.items():
             target["first_use"] = first_use.get(tid)
 
@@ -518,7 +512,7 @@ class GraphViews:
         method, _, path = (fl.get("name") or "").partition(" ")
         head = _node(
             fl,
-            entry.get("name"),
+            (fl.get("entry_symbol") or "").rsplit(".", 1)[-1] or None,
             method=method,
             path=path,
             trigger=_node(trigger)["kind"] if trigger is not None else None,
@@ -533,7 +527,7 @@ class GraphViews:
             "edges": _merge_edges(edges),
             "breadcrumbs": self._breadcrumbs(flow_id),
             "summary": {
-                "functions": len(funcs),
+                "functions": len({t["symbol"] for t in trace}),
                 "shown": len(steps),
                 "significant_only": significant_only,
             },
@@ -542,6 +536,8 @@ class GraphViews:
     # ---------------------------------------------------------------- details
 
     def node(self, node_id: str) -> dict[str, Any]:
+        if node_id.startswith("trace:"):
+            return self._trace_entry(node_id)
         label = _label_for(node_id)
         match = f"MATCH (n:{label} {{id: $id}})" if label else "MATCH (n {id: $id})"
         rows = self._read(f"{match} RETURN n", id=node_id)
@@ -586,7 +582,9 @@ class GraphViews:
             "labels": list(n.labels),
             "label": props.get("name") or props.get("path") or node_id,
             "properties": {
-                k: v for k, v in props.items() if k not in PROVENANCE and not k.startswith("card")
+                k: v
+                for k, v in props.items()
+                if k not in PROVENANCE and k not in HIDDEN and not k.startswith("card")
             },
             "provenance": {
                 k: props.get(k)
@@ -603,6 +601,65 @@ class GraphViews:
             },
             "neighbors": neighbors,
             "breadcrumbs": self._breadcrumbs(node_id),
+        }
+
+    def _trace_entry(self, entry_id: str) -> dict[str, Any]:
+        """One function in a flow's trace. Not a node: read from the flow (D60)."""
+        flow_id, _, path = entry_id.removeprefix("trace:").rpartition("#")
+        rows = self._read("MATCH (fl:Flow {id: $id}) RETURN fl", id=flow_id)
+        entry = (
+            next((t for t in _trace(rows[0]["fl"].get("trace")) if t["path"] == path), None)
+            if rows
+            else None
+        )
+        if entry is None:
+            raise KeyError(entry_id)
+        fl = rows[0]["fl"]
+        shown = (
+            "symbol",
+            "bound_to",
+            "container",
+            "doc",
+            "start_line",
+            "end_line",
+            "call_line",
+            "conditional",
+            "in_loop",
+            "async",
+            "candidate",
+            "utility",
+            "repeat",
+            "recursive",
+        )
+        return {
+            "id": entry_id,
+            "kind": "function",
+            "labels": ["TraceEntry"],
+            "label": entry["name"],
+            "properties": {k: entry[k] for k in shown if k in entry},
+            "provenance": {
+                k: v
+                for k, v in {
+                    "repo": fl.get("repo"),
+                    "commit": fl.get("commit"),
+                    "extracted_by": "call-graph",
+                    "source_file": entry["file"],
+                    "source_line": entry.get("start_line"),
+                }.items()
+                if v is not None
+            },
+            "neighbors": [
+                {
+                    "type": "IN_TRACE_OF",
+                    "dir": "out",
+                    "node": {"id": flow_id, "kind": "flow", "label": fl.get("name")},
+                    "props": {},
+                }
+            ],
+            "breadcrumbs": [
+                *self._breadcrumbs(flow_id),
+                {"id": entry_id, "label": entry["name"], "kind": "function"},
+            ],
         }
 
     def search(self, text: str, limit: int = 12) -> list[dict[str, Any]]:
@@ -628,18 +685,22 @@ class GraphViews:
                     "score": row["score"],
                 }
             )
-        for row in self._read(  # functions aren't searchable architecture nodes, but names help
-            "MATCH (f:Function) WHERE toLower(f.name) CONTAINS toLower($t) "
-            "RETURN f ORDER BY size(f.name) LIMIT 5",
+        # Functions aren't searchable architecture nodes, but their names help find a flow:
+        # a match in a flow's trace opens that flow
+        for row in self._read(
+            "MATCH (fl:Flow) "
+            "WITH fl, [s IN fl.trace_symbols WHERE toLower(s) CONTAINS toLower($t)] AS hits "
+            "WHERE size(hits) > 0 "
+            "RETURN fl, hits[0] AS symbol ORDER BY size(hits[0]) LIMIT 5",
             t=words[0],
         ):
-            f = row["f"]
+            fl = row["fl"]
             out.append(
                 {
-                    "id": f.get("id"),
-                    "kind": "function",
-                    "label": f.get("name"),
-                    "sub": f.get("container"),
+                    "id": fl.get("id"),
+                    "kind": "flow",
+                    "label": row["symbol"].rsplit(".", 1)[-1],
+                    "sub": f"in {fl.get('name')}",
                 }
             )
         return out
@@ -784,6 +845,10 @@ def _place_target(
         whole = group(f"group:{t['id']}", "datastore", t.get("name"), bool(t.get("stub")))
         return whole, "the whole store"
     return group("group:external", "externals", "External systems"), t.get("host")
+
+
+def _trace(raw: Any) -> list[dict[str, Any]]:
+    return json.loads(raw) if isinstance(raw, str) else []
 
 
 def _resource(path: str) -> str:

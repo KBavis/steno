@@ -96,7 +96,8 @@ class NodeFact:
         return next((lbl for lbl in reversed(self.labels) if lbl in IDENTITY), self.labels[-1])
 
     def ref(self) -> NodeRef:
-        keys = IDENTITY.get(self.label, ())
+        # An org-defined Interface label (a channel, D61) is identified by its name, like a topic
+        keys = IDENTITY.get(self.label) or (("name",) if "Interface" in self.labels else ())
         return NodeRef.of(self.label, {k: self.props[k] for k in keys if k in self.props})
 
 

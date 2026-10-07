@@ -13,8 +13,10 @@ const INVERSE: Record<string, string> = {
   'in:READS_FROM': 'read by',
   'in:WRITES_TO': 'written by',
   'in:STARTS': 'started by',
-  'in:ENTRY': 'entry of',
-  'in:INVOKES': 'invoked by',
+  'in:FIRST_STEP': 'first step of',
+  'in:SUBSTEP': 'substep of',
+  'in:NEXT': 'after',
+  'out:IN_TRACE_OF': 'runs in flow',
 }
 
 /** The selected node: what it is, where it came from in the code, and what it's connected to. */

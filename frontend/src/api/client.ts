@@ -1,6 +1,6 @@
 // Typed client for the Admin API (backend/src/steno/api). Types mirror api/schemas.py.
 
-export type JobMode = 'full' | 'incremental' | 'dry_run'
+export type JobMode = 'full' | 'dry_run'
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed'
 export type StageName = 'clone' | 'deps' | 'parse' | 'extract' | 'assemble' | 'flows' | 'write' | 'cards'
 export type StageStatus = 'running' | 'succeeded' | 'failed' | 'skipped'
@@ -54,7 +54,7 @@ export type RepositoryInput = Omit<Repository, 'id' | 'last_ingested_sha'>
 export interface Job {
   id: number
   repository_id: number
-  trigger: 'initial' | 'merge' | 'manual'
+  trigger: 'initial' | 'nightly' | 'manual'
   mode: JobMode
   status: JobStatus
   from_sha: string | null
@@ -112,6 +112,9 @@ export interface GraphNode {
   bound_to?: string | null
   /** Flow view: one of several implementations that can run here, chosen at runtime */
   candidate?: boolean
+  /** Trace entries: a helper called from many places, never expanded; a call to a function already shown above */
+  utility?: boolean
+  repeat?: boolean
   /** Flow view: what a step does, in words (operation and target) */
   does?: { type: string; op?: string | null; target: string }[]
   /** Flow view: the first step that uses a target */

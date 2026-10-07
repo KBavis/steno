@@ -94,7 +94,6 @@ This is structural retrieval, which embeddings alone can't do. Combined with Jev
 | **Flow** | Trigger, purpose, narrative steps, what it touches, what it leads to, business context (later), source. See the [flow card](./knowledge-graph.md#flow-levels-and-the-flow-card-decided). | Deterministic signature + **LLM purpose and narrative for every flow** at initial ingestion |
 | **Application, Space, Organization** | Purpose, key flows and interfaces, ins and outs | LLM (few nodes, high value, and routing depends on them) |
 | **Interface, Entity, Table, Module** | Facts and neighbors | Deterministic template |
-| **Function** | None | — |
 
 - **Why every flow gets an LLM purpose:** declared summaries are often missing or vague, and without a real purpose semantic search has nothing meaningful to match.
 - **Keeping it affordable at scale:** a small model by default, the Batch API, and **prompt caching** (flows in one app share a cached prefix: the app card, entities, conventions).
@@ -186,7 +185,7 @@ Every fact already records its source (repo, symbol, commit) and every call site
 | **Space** | **The "Bloomberg" view:** its applications, data stores, and topics; **ins and outs** (which spaces call in and which it calls out to, grouped by transport); communication within the space; a pointer to its glossary |
 | Application | Endpoints, outbound calls, topics produced and consumed, data store access, modules (Service/Library), flows by trigger |
 | Flow | Its trigger, summary, significant steps, and the flows it leads to |
-| Interface, DataStore, Function, … | Its card, owner, and edges grouped by type |
+| Interface, DataStore, Table, … | Its card, owner, and edges grouped by type |
 
 These views are rollups computed from application-level facts. The future UI renders the same views, so they're built once and serve both agents and people.
 
@@ -194,10 +193,12 @@ These views are rollups computed from application-level facts. The future UI ren
 
 | Tool | Purpose | Returns |
 |---|---|---|
-| `get_flow(flow_id \| trigger, expand: none\|sync\|all, detail: significant\|all)` | The ordered step tree, stitched across services when expanded | Ordered steps, interactions, sync/async markers |
-| `view_flow_code(flow_id, steps?)` | The code for every step of a flow in **one round trip** | Source snippets by step |
+| `get_flow(flow_id \| trigger, expand: none\|sync\|all, detail: significant\|all)` | The ordered step tree, stitched across services when expanded; `detail: all` returns the full trace | Ordered steps (or trace entries) with file and lines, interactions, sync/async markers, and the flows each cross-app step leads to |
+| `view_flow_code(flow_id, steps?)` | The code for every step of a flow in **one round trip**, read from the git host at the ingested commit using the trace's file and lines | Source snippets by step |
 | `view_file(repo, path, sha?)` / `list_directory(repo, path, sha?)` | Files not covered by any flow, from the git host at the ingested commit | File contents / listing |
-| `find_symbols(symbols[] \| stack_trace)` | Map stack frames or symbols to functions → flows → triggers → upstream callers | Matching functions and their flows |
+| `find_symbols(symbols[] \| stack_trace)` | Map stack frames or symbols to the flows whose traces contain them → triggers → upstream callers | Matching trace entries and their flows |
+
+**Following a flow across spaces.** An agent doesn't need any repository checked out to follow behavior through the org. `get_flow(A)` returns A's steps and says that step 3 calls `POST /accounts`, which starts Flow B in another application and space. `view_flow_code(A, [2, 3])` shows the code for those steps, read from the git host. `get_flow(B)` continues on the other side. Interface nodes are the bridges, and each flow's trace tells the agent which few functions out of thousands to read. Steno only reads code; it never changes it.
 
 ### Dependencies and impact
 
@@ -233,13 +234,13 @@ A raw diff is too narrow. It misses the PR's context, and the other PRs this cha
 
 **How it's analyzed: a dry-run ingestion.**
 
-1. Run the **same rule packs** used for incremental updates on each PR's changed files at its head commit.
+1. Run the **same ingestion** used nightly, as a dry run, on each PR's head commit.
 2. Compute the **fact diff against main's graph**, but write it to a temporary overlay, never to the main graph.
 3. **Combine the overlays** of all related PRs, then analyze them together:
    - "The producer PR changes `order.created`. Consumers A and B are updated by PR #45; **consumer C isn't covered by any PR**."
    - The deploy order: producer before consumers, or the reverse, depending on whether the change is backward compatible.
 
-This reuses the ingestion machinery, so there's no separate analysis engine. It takes seconds to a minute (fetch + extract), which suits CI and PR review. In interactive use it may need to run asynchronously.
+This reuses the ingestion machinery, so there's no separate analysis engine. It takes seconds to a few minutes (a whole-repository analysis), which suits CI and PR review. In interactive use it may need to run asynchronously.
 
 ### Changes over time (needs the delta store)
 

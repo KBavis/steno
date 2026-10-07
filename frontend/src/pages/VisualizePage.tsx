@@ -479,9 +479,8 @@ const LEGEND: Record<string, string> = {
   CALLS: 'calls',
   READS_FROM: 'reads tables',
   WRITES_TO: 'writes tables',
-  INVOKES: 'function calls',
+  INVOKES: 'calls between files',
   STARTS: 'starts the flow',
-  ENTRY: 'enters the code',
 }
 
 function hint(view: GraphView): string {

@@ -27,19 +27,26 @@ def application_id(name: str) -> str:
     return f"app:{name}"
 
 
-def function_id(
-    repo: str,
-    qualified_name: str,
-    param_types: list[str] | None = None,
-    bound_to: str | None = None,
-) -> str:
-    """`param_types` is given only where the language has overloading. `bound_to` names the
-    subclass an inherited method runs for, when that changes what it calls:
-    `fn:repo:app.tasks.base.Task.run@app.tasks.diff.DiffTaskRunner`."""
-    base = f"fn:{repo}:{qualified_name}"
-    if param_types is not None:
-        base = f"{base}({','.join(param_types)})"
-    return f"{base}@{bound_to}" if bound_to else base
+def step_id(flow: str, symbol: str, bound_to: str | None = None, occurrence: int = 1) -> str:
+    """A step is keyed by the function it runs, not its position, so inserting a step doesn't
+    renumber the others: `step:flow:app:POST /x:app.svc.Svc.run@app.svc.Impl#2`. `bound_to`
+    names the subclass an inherited method runs for; `occurrence` counts repeats in one flow."""
+    base = f"step:{flow}:{symbol}"
+    if bound_to:
+        base = f"{base}@{bound_to}"
+    return f"{base}#{occurrence}" if occurrence > 1 else base
+
+
+def trace_entry_id(flow: str, path: str) -> str:
+    """Not a node: names one entry of a flow's trace, so views and details can point at it."""
+    return f"trace:{flow}#{path}"
+
+
+def channel_id(label: str, name: str) -> str:
+    """A messaging interface known by its name alone (D61): a Kafka topic, a queue, or an
+    org-defined channel. Not scoped to an application, so a sender and a receiver in different
+    applications meet on the same node."""
+    return f"{label.lower()}:{name}"
 
 
 def http_endpoint_id(app: str, method: str, path: str) -> str:

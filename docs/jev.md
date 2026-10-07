@@ -109,7 +109,7 @@ Routing layer by layer (Q1, then Q2) keeps every Choice under the 255-option lim
 
 | # | Decision | Type | State | Runs only when… | Result |
 |---|---|---|---|---|---|
-| **I1** | Which implementation does this DI call resolve to? | Choice (candidates) | Call site + candidate digests + active config | The DI rules find more than one candidate | `INVOKES` to the choice, or to all of them, marked `ambiguous` |
+| **I1** | Which implementation does this DI call resolve to? | Choice (candidates) | Call site + candidate digests + active config | The DI rules find more than one candidate | The trace follows the choice, or lists all of them, marked `ambiguous` |
 | **I2** | Which transport does this outbound call use? | Choice (HTTP, gRPC, Kafka, internal framework(s), DB, other) | Call site digest | No rule matched | The `transport` on `CALLS` |
 | **I3** | Is this function an entry point? | Noul | Method, class, unrecognized annotations | An unrecognized framework looks like a trigger | A new `Flow`, or none |
 | **I4** | Is this host inside the org or a vendor? | Noul | The host + known org domains | The host isn't on the known-domains list | A stub `Interface` or an `ExternalSystem` |

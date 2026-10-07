@@ -1,9 +1,16 @@
 from steno.graph import ids
 
 
-def test_function_id_includes_param_types_only_when_given():
-    assert ids.function_id("svc", "a.B#run") == "fn:svc:a.B#run"
-    assert ids.function_id("svc", "a.B#run", ["a.Req", "int"]) == "fn:svc:a.B#run(a.Req,int)"
+def test_step_id_is_keyed_by_function_not_position():
+    flow = "flow:svc:POST /x"
+    assert ids.step_id(flow, "a.B.run") == "step:flow:svc:POST /x:a.B.run"
+    assert (
+        ids.step_id(flow, "a.Base.run", "a.Impl", 2) == "step:flow:svc:POST /x:a.Base.run@a.Impl#2"
+    )
+
+
+def test_channels_are_not_scoped_to_an_application():
+    assert ids.channel_id("PxChannel", "orders") == "pxchannel:orders"
 
 
 def test_endpoint_id_normalizes_method():

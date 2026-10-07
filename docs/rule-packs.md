@@ -76,7 +76,7 @@ emit:                                 # one or more outputs
 | `{Function: {symbol: $X}}` | A function that's **referenced, not called** here: a callback, a background task. Symbol resolution turns `$X` into the function's identity. | `to: { Function: { symbol: $TASK } }` |
 | `{table_of: $X}` | The `Table` an entity maps to (through `MAPS_TO`). `$X` may be the entity class, an instance of it, or one of its attributes (`Job.status`). **If `$X` isn't a mapped entity, the emit is dropped**, so a rule can match broadly (`select(...)`) without producing noise. | `to: { table_of: $MODEL }` |
 
-**Edge properties** listed for an edge in [Knowledge Graph §4](./knowledge-graph.md#4-relationship-types) can be set in the emit, such as `async: true` on `INVOKES` or `operation: insert` on `WRITES_TO`. An emitted edge between the same two things, at the same call site, as one the call graph extracts **merges** into it; that's how a rule marks an existing call as async.
+**Edge properties** listed for an edge in [Knowledge Graph §4](./knowledge-graph.md#4-relationship-types) can be set in the emit, such as `operation: insert` on `WRITES_TO`, or `async: true` on an `INVOKES` between two functions. `INVOKES` goes into the run's in-memory call graph (it isn't stored, D60): a rule's call to a function the code already calls there **merges** into that call, which is how a rule marks an existing call as async; otherwise it adds the call, ordered by its line.
 
 **Optional captures.** A capture bound in only one branch of an `any:` (for example an optional `prefix=` keyword) is simply left out of the emit when that branch didn't match.
 
@@ -90,9 +90,10 @@ Steno builds every node's stable ID from its identity properties ([Knowledge Gra
 |---|---|---|
 | `HttpEndpoint` | `method`, `path` | Plus the exposing app, implied |
 | `GrpcMethod` | `service`, `method` | |
-| `KafkaTopic` / `Queue` | `name` | `cluster` when known |
+| `KafkaTopic` / `Queue` | `name` | `cluster` when known. Not scoped to an application: producers and consumers in different apps meet on one node. |
+| Org-defined `Interface` label, e.g. `PxChannel` (D61) | `name` | An org's own messaging channel. Emit `node: [Interface, PxChannel]`, or refer to it as `{ PxChannel: { name: $C } }`. Like a topic, it's keyed by name across applications. |
 | `Schedule` | `kind`, `expression` | Plus the app, implied |
-| `Function` | `symbol` (fully qualified; parameter types where the language has overloading) | Usually created by the call graph; rules refer to existing functions |
+| `Function` | `symbol` (fully qualified; parameter types where the language has overloading) | A function in the run's call graph; rules refer to existing functions. Functions aren't stored as nodes: they reach the graph through flow traces (D60). |
 | `Entity` | `name` (the symbol) | |
 | `Table` | `name` | `schema`, `datastore` when known |
 | `DataStore` | `vendor`, `host`, `database` | |
@@ -113,6 +114,37 @@ emit:
   - entry_point:
       trigger: endpoint
       function: "@function"
+```
+
+### Example: an org's own messaging (sender + receiver, D61)
+
+Two rules in the org pack cover an internal framework, whether or not it wraps Kafka. Applications connect wherever the channel names match.
+
+```yaml
+# rules/px-send.yaml: messenger.post("orders", payload)
+id: px-send
+match:
+  rule: { pattern: "$M.post($CHANNEL, $$$)" }
+where:
+  $M: { type: com.yourorg.px.Messenger }
+emit:
+  - edge: PRODUCES
+    from: "@function"
+    to: { PxChannel: { name: $CHANNEL } }
+```
+
+```yaml
+# rules/px-receive.yaml: @OnMessage("orders") on a handler method
+id: px-receive
+match:
+  rule:
+    kind: method_declaration
+    has: { pattern: "@OnMessage($CHANNEL)" }
+emit:
+  - node: [Interface, PxChannel]
+    as: channel
+    name: $CHANNEL
+  - entry_point: { trigger: channel, function: "@function" }
 ```
 
 ## 4. Clues (Decided)

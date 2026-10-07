@@ -15,6 +15,7 @@ Part of the [Design Doc](./DESIGN_DOC.md). Status markers: **Decided** · **Prop
 | **Agnostic core, org-specific plugins.** The core defines fact types; rules (in rule packs) and plugins are what orgs extend. | Decided |
 | **Passive.** Applications don't opt in to anything; Steno reads what already exists. No OpenTelemetry, Terraform, or annotations are required. | Decided |
 | **Idempotent.** Re-running any ingestion yields the same graph. | Decided |
+| **Whole repository, nightly.** Each night a repository that changed is re-analyzed in full; only the differences are written (D59). | Decided |
 | **Static only in Phase 1.** Code and config only. Runtime signals (Splunk, OpenTelemetry) are deferred. | Decided |
 | **Secret values are never ingested.** | Proposed |
 
@@ -31,7 +32,7 @@ flowchart LR
     SR -. answers .-> X
     X --> A[Assemblers<br/><i>clues → complete facts</i>]
     SR -. answers .-> A
-    A --> CG[Call graph + flows<br/><i>whole app; IDs, stubs</i>]
+    A --> CG[Call graph + flows<br/><i>in memory; traces, IDs, stubs</i>]
     SR --> CG
     CG --> GW[Graph writer<br/><i>MERGE by stable ID</i>]
     GW --> D[Delta<br/><i>added / removed / changed</i>]
@@ -55,8 +56,8 @@ Flows are **derived**, not extracted one by one:
 | **Clue** | `router` has prefix `/jobs` | Never stored: a note that fills another fact's blank |
 
 3. **Assemble:** each clue type's **assembler** fills in the blanks from the clues, such as an endpoint's full path. It runs before flows, which need completed facts to name each flow.
-4. **Whole application (flows):** build the call graph with the symbol resolver, then walk from every entry point to derive all flows at once. The graph builder gives every fact a stable ID and creates stubs for targets not yet ingested.
-5. **Write:** `MERGE` by stable ID, compute the delta, then generate cards for changed nodes only.
+4. **Whole application (flows):** build the call graph **in memory** with the symbol resolver, then walk from every entry point to derive all flows at once, each with its steps and its trace. The graph builder gives every fact a stable ID and creates stubs for targets not yet ingested. The call graph is discarded after the run (D60).
+5. **Write:** compare the new facts and traces with the graph by stable ID, write only what changed, then generate cards for changed flows only, while the clone and call graph are still in memory.
 
 > [!IMPORTANT]
 > **Resolve** and **assemble** are different jobs (D56). The **symbol resolver** (one per language, §5) answers *what is this?*: which symbol a name refers to, a value's type, the constant it holds. **Assemblers** (one per clue type, the same for every language) combine clues into complete facts, asking the symbol resolver when they need to. Nothing else is called a resolver.
@@ -189,20 +190,45 @@ Org-specific packs are usually a handful of rules for internal frameworks.
 
 ### Coverage report (Decided)
 
-After every ingestion, Steno reports **what no rule explained**: call sites that look like I/O and methods that look like entry points (pre-filtered by Jev I8), **ranked by frequency**:
+After every ingestion, Steno reports **what no rule explained**, so gaps are measured instead of discovered by accident.
+
+**Aggregated across the organization (D62).** One rule fixes the same gap in every repository that has it, so items are grouped by target across all repositories and **ranked by total occurrences**:
 
 ```
-UNEXPLAINED (top 3)
-  437 call sites → com.yourorg.messaging.Publisher#send(String, Object)
-  112 methods    → annotated @PxMessageHandler
-   38 call sites → com.yourorg.http.ServiceProvider#invoke(...)
+UNEXPLAINED (org-wide, top 3)
+  437 call sites in 61 repos → com.yourorg.messaging.Publisher#send(String, Object)
+  112 methods in 18 repos    → annotated @PxMessageHandler
+   38 call sites in 9 repos  → com.yourorg.http.ServiceProvider#invoke(...)
 ```
+
+**Triage states (D62).** Every item is **unexplained**, **ignored** (looked at; not I/O, e.g. a logging or string helper), or **explained** (a rule now covers it). The state persists across runs, so ignored noise stays hidden and the open count per repository trends toward zero instead of staying noisy forever. Each repository gets completeness numbers from it: % of external calls explained, % of functions reachable from an entry point, open items.
+
+**What it looks for (Proposed).** Six signals, each a place a fact could hide:
+
+| Signal | What it catches |
+|---|---|
+| **Unexplained external calls** | Calls leaving first-party code that no rule explains and that aren't marked harmless, grouped by target (pre-filtered by Jev I8) |
+| **Libraries with no pack** | Declared or imported libraries no rule pack covers (`boto3 imported in 40 repos, no pack`) |
+| **Unreachable code** | The share of a repository's functions no entry point reaches, and functions with effects no flow reaches. Large unreachable clusters sharing an annotation or base class usually mean a missing entry-point (receiver) rule. |
+| **Unmet joins** | Facts with blanks the assemblers couldn't fill (partial paths), unresolved calls, ambiguous DI, HTTP calls to unknown hosts |
+| **Cross-app inconsistencies** | A topic or channel produced but never consumed, or consumed but never produced; a call to an endpoint the target app doesn't expose. Each means one side was missed. These get more useful as more of the org is ingested. |
+| **Config no rule read** | Config keys that look like hosts, URLs, topics, or queues that no rule read |
 
 The most frequent items are exactly the internal frameworks worth covering. Each can be fixed by:
-1. **Ingesting the library's repository**, so calls resolve into its code and its own facts carry through, or
-2. **Adding a rule** to the org pack.
+1. **Adding a rule** to the org pack, or
+2. **Ingesting the library's repository**, so calls resolve into its code (how traces continue across repositories is Open).
 
 Until then, Jev I2/I3 cover them at low confidence.
+
+**What it can't see.** Behavior that leaves no trace in the code (reflection, routing chosen entirely by runtime config) can only be marked unknown, not filled in. Runtime signals (deferred) are what close that gap.
+
+### Internal communication frameworks (Decided)
+
+Organizations often have their own messaging, which may not wrap Kafka at all. It's covered by the general communication model (D61, [Knowledge Graph](./knowledge-graph.md#communication-of-any-kind-decided)): an org-defined `Interface` label, a **sender rule** (`Messenger#post(channel, …)` → `PRODUCES`, key = argument 0), and a **receiver rule** (`@OnMessage("x")` → entry point `STARTS` from channel `x`). Matching keys connect the applications.
+
+Finding one before anyone writes its rules is the coverage report's job: receivers show up as **unreachable handler clusters**, senders as **frequent unexplained external calls**. If the framework's own repository is ingested, its coverage report shows the I/O it eventually does (sockets, HTTP, JMS, Redis, a table used as a queue), which confirms it's communication; the channel key is a concept only the framework defines, so a rule is still needed.
+
+**Default for internal libraries (Proposed):** a boundary rule (one rule fixes every repository, and it stays stable as the library changes). Ingest the library's repository when it contains business logic worth tracing.
 
 ### Turning a coverage item into a rule (Deferred: future enhancement)
 
@@ -265,9 +291,9 @@ flowchart TD
     T4 -- one --> T5["5. Target identity<br/>fn:repo:com.x.PassServiceImpl#callToFunction(ClientRequest)"]
     T4 -- several --> J[Jev I1, or link all, marked ambiguous]
     T5 --> W{Where does it live?}
-    W -- "this repo" --> N1[INVOKES → Function node]
-    W -- "ingested library repo" --> N2[INVOKES → that repo's Function node]
-    W -- "not ingested" --> N3[INVOKES → external symbol stub<br/>coverage report, or a rule matches it]
+    W -- "this repo" --> N1[Call graph edge → the trace continues]
+    W -- "library in another repo" --> N2[Open: how the trace continues]
+    W -- "not ingested" --> N3[Ends at an external symbol<br/>a rule labels it, or a coverage item]
 ```
 
 1. **Receiver type.** `passSvc` is declared as `private final PassService passSvc;` (or a constructor parameter), so its type is `com.x.PassService`. The JavaParser symbol solver finds this from the repo's source, the **dependency JARs**, and the JDK.
@@ -282,9 +308,9 @@ flowchart TD
    - **Interfaces with no implementation in the code** are generated by the framework at runtime: Spring Data repositories, Feign clients, gRPC stubs. **Rules** handle them: a `JpaRepository<User, …>` method becomes `READS_FROM` / `WRITES_TO` the `users` table; a `@FeignClient` method becomes `CALLS` an endpoint. This is where DI resolution and extractor rules meet.
 5. **Target identity.** Every function has a stable ID built from its fully qualified name **and parameter types**: `fn:{repo}:com.x.PassServiceImpl#callToFunction(com.x.ClientRequest)`. So a call always points to **one specific, already-known function**, and two calls to it point to the same node.
 6. **Where the target lives:**
-   - this repo: `INVOKES` to its `Function` node
-   - an ingested library: `INVOKES` to that repo's node, matched by the same identity
-   - not ingested: `INVOKES` to an **external symbol stub**, unless a rule recognizes it (e.g. `KafkaTemplate#send` → `PRODUCES`); frequent stubs show up in the coverage report
+   - this repo: an edge in the run's call graph, so the flow's trace continues into it
+   - a library in another repository: **Open** (functions aren't stored as nodes, so another run can't link to them; one option is a per-library summary of each public function's effects)
+   - not ingested: the call ends at an **external symbol**, unless a rule recognizes it (e.g. `KafkaTemplate#send` → `PRODUCES`); frequent ones show up in the coverage report
 
 **Known gaps**, marked instead of guessed:
 - reflection
@@ -295,8 +321,9 @@ flowchart TD
 
 
 **Internal libraries:**
-- **Library repository ingested:** calls resolve into its functions, keyed by fully qualified name, and its facts (e.g. publishing to Kafka) carry through into the flows that call it.
-- **Not ingested:** the call ends at a stub for the external symbol, which shows up in the coverage report.
+- **In the same repository** (a monorepo's `plugins/`): analyzed with the services, so their functions and facts are part of each flow's trace.
+- **In another repository:** a boundary rule by default (see [Internal communication frameworks](#internal-communication-frameworks-decided)); continuing the trace into an ingested library is Open.
+- **Neither:** the call ends at the external symbol, which shows up in the coverage report.
 
 ### 5.1b The call resolution plan (Python) (Decided)
 
@@ -320,7 +347,7 @@ What it can't follow (dynamic attribute access, values built at runtime, untyped
 | `class_of(expr)` | The class an expression names (repository classes, and library names that look like classes) | Classes chosen at runtime |
 | `value_of(expr)` | The constant a value holds: literals, f-strings, `+`, single assignments, module constants across imports, class defaults, `os.getenv(key, default)`; a parameter inside a string becomes `{name}` | Values that exist only at runtime |
 | `is_subclass(type, targets)` | Whether a type is, or inherits from, one of the targets (repository bases walked; library bases by name) | Inheritance inside libraries that aren't read |
-| `invocations(fn, self_type?)` | Every first-party call in a function, closures included, in execution order, flagged conditional or in-loop: the call graph. With `self_type`, an inherited method is read as that subclass, so `self.execute()` in `Task.run` finds `DiffTaskRunner.execute`; a call to an abstract method lists its implementations as candidates (D58) | Which implementation runs when the code doesn't say (a factory returning the base type): every candidate is linked instead |
+| `invocations(fn, self_type?)` | Every first-party call in a function, closures included, in execution order, flagged conditional or in-loop: the (in-memory) call graph. With `self_type`, an inherited method is read as that subclass, so `self.execute()` in `Task.run` finds `DiffTaskRunner.execute`; a call to an abstract method lists its implementations as candidates (D58) | Which implementation runs when the code doesn't say (a factory returning the base type): every candidate is linked instead |
 
 **One symbol resolver per language.** Each language gets its own symbol resolver behind these same questions. The engine today builds only the Python one, so a repository mixing languages needs a symbol resolver per language, chosen by each rule's `language` (Open). Links between languages go through shared interface nodes in the graph, not through a resolver.
 
@@ -364,39 +391,38 @@ PEO: "Professional Employer Organization"; entity/PeoClient
 ### Stable IDs and replacement by scope (Decided)
 
 - Every node and edge has a **stable ID derived from natural keys**, so re-ingesting finds the same nodes.
-- Every fact records the `ingestion_job` that wrote it. Re-ingesting a scope (a repo, or a set of files):
+- Every fact records the `ingestion_job` that wrote it. Re-ingesting a repository:
   1. `MERGE` all current facts.
   2. Delete that scope's facts from older runs.
   3. Remove shared nodes (topics, tables) only when nothing references them anymore.
 - **The delta** comes from comparing fact sets by stable ID: added, removed, or changed.
 
-### Incremental updates on merge to main (Decided)
+### Nightly updates (Decided, D59)
 
 ```mermaid
 sequenceDiagram
-    participant Git as Git host
+    participant Sch as Nightly schedule
     participant Orc as Orchestrator
+    participant Git as Git host
     participant Wk as Ingestion worker
     participant Neo as Neo4j
     participant PG as Postgres
-    Git->>Orc: merge to main (webhook, or polling)
-    Orc->>PG: read last_ingested_sha
-    Orc->>Wk: run(repo, last_sha..new_sha)
-    Wk->>Wk: fetch, then git diff --name-status last..new
-    Wk->>Wk: re-run parse and extract on the changed files
-    Wk->>Neo: find flows reaching changed functions (reverse reachability)
-    Wk->>Wk: re-derive those flows
-    Wk->>Neo: MERGE facts, remove stale ones
-    Wk->>PG: store delta + map commits to PRs
-    Wk->>Wk: Jev I5 decides which cards to regenerate
+    Sch->>Orc: start the nightly run
+    Orc->>PG: read last_ingested_sha per repository
+    Orc->>Git: has the default branch moved?
+    Orc->>PG: queue a job per changed repository
+    Wk->>Wk: fetch, then analyze the whole repository at the new head
+    Wk->>Neo: compare facts and traces by stable ID; write only changes, remove stale ones
+    Wk->>PG: store the delta + map commits last..new to PRs
+    Wk->>Wk: decide which cards to regenerate (Jev I5 or a stand-in)
     Wk->>PG: update last_ingested_sha
 ```
 
-- **Diff by commit range, not by PR.** Steno stores **one** `last_ingested_sha` per repository. The range covers every change since then:
-  - a missed webhook heals itself on the next run
-  - direct pushes and reverts are caught
-  - squashes and rebases don't matter
-- **PRs are used for attribution.** Commits in the range are mapped to their PRs. The range says *what* changed; the PR says *who and why*. That's the link to Projects later.
+- **Once a night, whole repositories.** Every repository whose default branch moved past `last_ingested_sha` is re-analyzed in full at its new head. Repositories that didn't change are skipped. No merge-triggered runs, and no per-file incremental re-derivation: flows depend on the whole call graph, so a full analysis is simpler and can't drift from a fresh ingest.
+- **Only differences are written.** Facts and traces are compared by stable ID. A day of refactoring that changes no behavior writes traces but no architecture nodes, and regenerates no cards.
+- **The commit range is for attribution.** Commits in `last_ingested_sha..head` are mapped to their PRs. The run says *what* changed; the PRs say *who and why*, and that's the link to Projects later. A missed night heals itself on the next one.
+- **Manual runs** (initial ingestion, a re-run after a rule pack changes) use the same job.
+- **Keeping it cheap (Proposed):** cache parse and extract results per file, keyed by the file's git blob SHA plus the rule pack versions, so unchanged files cost almost nothing; keep a persistent mirror per repository and `git fetch` instead of cloning. For very large monorepos, scope the run to the applications whose files changed.
 
 ### Steno owns re-ingestion (Decided)
 
@@ -452,9 +478,9 @@ erDiagram
 | `glossary_term` | `id`, `space_id`, `term`, `target_node_id`, `definition` |
 | `rule_pack` | `id`, `name`, `version`, `source` (core / org) |
 | `repository_rule_pack` | `repository_id`, `rule_pack_id`, `enabled`, `reason` (auto / manual) |
-| `ingestion_job` | `id`, `repository_id`, `trigger` (initial / merge / manual), `mode` (full / incremental / dry_run), `from_sha`, `to_sha`, `status` (queued / running / succeeded / failed), `queued_at`, `started_at`, `finished_at`, `error`, `stats` (json) |
+| `ingestion_job` | `id`, `repository_id`, `trigger` (initial / nightly / manual), `mode` (full / dry_run), `from_sha`, `to_sha`, `status` (queued / running / succeeded / failed), `queued_at`, `started_at`, `finished_at`, `error`, `stats` (json) |
 | `ingestion_stage` | `id`, `job_id`, `stage` (clone / deps / parse / extract / assemble / flows / write / cards), `started_at`, `finished_at`, `status`, `metrics` (json), `llm_cost`, `jev_cost` |
-| `coverage_item` | `id`, `job_id`, `repository_id`, `kind` (call site / annotation), `target_symbol`, `occurrences`, `samples` (json), `status` (open / ignored / covered) |
+| `coverage_item` | `id`, `job_id`, `repository_id`, `kind` (external call / library / unreachable / unmet join / inconsistency / config), `target_symbol`, `occurrences`, `samples` (json), `status` (unexplained / ignored / explained) |
 | `fact_change` | `id`, `job_id`, `fact_id`, `fact_type`, `change` (added / removed / modified), `before` (json), `after` (json), `commit_sha` |
 | `job_commit` | `job_id`, `commit_sha`, `pr_number`, `pr_url`, `merged_at` |
 | `llm_call` | `id`, `job_id`, `stage_id`, `node_id`, `purpose`, `model`, `input_tokens`, `output_tokens`, `cached_tokens`, `cost`, `latency_ms` |
@@ -468,7 +494,7 @@ erDiagram
 |---|---|
 | `organization` | The organization this deployment serves: one row, entered in onboarding. The root of the space tree. Projected into Neo4j. |
 | `connector` | A source system plus a scope (a Bitbucket workspace or project, a GitHub org). `credentials_ref` points into a secret manager; secrets are never stored. |
-| `repository` | The include list now, discovery later (`selection`: included / discovered / excluded). `space_id` places it in the org. `last_ingested_sha` drives incremental updates. |
+| `repository` | The include list now, discovery later (`selection`: included / discovered / excluded). `space_id` places it in the org. `last_ingested_sha` decides whether the nightly run includes it. |
 | `space` | Admin-declared spaces, which can nest. Projected into Neo4j. |
 | `glossary_term` | Human-declared vocabulary: a term, its definition, and the node it refers to. Projected into Neo4j. |
 | `rule_pack`, `repository_rule_pack` | Which rule packs (and versions) apply to which repository, and whether each was auto-enabled from dependencies or added manually. |
@@ -477,20 +503,20 @@ erDiagram
 
 | Table | Why |
 |---|---|
-| `ingestion_job` | Every job (`trigger`: initial / merge / manual; `mode`: full / incremental / **dry_run**) and its status (**queued** / running / succeeded / failed). **It's also the work queue.** |
+| `ingestion_job` | Every job (`trigger`: initial / nightly / manual; `mode`: full / **dry_run**) and its status (**queued** / running / succeeded / failed). **It's also the work queue.** |
 | `ingestion_stage` | Per stage (clone, deps, parse, extract, assemble, flows, write, cards): timings, metrics (files, functions, flows), and **cost** (`llm_cost`, `jev_cost`, summed from the calls made in that stage). This is the dry-run report. |
-| `coverage_item` | What **no rule explained** but looks like it matters: unexplained call sites and unrecognized annotations, with occurrence counts and sample locations. `status` is open / ignored / covered, so it's tracked across jobs, noise stays hidden once ignored, and open items measure how complete an app's graph is. |
+| `coverage_item` | What **no rule explained** but looks like it matters (the six signals in §4), with occurrence counts and sample locations. `status` is unexplained / ignored / explained, so it's tracked across jobs, noise stays hidden once ignored, and open items measure how complete an app's graph is. The org-wide report groups items by `target_symbol` across repositories. |
 
 ### Change history
 
 | Table | Why |
 |---|---|
-| `fact_change` | One row per fact a job **added, removed, or modified**, with `before` and `after`. It backs "what changed in this merge?" (`get_changes`), delta-driven testing, and debugging. Re-ingesting the same commit must produce **zero rows**, which makes it an automated idempotency test. `commit_sha` is set when exactly one commit in the range touched the change's file, which attributes it to one PR. |
+| `fact_change` | One row per fact a job **added, removed, or modified**, with `before` and `after`. It backs "what changed today?" (`get_changes`), delta-driven testing, and debugging. Re-ingesting the same commit must produce **zero rows**, which makes it an automated idempotency test. `commit_sha` is set when exactly one commit in the range touched the change's file, which attributes it to one PR. |
 | `job_commit` | Every commit (and its PR) that a job covered. It enables "introduced in PR #123" in citations, and it's the bridge Contextualized will use for PR → Project. |
 
 **What `fact_change` records.** The graph itself always reflects **every** change in full; this table is only the **history log**:
 - **Architecture nodes:** every change to flows, steps, interfaces, effects, entities, and tables, including LLM text that was regenerated.
-- **Code nodes:** one row per function **added, removed, or modified** (signature or body, detected by a body hash). Individual `INVOKES` edges aren't logged one by one; a function whose calls changed shows up as "modified," and any effect of that change on flows and steps is logged in full on the architecture side.
+- **Traces:** one row per flow whose trace changed, listing the functions added, removed, or modified (signature or body, detected by a body hash). Any effect of that change on flows and steps is logged in full on the architecture side.
 
 ### Audit, cost, and caching
 

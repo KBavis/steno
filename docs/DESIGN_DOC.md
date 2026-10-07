@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Draft v0.1 |
 | **Author** | Kellen Bavis |
-| **Last updated** | 2026-09-27 |
+| **Last updated** | 2026-10-06 |
 | **Detailed docs** | [Knowledge Graph](./knowledge-graph.md) · [Ingestion](./ingestion.md) · [Rules and Rule Packs](./rule-packs.md) · [Retrieval & MCP](./retrieval-and-mcp.md) · [Jev](./jev.md) · [Use Cases](./use-cases.md) |
 
 Status markers used throughout: **Decided** · **Proposed** (suggested, not yet confirmed) · **Open** (not yet decided).
@@ -21,7 +21,7 @@ Key design choices:
 - **Deterministic first.** Rules extract facts. **Jev** makes typed, calibrated decisions where rules can't. An **LLM only writes** summaries.
 - **Agnostic core, org-specific rules.** Connectors reach sources, and declarative rules, bundled in rule packs, are what any org can extend.
 - **Fast by design.** Precomputed cards, routing to the right layer, server-side fan-out, and batch tools minimize agent round trips.
-- **Idempotent and incremental.** A one-time initial ingestion, then updates driven by commit ranges on every merge to main.
+- **Idempotent and current.** A one-time initial ingestion, then a nightly run that re-analyzes every repository whose main branch moved and writes only what changed.
 
 ---
 
@@ -43,7 +43,7 @@ Agents are strong within one repository and blind beyond it. In a large enterpri
 1. Let an agent **understand one application in depth**: endpoints, outbound calls, transports, flows, entities, and code structure.
 2. **Roll up** to space and organization views: communication within and between spaces, and each space's purpose and glossary.
 3. **Answer quickly**, in ≤ 3 tool calls for typical questions (see [latency targets](./retrieval-and-mcp.md#6-latency-targets-proposed)).
-4. **Stay current** through incremental updates on merge to main.
+4. **Stay current** through nightly re-ingestion of every repository that changed that day.
 5. **Work at any org**, without hard-coding one company's structure or tools.
 6. **Show confidence and provenance** for every fact.
 
@@ -73,7 +73,7 @@ Agents are strong within one repository and blind beyond it. In a large enterpri
 | **Space** | A generic name for however an org divides itself. It can nest, or an org can have only one. Owns data stores and topics. |
 | **Application** | An independently deployable unit. One repository can contain several (e.g. our microservices repo). |
 
-These three layers are the levels of zoom. Beneath them, the graph holds two kinds of nodes in **one database**: **architecture nodes** (Application → Flow → Step, interfaces, tables, …: what the software does) and **code nodes** (Repository → Module → File → Function: how it's built), joined by `BUILT_FROM`, `ENTRY`, and `RUNS`. The test for which is which: if a behavior-preserving refactor would change the node, it's a code node. Search runs only on architecture nodes. See [Knowledge Graph §2](./knowledge-graph.md#2-one-graph-layers-architecture-nodes-and-code-nodes). Project is **not** a layer. Projects attach to facts as attribution, later, through Contextualized.
+These three layers are the levels of zoom. Beneath them, the graph holds two kinds of nodes in **one database**: **architecture nodes** (Application → Flow → Step, interfaces, tables, …: what the software does) and **code nodes** (Repository → Module → File: how it's built), joined by `BUILT_FROM`. Functions aren't nodes: each flow stores its **trace**, the ordered list of functions it runs, with file and lines (D60). The test for which is which: if a behavior-preserving refactor would change the node, it's a code node. Search runs only on architecture nodes. See [Knowledge Graph §2](./knowledge-graph.md#2-one-graph-layers-architecture-nodes-and-code-nodes). Project is **not** a layer. Projects attach to facts as attribution, later, through Contextualized.
 
 ### 5.2 Built bottom-up, searched top-down
 
@@ -118,7 +118,8 @@ Steno has two independent paths that share the same two databases.
 
 ```mermaid
 flowchart LR
-    GIT[Git host] -- "merge to main" --> ORC[Orchestrator]
+    SCH[Nightly schedule] --> ORC[Orchestrator]
+    ORC -- "main moved?" --> GIT[Git host]
     ORC -- "queues a run" --> WK[Ingestion workers]
     WK -- clone --> GIT
     WK -- "decisions / cards" --> AI[Jev + LLM]
@@ -142,7 +143,7 @@ The UI (later) talks to an Admin API for connectors and runs, and uses the same 
 |---|---|
 | **MCP server** | Tools for agents. Stateless, reads Neo4j and Postgres, calls Jev for routing. |
 | **Admin / Onboarding API** | Connectors, rule packs, space declarations, run status. Backs the UI. |
-| **Orchestrator** | Turns webhooks, schedules, and manual requests into ingestion runs. Tracks `last_ingested_sha`. |
+| **Orchestrator** | Each night, queues a run for every repository whose default branch moved past `last_ingested_sha`; also takes manual requests. |
 | **Ingestion workers** | Execute ingestion runs: clone, extract, assemble, derive flows, write facts, compute deltas, generate cards. They're separate from the MCP server so heavy work never slows queries, and several can run in parallel. In the POC, one process can play both orchestrator and worker. |
 | **Neo4j** | The knowledge graph, summary cards, and the vector index |
 | **Postgres** | Application state: connectors, rule packs, runs, deltas, Jev and LLM logs |
@@ -181,11 +182,12 @@ Full model: [knowledge-graph.md](./knowledge-graph.md).
   - **One `BELONGS_TO` edge**: where it lives.
   - **Interaction edges**: what it does.
 - **No `IS_A` edges.** Neo4j labels handle abstraction.
-- **Nodes:** `Organization`, `Space`, `Repository`, `Application`, `Module` (roles: `:Service`, `:Library`, `:Contract`, `:Migrations`, `:Test`, `:Build`), `File`, `Function`, `Interface` (`:HttpEndpoint`, `:GrpcMethod`, `:KafkaTopic`, `:Queue`, plugin-defined), `Schedule`, `Flow`, `DataStore` (category labels: `:Relational`, `:Document`, …; vendor as a property), `Schema`, `Table`, `Column`, `Entity`, `ExternalSystem`, `KafkaCluster`.
-- **Key edges:** `INVOKES {seq}` (code calls code), `CALLS` (code calls over the network), `PRODUCES`, `CONSUMES`, `READS_FROM`, `WRITES_TO`, `STARTS` (what kicks off a flow), `LEADS_TO` (one flow causes another; **derived**), `EXPOSES`, `BUILT_FROM`, `DEPENDS_ON` (build dependency), `MAPS_TO` (entity → table). Every edge is either extracted from code/config or derived from other edges; see [Relationship types](./knowledge-graph.md#4-relationship-types).
+- **Nodes:** `Organization`, `Space`, `Repository`, `Application`, `Module` (roles: `:Service`, `:Library`, `:Contract`, `:Migrations`, `:Test`, `:Build`), `File`, `Interface` (`:HttpEndpoint`, `:GrpcMethod`, `:KafkaTopic`, `:Queue`, plugin-defined), `Schedule`, `Flow`, `Step`, `DataStore` (category labels: `:Relational`, `:Document`, …; vendor as a property), `Schema`, `Table`, `Column`, `Entity`, `ExternalSystem`, `KafkaCluster`.
+- **Key edges:** `CALLS` (a network call), `PRODUCES`, `CONSUMES`, `READS_FROM`, `WRITES_TO`, `STARTS` (what kicks off a flow), `LEADS_TO` (one flow causes another; **derived**), `EXPOSES`, `BUILT_FROM`, `DEPENDS_ON` (build dependency), `MAPS_TO` (entity → table). Every edge is either extracted from code/config or derived from other edges; see [Relationship types](./knowledge-graph.md#4-relationship-types). Effects hang off the `Step` that performs them and roll up onto its Flow.
+- **No `Function` nodes (D60).** The call graph is built in memory during a run and isn't stored. Each flow keeps its **trace** (L3): every function it runs, in order, with file, lines, and effects. Traces locate code; the code itself is read from the git host.
 - **Flows:**
   - A flow is a **unit of work** started by a trigger (an interface or a schedule). There is no Job type and no Subflow type.
-  - Every first-party function reachable from an entry point is stored.
+  - Every first-party function reachable from an entry point appears in the flow's trace.
   - `significant` and `utility` are **derived tags**, not filters.
   - Steps are an **ordered tree** (by call-site `seq`).
   - A flow points to another flow across an interface (sync: waits; async: fire and forget) and **never contains it**.
@@ -209,15 +211,10 @@ flowchart LR
     TB -- BELONGS_TO --> DS[DataStore]
     DS -- BELONGS_TO --> SP[Space]
     T -- BELONGS_TO --> SP
-    subgraph code [code nodes]
-      FN1[Function] -- INVOKES --> FN2[Function]
-    end
-    FL -. ENTRY .-> FN1
-    S1 -. RUNS .-> FN1
-    S2 -. RUNS .-> FN2
+    FL -. trace .-> TR[["Trace (L3)<br/>every function, in order,<br/>file:lines @ commit"]]
 ```
 
-Solid edges connect **architecture nodes**: the Flow, its Steps in order, and what each step touches. Dashed edges lead into the **code nodes** (the boxed group), which are only visited for fine detail.
+Solid edges connect **architecture nodes**: the Flow, its Steps in order, and what each step touches. The dashed link is the flow's **trace**, stored with the flow rather than as nodes, which points into the code for fine detail.
 
 ---
 
@@ -237,7 +234,8 @@ flowchart LR
 - **Connectors** are a source system plus a scope (a Bitbucket workspace or project, a GitHub org), with credentials stored as references into a secret manager. Repositories are selected separately: an explicit include list in Phase 1, discovery later.
 - **Rules** ("when you see X, emit Y"), bundled in **rule packs** and run by the **rule engine**, are an ast-grep pattern plus what it means in Steno's vocabulary (nodes, edges, clues, entry points), config path rules, or code plugins. They match **file types and patterns, not connectors**. Orgs add their own. Full format: [Rules and Rule Packs](./rule-packs.md).
   - Published as versioned **rule packs** (~40–60 rules for a Spring/Kafka stack), auto-enabled from build dependencies.
-  - A **coverage report** after every ingestion ranks what no rule explained, which points straight at the internal frameworks worth a rule.
+  - A **coverage report** after every ingestion ranks what no rule explained, **aggregated across the organization** so one rule's reach is visible, with every item triaged as explained, ignored, or unexplained (D62). It points straight at the internal frameworks worth a rule.
+  - **Communication of any kind** is modeled the same way: a sender rule, a receiver rule, and the shared key that joins them (D61), so an org's own messaging framework, Kafka or not, is covered by two rules.
   - **Phase 1 is fully deterministic:** a person writes each rule, by hand or with the `rule-pack-author` skill, and every rule ships with test cases. Steno generating rules itself (templates, LLM drafting) is a future enhancement.
 - **Cloning** into a temporary workspace gives resolution the full source, avoids rate limits, and makes `git diff` exact. 
 - **Config files** become facts (topics, clusters, base URLs, datasources, schedules), plus a property map for placeholders.
@@ -252,11 +250,10 @@ flowchart LR
   4. Whole app (call graph → all flows at once).
   5. Write.
 - **Idempotency:** stable IDs from natural keys. Re-ingesting a scope replaces its facts. Shared nodes are removed only when nothing references them.
-- **Incremental updates:**
-  - Triggered by a merge to main.
-  - Diff by **commit range** from `last_ingested_sha`.
-  - Re-extract the changed files, then re-derive only the flows that reach changed functions.
-  - Map commits to PRs for attribution.
+- **Nightly updates (D59):**
+  - Each night, every repository whose default branch moved past `last_ingested_sha` is re-analyzed **in full** at the new head.
+  - The new facts and traces are compared with the graph by stable ID, and only what changed is written. A refactor that changes no architecture writes no graph nodes.
+  - The commits in `last_ingested_sha..head` are mapped to PRs for attribution.
 - **Steno owns re-ingestion.** Contextualized will add attribution and the "why."
 
 ### Relational database
@@ -396,7 +393,7 @@ MCP is the primary interface. A UI comes later, for the tasks where people need 
 | **Low-confidence review queue** | Humans resolve decisions Jev marked `ambiguous` |
 | **Flow tracer** | Visually follow a flow step by step, stitched across services, with its code |
 | **"Bloomberg terminal" view** | Navigate the org → space → app, and see each space's ins and outs by transport, live. It renders the same layer views `get_node` returns to agents, so the data is built once. |
-| **Change timeline** | What each merge changed (from `fact_change`), later tied to Projects |
+| **Change timeline** | What each nightly run changed (from `fact_change`), attributed to the PRs merged that day, later tied to Projects |
 
 ---
 
@@ -430,7 +427,7 @@ sequenceDiagram
 | **1: Application** | **Start with a dry run** (deterministic only, no LLM cards) that reports time per stage, graph size, and projected LLM cost. Contextualized first, then one app in our org. Ingest each fully: endpoints, outbound calls, transports, flows, entities, structure. Static only. MCP tools over it. | Against a hand-labeled gold set for that app: ≥ 90% of endpoints/topics/outbound calls found, flows match the gold set for the top entry points, and typical questions answered in ≤ 3 calls |
 | **2: Space** | Onboard one space (declared). Rollups within the space, ins/outs, purpose, glossary. | Communication within the space matches what the team says it is |
 | **3: Organization** | Several spaces, cross-space edges, space proposals, the org view | Cross-space edges confirmed by the space owners |
-| **Incremental** | Merge-to-main updates. Can start during Phase 1. | Graph after incremental updates = graph after a full re-ingest |
+| **Nightly updates** | Scheduled nightly re-ingestion of changed repositories (D59). Can start during Phase 1. | Re-ingesting an unchanged commit writes nothing; a nightly run's delta matches the day's merged PRs |
 | **Later** | Contextualized attribution · V2 schemas · runtime signals · UI · more languages | |
 
 ---
@@ -441,7 +438,7 @@ Correctness comes first, so it has to be measured:
 
 - **Gold set:** hand-label one application's endpoints, topics, outbound calls, data store access, and 10–20 key flows.
 - **Metrics:** precision and recall per fact type. Flow step accuracy. Jev calibration (predicted confidence vs. actual accuracy). Tool calls per answered question. Latency.
-- **Consistency check:** the graph after N incremental updates must equal the graph from a full re-ingest at the same SHA. This proves idempotency.
+- **Consistency check:** re-ingesting the same commit must produce zero `fact_change` rows, and ingesting from an empty graph must give the same graph as a nightly run at the same SHA. This proves idempotency.
 - **Agnostic check:** a public multi-language system (e.g. the OpenTelemetry Demo) as a second target, so the design doesn't overfit to our org.
 
 ---
@@ -463,7 +460,7 @@ Correctness comes first, so it has to be measured:
 | Static call graphs miss DI, reflection, and dynamic dispatch | Missing or wrong flow steps | Symbol solver with dependency JARs + DI rules + Jev I1. Mark `ambiguous`. Coverage report. Runtime signals later. |
 | Flows can't be found from business-language questions | Search misses the right flow | Business-language flow cards from a stronger model, four retrieval signals, Jev Q4 verification, measured against a question → flow set |
 | Rules overfit to our org | Not agnostic | Rules and plugins, a public second target, the core never depends on org rules |
-| Enterprise scale (millions of functions) | Slow ingestion and queries | Incremental updates, derived tags, materialized rollups, measure early |
+| Enterprise scale (millions of functions) | Slow ingestion and queries | No Function nodes (traces instead), nightly runs only for changed repositories, per-file extraction cache, materialized rollups, measure early |
 | Jev is new | Wrong decisions | Calibration on a gold set, logging, a replaceable `Decision` interface |
 | Data egress policy | Blocks Jev / LLM | Confirm early. Minimal state. |
 | Round trips still too many | Slow for agents | Measure calls per question. Add batch tools where the logs show chatty patterns. |
@@ -481,9 +478,9 @@ Correctness comes first, so it has to be measured:
 | D5 | Phase 1 is static only | Decided |
 | D6 | Neo4j for the graph, Postgres for app state | Decided (Neo4j leaning) |
 | D7 | Flows: triggers instead of Jobs, no Subflows, ordered steps, flows linked across interfaces and never nested | Decided |
-| D8 | One Neo4j database holding two kinds of nodes, both persisted: **architecture nodes** (where routing and search run) and **code nodes** (every first-party reachable function, `INVOKES`). Code nodes can be partitioned per space at very large scale. Significance is a tag. | Decided |
+| D8 | *(Revised by D60: no Function nodes.)* One Neo4j database holding two kinds of nodes, both persisted: **architecture nodes** (where routing and search run) and **code nodes** (every first-party reachable function, `INVOKES`). Code nodes can be partitioned per space at very large scale. Significance is a tag. | Decided |
 | D9 | One repository → many Applications, detected via Service/Library modules | Decided |
-| D10 | Incremental updates by commit range on merge to main. PRs are used for attribution. | Decided |
+| D10 | *(Revised by D59: nightly, full re-analysis.)* Incremental updates by commit range on merge to main. PRs are used for attribution. | Superseded |
 | D11 | Steno owns re-ingestion. Contextualized adds attribution and the why. | Decided |
 | D12 | Jev for all decisions rules can't make, at ingestion and query time | Decided |
 | D13 | Steno's own symbol resolution (JavaParser + dependency JARs), with cloning into temporary workspaces. SCIP not planned. | Decided |
@@ -491,7 +488,7 @@ Correctness comes first, so it has to be measured:
 | D15 | Data store schemas in V2. V1 records entity → table mappings and table-level access. | Decided |
 | D16 | Labels for abstraction, no `IS_A` edges | Decided |
 | D17 | No stored file contents: code tools read from the git host at the ingested commit | Decided |
-| D18 | `fact_change` keeps the before/after of every changed fact (architecture nodes in full; code nodes per function) | Decided |
+| D18 | `fact_change` keeps the before/after of every changed fact (architecture nodes in full; *revised by D60:* trace changes per flow instead of per Function node) | Decided |
 | D19 | MCP tool set ([list](./retrieval-and-mcp.md#5-mcp-tools-decided)) | Decided |
 | D20 | Edge names: `INVOKES` (code → code), `CALLS` (network), `STARTS` (what kicks off a flow), `LEADS_TO` (flow → flow, derived) | Decided |
 | D21 | Jev is the navigator at query time: Q0 intent, Q1/Q2 routing, **Q4 candidate verification**, Q3 ranking, using bounded digests | Decided |
@@ -503,7 +500,7 @@ Correctness comes first, so it has to be measured:
 | D28 | Glossary is human-declared in V1. Deriving it from docs and product knowledge comes with the Contextualized integration. | Decided |
 | D29 | Citations in every MCP result (V1) | Decided |
 | D30 | A connector is a source system + scope. Repositories: explicit include list in Phase 1, discovery later. | Decided |
-| D31 | Flow levels: L0 headline, L1 signature (deterministic) + narrative (LLM), L2 `Step` nodes (`FIRST_STEP` / `NEXT` / `SUBSTEP`, each `RUNS` a function), L3 code nodes. One rendered flow card per flow. | Decided |
+| D31 | *(L2/L3 revised by D60.)* Flow levels: L0 headline, L1 signature (deterministic) + narrative (LLM), L2 `Step` nodes (`FIRST_STEP` / `NEXT` / `SUBSTEP`, each `RUNS` a function), L3 code nodes. One rendered flow card per flow. | Decided |
 | D32 | Business context comes from Contextualized, attached to exactly what each Project changed (`Project -CHANGED-> element`) | Decided (later) |
 | D33 | Postgres holds what Steno is told and did; Neo4j holds what it knows. Declared spaces and glossary live in Postgres and are projected into Neo4j. | Decided |
 | D34 | One Steno deployment per organization | Decided |
@@ -529,9 +526,14 @@ Correctness comes first, so it has to be measured:
 | D55 | POC staging: finish Contextualized → a stub organization we control → spring-petclinic-microservices → our org's application | Decided |
 | D56 | Terminology: "resolver" means only the per-language **symbol resolver** (what a name, type, or value is). The per-clue-type code that combines clues into complete facts is an **assembler**, run in the **assemble** stage (after extract, before flows, which need completed facts). The former "Resolver" component is split: config placeholders and DI → symbol resolver; identity, stubs, internal vs. vendor hosts → graph builder. | Decided |
 | D57 | Stages: **parse** (read the code once: file list, symbol table, syntax trees; no rules) is split from **extract** (the **rule engine** runs rule packs and emits facts, facts with blanks, and clues). Full order: clone → deps → parse → extract → assemble → flows → write → cards. "Extractor" is no longer a component name: the units are **rules** in **rule packs**. | Decided |
-| D58 | Calls through base classes: the resolver carries the class a method was called on into inherited code, so `self.m()` finds the subclass's `m`. An inherited method that calls something its subclass overrides gets one `Function` node per subclass it runs as (`fn:{repo}:{symbol}@{subclass}`, `bound_to`), so flows follow the real implementation in order. A call to an abstract method whose implementation is chosen at runtime links to every implementation, marked `candidate`. See [Knowledge Graph §3](./knowledge-graph.md). | Decided |
+| D58 | *(Bound copies become trace entries under D60.)* Calls through base classes: the resolver carries the class a method was called on into inherited code, so `self.m()` finds the subclass's `m`. An inherited method that calls something its subclass overrides gets one `Function` node per subclass it runs as (`fn:{repo}:{symbol}@{subclass}`, `bound_to`), so flows follow the real implementation in order. A call to an abstract method whose implementation is chosen at runtime links to every implementation, marked `candidate`. See [Knowledge Graph §3](./knowledge-graph.md). | Decided |
 | D39 | A connector's scope is access only. Repository selection and placement are separate; at org scale, placement rules (connector + host grouping + optional name pattern → space) place repositories, an explicit assignment wins, and unmatched repositories go to an unassigned queue. Rules are built with discovery. | Decided |
 | D25 | Rule packs, auto-enabled from dependencies, plus a coverage report after every ingestion. Phase 1 rules are hand-written; templates and LLM-drafted rules are deferred. | Decided |
+| D59 | **Nightly ingestion.** Each night, every repository whose default branch moved past `last_ingested_sha` is re-analyzed in full at the new head. Facts and traces are compared by stable ID and only changes are written. Commits in the range are mapped to PRs for attribution. No merge-triggered or per-file incremental runs. Replaces D10. | Decided |
+| D60 | **No `Function` nodes or `INVOKES` edges are stored.** The call graph exists only in memory during a run. Each flow stores its **trace** (L3): every function it runs, in order (symbol, file, lines, depth, call-site flags, effects, tags). `Step` nodes (L2) carry their function's symbol and lines instead of `RUNS`, and effects hang off Steps. Repository, Module, and File stay as code nodes. Cards are written from the run's in-memory analysis, not from stored functions. Revises D8, D18, D31, D58. | Decided |
+| D61 | **Communication is modeled generally:** a sender (a call that puts something somewhere), a receiver (an entry point the framework runs), and a shared key (channel, queue, subject, URL, table) that joins them. An org's own messaging framework, whether or not it wraps Kafka, gets an org-defined `Interface` label plus one sender rule and one receiver rule; apps connect through matching keys. Extends D3. | Decided |
+| D63 | **Traces live in Neo4j, on the `Flow` node:** `trace` (the ordered entries as a JSON string, since Neo4j properties can't nest) plus `trace_files` and `trace_symbols` (string lists for lookups). Not Postgres (D33: Neo4j holds what Steno knows; the UI and MCP read one database), and not a node per entry. A trace lists **every first-party function the flow calls**, helpers included, once per call site; a `utility` function's own callees aren't expanded. | Decided |
+| D62 | **The coverage report is aggregated across the organization** (one item per target, ranked by total occurrences across repositories) and every item carries a triage state (unexplained / ignored / explained) that persists across runs, so the report converges instead of staying noisy. Refines D25. | Decided |
 
 ## 21. Open questions
 
@@ -543,6 +545,8 @@ Correctness comes first, so it has to be measured:
 - [ ] Neo4j edition and licensing (Community vs. Enterprise, Graph Data Science library)
 - [ ] Jev: calibration on our data, and our org's data policy
 
+
+- [ ] How a flow's trace continues into an **ingested library in another repository**, now that library functions aren't stored as nodes (e.g. a per-library summary of each public function's effects, read by dependents' runs)
 
 **Not yet discussed**
 - [ ] Deployment: where Steno runs

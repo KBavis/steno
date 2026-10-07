@@ -22,7 +22,9 @@ from steno.assemblers.assemble import assemble as run_assemblers
 from steno.config import get_settings
 from steno.connectors.git import clone as git_clone
 from steno.db.models import (
+    ChangeKind,
     Connector,
+    FactChange,
     IngestionJob,
     IngestionStage,
     JobMode,
@@ -36,6 +38,7 @@ from steno.extraction.report import to_json
 from steno.graph import ids
 from steno.graph.build import Context as GraphContext
 from steno.graph.build import build as build_graph
+from steno.graph.delta import changes
 from steno.graph.driver import database, get_driver
 from steno.graph.structure import detect as detect_structure
 from steno.graph.writer import write_plan
@@ -80,6 +83,7 @@ def clone(ctx: JobContext) -> dict[str, Any]:
         ctx.connector.credentials_ref,
     )
     ctx.workspace = workspace
+    ctx.job.from_sha = repo.last_ingested_sha
     ctx.job.to_sha = sha
     files = [p for p in workspace.rglob("*") if p.is_file() and ".git" not in p.parts]
     return {"sha": sha, "files": len(files), "bytes": sum(p.stat().st_size for p in files)}
@@ -137,8 +141,9 @@ def assemble(ctx: JobContext) -> dict[str, Any]:
 
 
 def flows(ctx: JobContext) -> dict[str, Any]:
-    """Build the call graph, find what each entry point reaches, and plan the graph:
-    architecture nodes, code nodes, the bridges between them, and flow rollups."""
+    """Build the call graph in memory, walk it from every entry point, and plan the graph:
+    architecture nodes, code nodes, each flow's trace and steps, and flow rollups. The call
+    graph itself isn't kept (D60)."""
     engine: Engine = ctx.state["engine"]
     x = engine.out
     structure = detect_structure(ctx.workspace, {ep.origin.file for ep in x.entry_points})  # type: ignore[arg-type]
@@ -156,20 +161,37 @@ def flows(ctx: JobContext) -> dict[str, Any]:
         ),
     )
     ctx.state["plan"] = plan
-    functions = [n for n in plan.nodes.values() if n.labels[0] == "Function"]
+    flow_nodes = [n for n in plan.nodes.values() if n.labels[0] == "Flow"]
     return {
         "modules": {m.path: sorted(m.roles) for m in structure.modules},
-        "flows": sum(1 for n in plan.nodes.values() if n.labels[0] == "Flow"),
-        "functions": len(functions),
-        "functions_reachable": sum(1 for n in functions if n.props.get("reachable")),
-        "invokes": plan.counts()["edges"].get("INVOKES", 0),
+        "flows": len(flow_nodes),
+        "steps": sum(1 for n in plan.nodes.values() if n.labels[0] == "Step"),
+        "trace_entries": sum(n.props.get("trace", "").count('"path"') for n in flow_nodes),
+        **plan.stats,
     }
 
 
 def write(ctx: JobContext) -> dict[str, Any]:
-    """MERGE the plan into Neo4j by stable ID and remove what this repository's earlier runs
-    left behind. A dry run writes the graph too: it only skips LLM text (D26)."""
-    return write_plan(get_driver(), database(), ctx.state["plan"], ctx.repository.name, ctx.job.id)
+    """Write only what changed since this repository's last run (D59): compare the plan with
+    the graph by stable ID, delete what's gone, write what's new or changed, and record each
+    change in `fact_change` (D18). A dry run writes the graph too: it only skips LLM text (D26).
+    """
+    plan = ctx.state["plan"]
+    delta = write_plan(get_driver(), database(), plan, ctx.repository.name)
+    rows = changes(delta)
+    ctx.session.add_all(
+        FactChange(
+            job_id=ctx.job.id,
+            fact_id=r["fact_id"],
+            fact_type=r["fact_type"],
+            change=ChangeKind(r["change"]),
+            before=r["before"],
+            after=r["after"],
+        )
+        for r in rows
+    )
+    ctx.repository.last_ingested_sha = ctx.job.to_sha
+    return {**plan.counts(), "delta": delta.counts(), "fact_changes": len(rows)}
 
 
 def cards(ctx: JobContext) -> dict[str, Any]:

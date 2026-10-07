@@ -23,7 +23,7 @@ Part of the [Design Doc](./DESIGN_DOC.md). Status markers: **Decided** · **Prop
 |---|---|---|
 | **What it is** | Kind / abstraction | **Labels**, e.g. `(:Interface:KafkaTopic)` |
 | **Where it lives** | Owner in the tree | **Exactly one** `BELONGS_TO` edge |
-| **What it interacts with** | Behavior | Interaction edges: `CALLS`, `PRODUCES`, `CONSUMES`, `READS_FROM`, `WRITES_TO`, `STARTS`, `INVOKES` |
+| **What it interacts with** | Behavior | Interaction edges: `CALLS`, `PRODUCES`, `CONSUMES`, `READS_FROM`, `WRITES_TO`, `STARTS` |
 
 - `MATCH (i:Interface)` returns every interface. `MATCH (t:KafkaTopic)` returns only topics. No type nodes are needed.
 - **Properties** hold attributes: vendor, HTTP method, cron expression.
@@ -45,13 +45,13 @@ Organization                              ← layer 1
     ├ DataStore → Schema → Table, KafkaTopic / Queue
     ├ Application                         ← layer 3
     │   ├ Interface, Entity, Schedule
-    │   └ Flow ──ENTRY──┐                      architecture nodes: what it DOES
-    │      └ Step ──RUNS─┤
-    │                    ▼
+    │   └ Flow  {trace: every function, in order}      architecture nodes: what it DOES
+    │      └ Step  {symbol, file, lines}
     └ Repository ─────── Module (:Service ◀──BUILT_FROM── Application)
-                          └ File
-                             └ Function ──INVOKES──▶ Function     code nodes: how it's BUILT
+                          └ File                               code nodes: how it's BUILT
 ```
+
+**Functions are not nodes (D60).** The call graph is built in memory during each run, used to derive flows, and discarded. What survives is each flow's **trace** (L3, [below](#trace-entries)): the ordered list of functions the flow runs, with file and lines at the ingested commit. Steps and trace entries point into the code by symbol and lines, and the code itself is read from the git host.
 
 **What decides which side a node is on.** Every node is extracted from code, so the split isn't about where a node came from. It's about **what the node describes**. The test:
 
@@ -61,38 +61,37 @@ Organization                              ← layer 1
 
 | Node | Changes on a refactor? | Side | Why |
 |---|---|---|---|
-| Repository, Module, File, Function | Yes | **Code** | Pure code organization |
+| Repository, Module, File | Yes | **Code** | Pure code organization |
 | Organization, Space | No | Architecture | How the org is divided |
 | Application | No | Architecture | The deployable unit; other teams depend on it |
 | Interface (endpoint, topic, gRPC method) | No | Architecture | A contract other apps call |
 | DataStore, Table | No | Architecture | Shared state other apps touch |
 | ExternalSystem | No | Architecture | Something outside the org that's depended on |
 | Flow | No | Architecture | Behavior: what happens when a trigger fires |
-| Step | No (only its `RUNS` edge may move to another function) | Architecture | Behavior: "write the audit record" is still a step even if the code doing it moves |
+| Step | No (only its `symbol` and lines may change) | Architecture | Behavior: "write the audit record" is still a step even if the code doing it moves |
 | Entity | Borderline (renaming the class renames it) | Architecture | Describes a data contract (payloads, tables) that others see |
 
-After a refactor, only the crossing edges (`RUNS`, `ENTRY`, `BUILT_FROM`) move. Flows and steps stay the same.
+After a refactor, only the code pointers (a step's `symbol` and lines, the flow's trace, `BUILT_FROM`) change. Flows and steps stay the same.
 
-**What the split controls**, and nothing more: (1) search, cards, and routing only cover architecture nodes; (2) change history logs architecture nodes in full and code nodes per function; (3) code nodes are the ones that can be partitioned into separate databases at very large scale.
+**What the split controls**, and nothing more: (1) search, cards, and routing only cover architecture nodes; (2) change history logs architecture nodes in full and trace changes per flow.
 
 | | Architecture nodes | Code nodes |
 |---|---|---|
-| **Kinds** | Organization, Space, Application, Interface, Flow, Step, Entity, DataStore, Table, ExternalSystem, … | Repository, Module, File, Function |
+| **Kinds** | Organization, Space, Application, Interface, Flow, Step, Entity, DataStore, Table, ExternalSystem, … | Repository, Module, File (functions live in flow traces) |
 | **Answers** | What exists, what it does, what it touches, flows step by step | Exactly what code runs at each step |
-| **Queried** | Always: routing, cards, and search run **only** on these | Only after narrowing to one app or flow, by following `ENTRY` / `RUNS` |
-| **Effects** | Lifted onto Steps and Flows (`Step -WRITES_TO-> Table`) | Where they're extracted (`Function -WRITES_TO-> Table`) |
-| **Change history** | Every change logged | Logged per function (added, removed, modified) |
+| **Queried** | Always: routing, cards, and search run **only** on these | Only after narrowing to one app or flow, through its steps and trace |
+| **Effects** | On the Step that performs them (`Step -WRITES_TO-> Table`), rolled up onto Flows | Listed on the trace entry of the function that performs them |
+| **Change history** | Every change logged | Trace changes logged per flow (functions added, removed, moved) |
 
-**Bridges** between the two kinds: `Application -BUILT_FROM-> Module`, `Flow -ENTRY-> Function`, and `Step -RUNS-> Function`.
+**Bridges** between the two kinds: `Application -BUILT_FROM-> Module`, plus the symbol and file pointers on steps and trace entries.
 
 **Why make the distinction at all?**
-- **Speed.** Search never wanders into millions of functions; it's enforced with labels and edge types, not separate databases.
-- **Meaningful change tracking.** Architecture nodes change rarely and meaningfully; code nodes change on every edit.
-- **A path to very large scale.** Code nodes can later be split into separate databases per space without touching the architecture nodes (see [Depth and storage](#depth-and-storage-decided-one-database-code-nodes-persisted)).
+- **Speed.** Search never wanders into code; it's enforced with labels and edge types.
+- **Meaningful change tracking.** Architecture nodes change rarely and meaningfully; code changes on every edit. Keeping functions out of the graph means a refactor that changes no behavior writes no graph nodes (see [Depth and storage](#depth-and-storage-decided-traces-not-function-nodes)).
 
 Other points:
 - **An Application is not a Module.** An Application is the deployable unit (architecture); a Module is the build unit (code). A `:Service` module builds an Application. Packages aren't nodes.
-- **Architecture nodes describe behavior down to each step without touching code nodes.** Agents drop into code nodes only for fine detail.
+- **Architecture nodes describe behavior down to each step without touching code.** Agents drop into a flow's trace, and from there into the source, only for fine detail.
 - Every node has exactly one `BELONGS_TO` owner. A Repository belongs to a Space, so code nodes are anchored in the same tree.
 
 ## 3. Node types
@@ -105,14 +104,13 @@ Other points:
 | `Application` | Space | `name`, `purpose` | An **independently deployable unit**. `(:Application)-[:BUILT_FROM]->(:Module)` |
 | `Module` (+ role label) | Repository | `path`, `build_tool` | The ecosystem's build unit: a Maven/Gradle module, a Python package with its own `pyproject.toml`, an npm workspace, a Go module. **Not a namespace package**: packages are paths. See [Module roles](#module-roles). |
 | `File` | Module | `path`, `language`, `content_hash` | |
-| `Function` | File | See [Function properties](#function-properties) | Every first-party function reachable from an entry point. See [Flows](#6-flows). |
 | `Interface` + `HttpEndpoint` | exposing Application | `method`, `path` | |
 | `Interface` + `GrpcMethod` | exposing Application | `service`, `method` | |
 | `Interface` + `KafkaTopic` / `Queue` | **a Space**, never an Application | `name` | See [Topic ownership](#topic-ownership) |
-| `Interface` + plugin-defined label | depends on the plugin | | e.g. the named messages of an internal communication framework |
+| `Interface` + org-defined label | a Space, like topics | `name` (the shared key) | An org's own communication channel, e.g. `:PxChannel`. See [Communication of any kind](#communication-of-any-kind-decided). |
 | `Schedule` | Application | `kind` (cron / fixed-rate / fixed-delay), `expression` | A trigger that isn't an interface |
-| `Flow` | Application | `name`, `entry_symbol`, `steps`, `primary_entity`, `operation`, `technical` (from Jev I9 / I10) | See [Flows](#6-flows) |
-| `Step` | Flow | `path` (e.g. `1.1.3`), `label` (LLM phrasing), `branch_raw`, `branch` (LLM phrasing), `effects` | One significant step of a flow (L2). `RUNS` the function it corresponds to. |
+| `Flow` | Application | `name`, `entry_symbol`, `entry_file`, `entry_lines`, `trace`, `trace_files`, `trace_symbols` (see [Trace entries](#trace-entries)), `primary_entity`, `operation`, `technical` (from Jev I9 / I10) | See [Flows](#6-flows) |
+| `Step` | Flow | `path` (e.g. `1.1.3`), `label` (LLM phrasing), `branch_raw`, `branch` (LLM phrasing), `effects` | One significant step of a flow (L2). Also carries its function's `symbol`, `file`, and `lines` at the ingested commit; its effects are edges from the Step. |
 | `DataStore` + `Relational` / `Document` / `KeyValue` / `Search` / `Graph` / `Vector` | Space | `vendor` (Postgres, Oracle, Mongo, Redis, …), `version`, `host`, `database` | The **category is a label**, because it changes the model (relational stores have schemas and tables; document and vector stores have collections). The **vendor is a property**, because it's an open-ended list that doesn't change the model. |
 | `Schema` | DataStore | `name` | V1: only when the code names one |
 | `Table` | Schema, or DataStore when there's no schema | `name`, `kind` (table / collection / index), `stub` | V1: stubs. V2: filled in. See [Data stores](#7-data-stores). |
@@ -123,41 +121,46 @@ Other points:
 
 Candidates for later: `Team`/owner, deployment `Environment`.
 
-### Function properties
+### Trace entries
 
-**One schema for every language.** Nodes are not typed by language: a Java method, a Python function, and a Go method are all `Function` nodes with the same properties. Language differences live in the **rule packs and symbol resolvers** (one rule pack and symbol resolver per language). Properties a language doesn't have are left empty, and anything truly language-specific goes in the `lang` bag.
+A flow's **trace** (L3) is the ordered list of every first-party function it runs: a depth-first walk of the call graph from the entry function, ordered by call site. It's stored **on the `Flow` node**, not as nodes of its own (D60, D63): `trace` holds the ordered entries as a JSON string (Neo4j properties can't nest), and `trace_files` and `trace_symbols` are string lists for lookups such as "which flows touch this file?". It's rebuilt on every run and replaced as a whole.
 
-**How much to store:** only what's needed to (1) **identify** a function uniquely, (2) **resolve and traverse** calls, and (3) **display and summarize** it. Everything else is read from the source when needed.
+**What's in it (D63):** every first-party function the flow calls, helpers included, once per call site. A function tagged `utility` (high fan-in, no interaction below it) appears at its call site, but its own callees aren't expanded: nothing architectural is below it, and this is what keeps traces bounded. The UI shows significant steps by default and expands to the full trace.
 
-| Property | Meaning | Java example | Python example | Why |
+**One schema for every language.** A Java method, a Python function, and a Go method are all trace entries with the same fields. Language differences live in the **rule packs and symbol resolvers**. Fields a language doesn't have are left empty, and anything truly language-specific goes in the `lang` bag.
+
+**How much to store:** only what's needed to (1) **identify** a function, (2) **show the flow in order**, and (3) **point into the code**. Resolving and traversing calls happens in memory during the run, so parameter types, annotations, and visibility aren't kept.
+
+| Field | Meaning | Java example | Python example | Why |
 |---|---|---|---|---|
-| `id` | `fn:{repo}:{qualified_name}`, plus `({param types})` where the language has overloading, plus `@{subclass}` for a bound copy (below) | `fn:microservices:com.x.PassServiceImpl#callToFunction(com.x.ClientRequest)` | `fn:contextualized:app.services.job.JobService.run_data_source_job` | Identity |
-| `language` | Source language | `java` | `python` | Picks the rules and symbol resolver |
-| `name` | Short name | `callToFunction` | `run_data_source_job` | Display, keyword search |
-| `container` | What it's defined in: class, module, struct, object, or none | `com.x.PassServiceImpl` (class) | `app.services.job.JobService` (class) | Display, grouping |
-| `kind` | `function` / `method` / `static_method` / `constructor` / `lambda` | `method` | `method` | Resolution, display |
-| `params` | `[{name, type?}]`; `type` is empty when the language or code doesn't declare one | `[{name: "req", type: "com.x.ClientRequest"}]` | `[{name: "project_id", type: "UUID"}, …]` | Overloads; which argument holds a topic or URL |
-| `returns` | Declared return type, if any | `com.x.ClientResponse` | *(empty)* | Chained calls, payloads |
-| `annotations` | Annotations, decorators, or attributes, whatever the language calls them | `["@Transactional"]` | `["@router.post(\"/projects/{project_id}…\")"]` | Rules, entry points, display |
-| `visibility` | `public` / `private` / `protected` / `internal`; by convention where the language has none (Python `_name` → private) | `public` | `public` | Entry-point rules |
-| `bound_to` | On a bound copy: the subclass the inherited method runs as | `com.x.DiffTask` | `app.tasks.diff.DiffTaskRunner` | Flows follow the real implementation |
-| `is_async` | Runs asynchronously | `false` | `true` | Flow ordering (async steps) |
-| `doc` | First sentence of its doc comment (Javadoc, docstring, JSDoc, GoDoc) | | "Creates Job, builds the applicable Tasks, and runs them." | Cards |
-| `start_line`, `end_line` | Line range at the ingested commit | `42`, `87` | `111`, `146` | Slicing source for `view_flow_code` |
-| `significant`, `utility` | Derived tags | | | Presentation (see [Flows](#6-flows)) |
-| `lang` | Language-specific extras, only when a rule needs them | `{throws: ["IOException"]}` | `{is_generator: false}` | Kept out of the shared schema |
+| `path` | Position in the walk (`1.2.1`) | `1.2` | `1.3.1` | Order and nesting |
+| `symbol` | Qualified name, plus `({param types})` where the language has overloading | `com.x.PassServiceImpl#callToFunction(com.x.ClientRequest)` | `app.services.job.JobService.run_data_source_job` | Identity, keyword lookup |
+| `bound_to` | The subclass an inherited method runs as (below) | `com.x.DiffTask` | `app.tasks.diff.DiffTaskRunner` | Flows follow the real implementation |
+| `name`, `container` | Short name, and the class or module it's defined in | `callToFunction`, `com.x.PassServiceImpl` | `run_data_source_job`, `app.services.job.JobService` | Display |
+| `file`, `start_line`, `end_line` | Where it is, at the ingested commit | `services/users/src/.../PassServiceImpl.java`, `42`, `87` | `apps/backend/app/services/job.py`, `111`, `146` | `view_flow_code`, citations, "which flows touch this file?" |
+| `call_line` | The line of the call site in the caller | `61` | `128` | Citations |
+| `conditional`, `in_loop`, `async`, `ambiguous`, `candidate` | How it's called (from the call site) | | | Branches, async steps, DI uncertainty |
+| `effects` | What this function does directly: `[{edge: WRITES_TO, target: table:…}]` | | | The step it belongs to, rollups |
+| `significant`, `utility` | Derived tags (see [Significance](#significance-is-a-derived-tag-decided)) | | | Presentation |
+| `step` | On a significant entry: which occurrence of that function's Step this is (its Step node is `step:{flow}:{symbol}[@bound_to][#n]`, keyed by function, not position, so inserting a step doesn't renumber the others) | `1` | `1` | Links L3 to L2 |
+| `repeat`, `recursive` | Called again after it was already expanded in this flow (listed, not expanded again); or called while already on the current path | | | Keeps traces bounded |
+| `body_hash` | A hash of the function's syntax tree (ignores moves and formatting) | | | Change history: which functions changed |
+| `doc` | First sentence of its doc comment | | "Creates Job, builds the applicable Tasks, and runs them." | Cards |
+| `lang` | Language-specific extras, only when needed | `{throws: ["IOException"]}` | `{is_generator: false}` | Kept out of the shared schema |
 
-**Not stored:** function bodies (the source is fetched from the git host), local variables, and individual statements. The call sites inside a body are stored only as `INVOKES` / `CALLS` / `PRODUCES` / … edges with their `seq` order.
+**Not stored:** function bodies (the source is fetched from the git host at the ingested commit), local variables, statements, and functions no entry point reaches. A function with effects that no flow reaches becomes a [coverage item](./ingestion.md#coverage-report-decided) instead.
 
-**Inherited methods that call subclass code: bound copies (Decided, D58).** A base class often runs shared steps and calls a method each subclass provides (`Task.run` calls `self.execute()`). Reached through `DiffTaskRunner(...).run()`, that code runs `DiffTaskRunner.execute`; reached through `EmbedTaskRunner(...).run()`, it runs Embed's. So the inherited method gets **one `Function` node per subclass it runs as**, when that changes what it calls: `fn:contextualized:app.tasks.base.Task.run@app.tasks.diff.DiffTaskRunner`, with `symbol` still `app.tasks.base.Task.run` and `bound_to` naming the subclass. Each copy's `INVOKES` point at that subclass's methods, so a flow lists Diff's work, then Embed's, in order. Copies are made only when the subclass changes something; an inherited method that calls nothing overridden stays one node. When the code doesn't say which subclass it is (a factory returning the base type), the call goes to every implementation, marked `candidate`.
+**A function shared by several flows** appears in each of their traces. "Which flows run `AuthService#identifyClient`?" or "which flows touch `ClientValidator.java`?" is a lookup across traces by `symbol` or `file`.
 
-**The same rule applies to every node type.** `Module` is whatever the ecosystem's build unit is (a Maven/Gradle module, a Python package with its own `pyproject.toml`, an npm workspace, a Go module), and `Entity` covers JPA classes, SQLAlchemy models, Pydantic models, protobuf messages, and so on.
+**Inherited methods that call subclass code: bound entries (Decided, D58, D60).** A base class often runs shared steps and calls a method each subclass provides (`Task.run` calls `self.execute()`). Reached through `DiffTaskRunner(...).run()`, that code runs `DiffTaskRunner.execute`; reached through `EmbedTaskRunner(...).run()`, it runs Embed's. So the trace entry for the inherited method carries `bound_to` naming the subclass, and the entries beneath it are that subclass's methods, so a flow lists Diff's work, then Embed's, in order. When the code doesn't say which subclass it is (a factory returning the base type), every implementation is listed beneath the call, marked `candidate`.
+
+**The same rule (one schema for every language) applies to every node type.** `Module` is whatever the ecosystem's build unit is (a Maven/Gradle module, a Python package with its own `pyproject.toml`, an npm workspace, a Go module), and `Entity` covers JPA classes, SQLAlchemy models, Pydantic models, protobuf messages, and so on.
 
 ### Properties every fact carries
 
 | Property | Purpose |
 |---|---|
-| `id` | **Stable ID derived from natural keys**, e.g. `endpoint:{app}:{METHOD}:{path}`, `topic:{cluster}:{name}`, `fn:{repo}:{symbol}`, `table:{datastore}:{schema}:{name}` |
+| `id` | **Stable ID derived from natural keys**, e.g. `endpoint:{app}:{METHOD}:{path}`, `topic:{cluster}:{name}`, `flow:{app}:{trigger}`, `table:{datastore}:{schema}:{name}` |
 | `source` | `{repo, symbol, commit}`: where the fact came from |
 | `extracted_by` | Rule ID and version, or Jev decision ID |
 | `confidence` | 0–1. Deterministic rules produce 1.0. Jev-produced facts carry Jev's confidence. |
@@ -168,7 +171,7 @@ Which Project introduced or changed a fact isn't a property. It's recorded later
 
 ### Card properties (searchable nodes only)
 
-Cards exist **only** on node types that search covers: **Flow, Application, Space, Organization, Interface, Entity, Table**. Steps, functions, modules, files, and edges have no card. These nodes also carry the `:Searchable` label, so one vector index and one full-text index cover them all.
+Cards exist **only** on node types that search covers: **Flow, Application, Space, Organization, Interface, Entity, Table**. Steps, traces, modules, files, and edges have no card. These nodes also carry the `:Searchable` label, so one vector index and one full-text index cover them all.
 
 | Property | Purpose |
 |---|---|
@@ -199,7 +202,7 @@ Example, our microservices repository:
  └─ (:Module:Library plugins/logging) ◀─DEPENDS_ON─ users-svc, auth-svc
 ```
 
-- Library code is stored **once**. Flows in `users-svc` traverse into `plugins/*` functions, so "which services use plugin X?" is one query.
+- Library code in the same repository is analyzed with the services. Flows in `users-svc` run into `plugins/*` functions, which appear in their traces, so "which services use plugin X?" is answered by `DEPENDS_ON` (built in) or a trace lookup (actually run). How traces continue into a library in **another** repository is Open.
 - If a library brings in an endpoint that's auto-configured into every service (e.g. a shared health check), each Application that includes it `EXPOSES` it.
 - A single-service repo is the simplest case of the same model.
 
@@ -213,6 +216,18 @@ A topic is shared infrastructure, so no Application owns it. It `BELONGS_TO` exa
 
 `(:KafkaTopic)-[:HOSTED_ON]->(:KafkaCluster)` is **not** an ownership edge.
 
+### Communication of any kind (Decided)
+
+Kafka, HTTP, and gRPC are special cases of one pattern (D61). Any communication between applications has three parts:
+
+| Part | What it is | In the graph |
+|---|---|---|
+| **Sender** | A call that puts something somewhere: `kafkaTemplate.send(topic, …)`, `messenger.post(channel, …)`, an HTTP client call | `Step -PRODUCES-> Interface` (or `CALLS` when the sender waits for a reply) |
+| **Receiver** | Code the framework runs when something arrives: `@KafkaListener`, `@OnMessage("x")`, a handler registered in config | An entry point: `Interface -STARTS-> Flow` |
+| **Shared key** | What joins the two: a topic, channel, queue, subject, URL, or table | The `Interface` node's stable ID |
+
+An organization's own messaging framework, whether or not it wraps Kafka, gets an **org-defined `Interface` label** (`:PxChannel`) and **two rules** in the org pack, one for the sender and one for the receiver. Applications connect automatically when their keys match, exactly as with Kafka topics. Communication through shared state (one app writes a table, another polls it) needs nothing extra: both point at the same `Table` node.
+
 ---
 
 ## 4. Relationship types
@@ -225,34 +240,30 @@ Every relationship is either **extracted** (read directly from code or config by
 | `BUILT_FROM` | Application → Module | | Which module builds the deployable | Extracted (build files) |
 | `DEPENDS_ON` | Module → Module | `scope` | A **build dependency**, from `pom.xml` / `build.gradle`: `services/users` depends on `plugins/logging` | Extracted (build files) |
 | `EXPOSES` | Application → Interface | | The app serves this endpoint or method | Extracted |
-| `INVOKES` | Function → Function | `seq`, `conditional`, `in_loop`, `async`, `ambiguous`, `candidate` | **A call in code** (in-process). `seq` = position of the call site in the caller. `candidate`: a call to an abstract method, linked to each implementation because which one runs is decided at runtime. | Extracted |
-| `CALLS` | Function → Interface / ExternalSystem | `transport`, `confidence` | **A network call** to an endpoint or gRPC method | Extracted |
-| `PRODUCES` / `CONSUMES` | Function → KafkaTopic / Queue | `consumer_group` | Async messaging | Extracted |
-| `READS_FROM` / `WRITES_TO` | Function → Table / DataStore | `operation` | Data access. Table-level when known. | Extracted |
+| `CALLS` | Step → Interface / ExternalSystem | `transport`, `confidence` | **A network call** to an endpoint or gRPC method | Extracted |
+| `PRODUCES` / `CONSUMES` | Step → KafkaTopic / Queue / org-defined Interface | `consumer_group` | Async messaging. A consumer that's a flow's trigger is `STARTS`; `CONSUMES` is for a step that reads messages itself (polling). | Extracted |
+| `READS_FROM` / `WRITES_TO` | Step → Table / DataStore | `operation` | Data access. Table-level when known. | Extracted |
 | `STARTS` | Interface / Schedule → Flow | | **What starts a flow**: this endpoint, topic, or schedule kicks it off | Extracted |
 | `FIRST_STEP` | Flow → Step | | **L2**: the flow's first step | Derived |
 | `NEXT` | Step → Step | | **L2**: the step that follows, at the same nesting level | Derived |
 | `SUBSTEP` | Step → Step | | **L2**: the first step nested inside this one (step 1 → step 1.1) | Derived |
-| `RUNS` | Step → Function | `line` (call site) | **Bridge** to code nodes: the function this step runs | Derived |
-| `WRITES_TO` / `READS_FROM` / `CALLS` / `PRODUCES` (on a Step) | Step → Table / ExternalSystem / Interface / Topic | | The effects that happen at this step, lifted from its function | Derived |
-| `WRITES_TO` / `READS_FROM` / `CALLS` / `PRODUCES` (on a Flow) | Flow → Table / ExternalSystem / Interface / Topic | `conditional` | **L1 rollups**: everything the flow's functions touch, lifted onto the flow | Derived |
-| `ENTRY` | Flow → Function | | The flow's entry function | Extracted |
-| `LEADS_TO` | Flow → Flow | `mode: sync\|async`, `via` | **This flow leads to that one.** Exists exactly when a function in Flow A `CALLS` or `PRODUCES` to an interface that `STARTS` Flow B. | **Derived** |
-| `USES_ENTITY` | Interface / Function → Entity | `role: request\|response\|message` | Payload contracts | Extracted |
+| `WRITES_TO` / `READS_FROM` / `CALLS` / `PRODUCES` (on a Flow) | Flow → Table / ExternalSystem / Interface / Topic | `conditional` | **L1 rollups**: everything the flow's steps touch, lifted onto the flow | Derived |
+| `LEADS_TO` | Flow → Flow | `mode: sync\|async`, `via` | **This flow leads to that one.** Exists exactly when a step in Flow A `CALLS` or `PRODUCES` to an interface that `STARTS` Flow B. | **Derived** |
+| `USES_ENTITY` | Interface / Flow → Entity | `role: request\|response\|message` | Payload contracts | Extracted |
 | `MAPS_TO` | Entity → Table | | **ORM mapping**: the `User` class maps to the `users` table (`@Table(name="users")`) | Extracted |
 | `HOSTED_ON` | KafkaTopic → KafkaCluster | | Infrastructure placement | Extracted (config) |
 
-**How the verbs differ:** `INVOKES` is code calling code. `CALLS` is code calling over the network. `STARTS` is what kicks off a flow. `LEADS_TO` is one flow causing another.
+Extracted effects are found on a function during the run and attached to the **Step** for that function (every function with an effect is a significant step, so every effect has one). They're also listed on its trace entry.
+
+**How the verbs differ:** `CALLS` is code calling over the network. `STARTS` is what kicks off a flow. `LEADS_TO` is one flow causing another. Code calling code (`INVOKES`) exists only in the run's in-memory call graph, where rules can still add to it (an async background task, D45); it reaches the graph as the order of a flow's steps and trace.
 
 ```
-Function A1 ──INVOKES──▶ Function A2 ──CALLS──▶ POST /verify ──STARTS──▶ Flow B
-     ▲                                                                     ▲
-   ENTRY                                                                   │
-     │                                                                     │
-  Flow A ──────────────────────────── LEADS_TO (derived) ──────────────────┘
+Flow A ──FIRST_STEP──▶ Step 1 ──NEXT──▶ Step 2 ──CALLS──▶ POST /verify ──STARTS──▶ Flow B
+  │                                                                                  ▲
+  └──────────────────────────────── LEADS_TO (derived) ──────────────────────────────┘
 ```
 
-**App-level and space-level edges are rollups.** For example, `(:Application)-[:CALLS]->(:Application)` is computed from `Function-CALLS->Interface<-EXPOSES-Application`, and can be materialized for speed.
+**App-level and space-level edges are rollups.** For example, `(:Application)-[:CALLS]->(:Application)` is computed from `Flow-CALLS->Interface<-EXPOSES-Application` (the flow belongs to the calling app), and can be materialized for speed.
 
 ### Internal vs. external is derived
 
@@ -275,20 +286,15 @@ When a call's target isn't ingested yet, it points at a **stub** node keyed by i
 
 ```cypher
 // Who consumes this topic? (1 hop)
-MATCH (t:KafkaTopic {name: 'user.created'})<-[:CONSUMES]-(f:Function)-[:BELONGS_TO*]->(a:Application)
+MATCH (t:KafkaTopic {name: 'user.created'})-[:STARTS]->(:Flow)-[:BELONGS_TO]->(a:Application)
 RETURN DISTINCT a.name
 
 // Blast radius: every flow downstream of an endpoint (variable-length path)
 MATCH (e:HttpEndpoint {id: $id})-[:STARTS]->(f:Flow)-[:LEADS_TO*0..10]->(down:Flow)
 RETURN down
 
-// Which flows need re-deriving after a change? (reverse reachability)
-MATCH (changed:Function) WHERE changed.id IN $changedIds
-MATCH (flow:Flow)-[:ENTRY]->(:Function)-[:INVOKES*0..]->(changed)
-RETURN DISTINCT flow
-
 // Communication across spaces (rollup)
-MATCH (s1:Space)<-[:BELONGS_TO*]-(:Function)-[:CALLS]->(:Interface)<-[:EXPOSES]-(:Application)-[:BELONGS_TO*]->(s2:Space)
+MATCH (s1:Space)<-[:BELONGS_TO*]-(:Flow)-[:CALLS]->(:Interface)<-[:EXPOSES]-(:Application)-[:BELONGS_TO*]->(s2:Space)
 WHERE s1 <> s2
 RETURN s1.name, s2.name, count(*) AS calls
 ```
@@ -299,14 +305,14 @@ RETURN s1.name, s2.name, count(*) AS calls
 
 ### Definitions (Decided)
 
-- **Function**: a unit of code.
+- **Function**: a unit of code. It exists in the run's call graph and in flow traces, not as a node.
 - **Flow**: a **unit of work**. The execution that starts at an **entry function** invoked by a **trigger**, plus everything that function reaches.
 - **There is no `Job` type.** Flows differ only by what triggers them:
   - `(:Interface)-[:STARTS]->(:Flow)`: HTTP, gRPC, a consumed topic
   - `(:Schedule)-[:STARTS]->(:Flow)`: cron, Spring `@Scheduled`, Quartz, a Kubernetes CronJob
 
   Sync vs. async isn't the dividing line (a Kafka consumer is async). Each org's scheduling mechanism is a rule (or plugin) that emits the same `Schedule` node.
-- **There is no `Subflow` type.** Shared logic ("identify client") is a `Function` that several flows reach.
+- **There is no `Subflow` type.** Shared logic ("identify client") is a function that appears in several flows' traces.
 
 ### Flow levels and the flow card (Decided)
 
@@ -317,8 +323,8 @@ A flow is described at four levels, from a one-line headline down to every funct
 | **L0 Headline** | "What is this, in one line?" | `Flow` properties: `trigger`, `purpose` | Trigger: deterministic. Purpose: **LLM** (declared docs are an input, not a substitute) |
 | **L1 Signature** | "What goes in, what comes out, what does it touch?" | `Flow` properties **and rollup edges** (`Flow -WRITES_TO-> Table`, `Flow -CALLS-> ExternalSystem`, …) | **Deterministic** (facts) |
 | **L1 Narrative** | "What does it do, step by step, in plain words, and when does it branch?" | `Flow.narrative` | **LLM** |
-| **L2 Steps** | "What happens, in what order, and where exactly?" | `Step` nodes: `Flow -FIRST_STEP-> Step -NEXT-> Step`, nested with `SUBSTEP`; each `RUNS` a function | **Deterministic** structure (the significance rule); step labels phrased by the LLM |
-| **L3 Trace** | "Every function it touches" | **Code nodes**: `Function -INVOKES-> Function`, walked from `ENTRY` | **Deterministic** |
+| **L2 Steps** | "What happens, in what order, and where exactly?" | `Step` nodes: `Flow -FIRST_STEP-> Step -NEXT-> Step`, nested with `SUBSTEP`; each carries its function's symbol and lines, and its effects | **Deterministic** structure (the significance rule); step labels phrased by the LLM |
+| **L3 Trace** | "Every function it touches" | The flow's **trace**: every function in order, with file and lines ([Trace entries](#trace-entries)) | **Deterministic** |
 
 **L1 has two halves.** The *signature* is facts: the trigger, inputs, outputs, effects, external calls. The *narrative* (purpose, steps in plain words, branch conditions in plain words) needs an LLM. A branch's raw condition, e.g. `ds.type == DataSourceType.REPOSITORY and ds.scope_by_issues`, is extracted deterministically; "if the repository is issue-scoped" is the LLM's phrasing of it.
 
@@ -336,7 +342,7 @@ A flow is described at four levels, from a one-line headline down to every funct
 
 `POST /jobs/projects/{project_id}/data-sources/{data_source_id}` in [Contextualized](https://github.com/KBavis/contextualized) (commit `ac93a3b`, illustrative):
 
-The Flow node holds L0 and L1 as properties. Its `Step` nodes (L2) chain in order, and each `RUNS` a function among the code nodes (L3):
+The Flow node holds L0 and L1 as properties. Its `Step` nodes (L2) chain in order, and its trace (L3) lists every function underneath them:
 
 ```
 (HttpEndpoint) ──STARTS──▶ (Flow)                     L0 + L1 as properties; rollups: WRITES_TO jobs, CALLS Jira, …
@@ -344,14 +350,17 @@ The Flow node holds L0 and L1 as properties. Its `Step` nodes (L2) chain in orde
                           FIRST_STEP
                               ▼
                    (Step 1: create job) ──NEXT──▶ (Step 2: sync linked PRs) ──NEXT──▶ (Step 3: re-embed files) ──NEXT──▶ …
-                              │                          │
-                            RUNS                      SUBSTEP
-                              ▼                          ▼
-      CODE NODES   (Function JobService.create_job)   (Step 2.1: fetch Jira issues) ──NEXT──▶ (Step 2.2: resolve PRs) ──▶ …
-                              │                          │
-                           INVOKES                     RUNS ──▶ (Function JiraDataProvider.get_issues)
-                              ▼
-                             …
+                   symbol: JobService.create_job          │
+                                                       SUBSTEP
+                                                          ▼
+                                    (Step 2.1: fetch Jira issues) ──NEXT──▶ (Step 2.2: resolve PRs) ──▶ …
+                                    symbol: JiraDataProvider.get_issues
+
+   trace (L3):  1 run_data_source_job  job.py:43-61
+                1.1 JobService.create_job  services/job.py:88-109        WRITES_TO jobs
+                1.2 JobService.run_data_source_job  services/job.py:111-146
+                1.2.1 [conditional] JiraDataProvider.get_issues  …       CALLS Jira
+                …
 ```
 
 What's stored **on the `Flow` node**:
@@ -382,7 +391,7 @@ What's stored **on the `Flow` node**:
 
 Its **rollup edges** (L1): `WRITES_TO` jobs, diff_tasks, embed_tasks, record_locks, pull_requests, project_file_diffs, docstore_chunks, and the Chroma collection. `READS_FROM` data_sources, projects. `CALLS` Jira, Bitbucket, the embedding model, and ⟨GitHub | Confluence⟩ (conditional).
 
-Its **`Step` nodes** (L2) chain with `NEXT` and nest with `SUBSTEP`. Each has its path (`1.1.3`), a label, its branch, its effects, and a citation, and `RUNS` its function (file:line at the commit).
+Its **`Step` nodes** (L2) chain with `NEXT` and nest with `SUBSTEP`. Each has its path (`1.1.3`), a label, its branch, its effects, and a citation: its function's symbol, file, and lines at the commit.
 
 **The rendered flow card** (one text, used for embeddings, for Jev digests, and for agents):
 
@@ -400,13 +409,14 @@ SOURCE   run_data_source_job  apps/backend/app/api/routers/job.py:43 @ ac93a3b
 
 - **Calls to another app** show the endpoint plus the **downstream flow's L0 purpose**, e.g. `auth-svc POST /verify → "verify caller token"`, and nothing more. Deeper detail comes from following `LEADS_TO`.
 - The card is **bounded by construction**, however large the flow is. Detail lives in L2 and L3, one call away.
+- **Cards are written during the run, from the in-memory analysis.** The worker still has the clone, the full call graph, and every function's source when the cards stage runs, so nothing about cards depends on storing functions.
 
 #### How the purpose and narrative are generated
 
 - **At initial ingestion, every flow gets an LLM purpose and narrative** (Decided). Without them, semantic search has nothing meaningful to match, and declared summaries are often missing or vague.
 - **LLM input:** the L1 signature, the L2 skeleton with raw branch conditions, declared docs (route summaries, docstrings, Javadoc, OpenAPI), the code of the significant steps (bounded), and the downstream flows' L0 purposes.
 - **Keeping cost down at scale:** a small model by default, the Batch API, and **prompt caching**: flows in the same application share a cached prefix (the app's card, its entities, its conventions), so each flow pays only for its own facts. The dry run measures the real cost before any spend.
-- **On re-ingestion:** when a change touches functions in a flow's trace, the deterministic parts are rebuilt for free. **Jev I5** is given the old purpose and narrative plus the fact diff and the changed step names, and decides whether they're still accurate. The LLM regenerates them only if not.
+- **On re-ingestion:** when a change touches functions in a flow's trace, the deterministic parts are rebuilt for free. A trace that changed only by renames or moved lines, with the same effects and calls, keeps its card. **Jev I5** is given the old purpose and narrative plus the fact diff and the changed step names, and decides whether they're still accurate. The LLM regenerates them only if not.
 
 #### Business context from Contextualized (later)
 
@@ -416,26 +426,27 @@ SOURCE   run_data_source_job  apps/backend/app/api/routers/job.py:43 @ ac93a3b
 (:Project {id, name, summary})-[:CHANGED {kind: added|modified|removed, pr, commit}]->(element)
 ```
 
-`element` is whatever the Project's delta touched: a `Flow` (when it created the whole flow), a `Function`, a rollup edge's target (a new `WRITES_TO audit_log`), an `Interface`, or a `Table`.
+`element` is whatever the Project's delta touched: a `Flow` (when it created the whole flow, or changed only its internals: functions in its trace), a `Step`, a rollup edge's target (a new `WRITES_TO audit_log`), an `Interface`, or a `Table`.
 
 - **A new flow created by a Project:** that Project's context explains the whole flow.
-- **An existing flow changed by a Project:** the context is scoped to the change, e.g. "Project B added the audit write at step 1.2." The card's CONTEXT line says exactly that.
+- **An existing flow changed by a Project:** the context is scoped to the change, e.g. "Project B added the audit write at step 1.2." The card's CONTEXT line says exactly that. A PR that only refactored internals is found by matching its changed files and lines against flow traces: "PR #812 changed the internals of *Create Client*."
 - **Flows no Project has touched** keep their code-derived purpose (`purpose_source: llm`).
 
-### Depth and storage (Decided: one database, code nodes persisted)
+### Depth and storage (Decided: traces, not Function nodes)
 
-Architecture nodes and code nodes live **in one Neo4j database**, and both are persisted:
+The graph stores **architecture nodes plus a trace per flow**. Functions are not nodes (D60):
 
 | Layer | Contains | Queried when |
 |---|---|---|
 | **Architecture nodes** | Orgs, spaces, apps, interfaces, flows (L0, L1), **steps (L2)**, entities, tables, external systems | Always: routing and search run **only** here |
-| **Code nodes** | **Every first-party function reachable from an entry point**, with `INVOKES` edges (L3) | Only after narrowing to one app or flow: full traces, stack-trace lookups, incremental updates |
+| **Code nodes** | Repository, Module, File | Orientation: what a repository contains and which modules build which applications |
+| **Traces (L3)** | Every first-party function each flow runs, in order, with file and lines | Only after narrowing to one flow: full detail, code navigation, "which flows touch this file?" |
 
-- **Why persist code nodes:** rebuilding a call graph means re-parsing and re-resolving the whole application. With it persisted, an incremental update re-parses only the changed files, patches their `INVOKES` edges, and finds the affected flows by traversal.
-- **Space:** roughly 1–2 KB per function including its edges and properties, so ~40M functions (2,000 apps × 20k functions) is on the order of **40–80 GB**, which a single Neo4j server handles.
-- **At Google scale** (billions of functions), code nodes are **partitioned into separate databases per space** (Neo4j composite databases). Architecture nodes refer to code nodes **by ID**, since relationships can't cross databases. Architecture nodes stay in one database.
-- **Excluded:** third-party library code, generated code, tests, and dead code.
-- **Nothing is dropped for being "insignificant."** Pure business logic (a tax calculation) does no I/O, and an I/O-based filter would lose it.
+- **Why not persist Function nodes:** they'd be most of the graph, they change on nearly every merge even when behavior doesn't, and agents get code detail from the trace plus the source read from the git host. With traces, a refactor that changes no architecture writes no graph nodes.
+- **What it costs:** every run rebuilds the repository's call graph in memory. Runs are nightly and only for repositories that changed (D59), so this is compute, not a design constraint.
+- **Size:** a trace is tens to a few hundred entries. A shared function appears once per flow that runs it, which is accepted for simpler, per-flow replacement.
+- **Excluded:** third-party library code, generated code, tests, and functions no entry point reaches.
+- **Nothing is dropped for being "insignificant."** Pure business logic (a tax calculation) does no I/O, and an I/O-based filter would lose it. It's in the trace, tagged.
 
 ### Significance is a derived tag (Decided)
 
@@ -446,7 +457,7 @@ Architecture nodes and code nodes live **in one Neo4j database**, and both are p
 
 ### Order (Decided)
 
-`INVOKES` edges carry `seq`, the position of the call site in the caller. A flow's steps are a **depth-first walk ordered by `seq`**, which makes them an ordered tree:
+Calls in the run's call graph carry `seq`, the position of the call site in the caller. A flow's trace, and its steps, are a **depth-first walk ordered by `seq`**, which makes them an ordered tree:
 
 ```
 1      UserController#getUser                      ← entry (INITIATED by GET /users)
@@ -486,7 +497,7 @@ flowchart LR
 
 ### Anchors (Decided)
 
-Steps point to **symbols** (`com.x.RefundService#process`) at an ingested commit, not line numbers. Symbols survive edits. Lines are looked up when the code is fetched.
+Steps and trace entries point to **symbols** (`com.x.RefundService#process`) at an ingested commit, plus that commit's file and lines. Code tools read at the ingested commit, so the lines are exact; symbols are what stay stable across runs.
 
 ---
 

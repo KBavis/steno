@@ -11,7 +11,7 @@ ARCHITECTURE_LABELS = (
     "Organization",
     "Space",
     "Application",
-    "Interface",  # + HttpEndpoint / GrpcMethod / KafkaTopic / Queue / plugin-defined
+    "Interface",  # + HttpEndpoint / GrpcMethod / KafkaTopic / Queue / org-defined (D61)
     "Schedule",
     "Flow",
     "Step",
@@ -24,12 +24,11 @@ ARCHITECTURE_LABELS = (
     "KafkaCluster",
 )
 
-# Code nodes: how it's built. Reached only through ENTRY / RUNS / BUILT_FROM.
+# Code nodes: how it's built. Functions aren't nodes: they live in each Flow's trace (D60).
 CODE_LABELS = (
     "Repository",
     "Module",  # + Service / Library / Contract / Migrations / Test / Build
     "File",
-    "Function",
 )
 
 # Carded node types carry this label, so one vector and one full-text index cover them all.

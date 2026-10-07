@@ -372,7 +372,7 @@ pre .c { color: var(--muted); }
         </div>
         <div class="card mem">
           <h4>Graph builder + writer <span class="tag yes">built</span></h4>
-          <p>Builds a plan of nodes and edges with stable IDs (structure, call graph, one flow per entry point, rollups), then MERGEs it into Neo4j and deletes this repository's stale facts.</p>
+          <p>Builds a plan of nodes and edges with stable IDs (structure, an in-memory call graph, one flow per entry point with its trace and steps, rollups), compares it with what Neo4j holds for this repository, and writes only the differences: new and changed facts in, facts gone from the code out.</p>
           <span class="where">graph/build.py · graph/writer.py · graph/ids.py</span>
         </div>
         <div class="card code">
@@ -387,7 +387,7 @@ pre .c { color: var(--muted); }
         </div>
         <div class="card neo">
           <h4>Neo4j <span class="tag yes">built</span></h4>
-          <p>One database: architecture nodes and code nodes. A uniqueness constraint on <code>id</code> per label and a full-text index on <code>:Searchable</code>. No vector index yet (the embedding model is still Open).</p>
+          <p>One database: architecture nodes and code nodes (repository, module, file). Functions aren't nodes: each Flow stores its trace. A uniqueness constraint on <code>id</code> per label and a full-text index on <code>:Searchable</code>. No vector index yet (the embedding model is still Open).</p>
           <span class="where">graph/schema.py  ·  make graph-init</span>
         </div>
         <div class="card off">
@@ -412,8 +412,8 @@ pre .c { color: var(--muted); }
           <thead><tr><th>Place</th><th>Holds</th><th>Lives</th><th>Written by</th></tr></thead>
           <tbody>
             <tr><td><span class="tag pg">Postgres</span></td><td>The organization, spaces, connectors, repositories (with clone URL and space), every job and one row per stage with its timings and counts</td><td>Permanent</td><td>API (config, new jobs), worker (claims, stages, status)</td></tr>
-            <tr><td><span class="tag neo">Neo4j</span></td><td>The graph: Organization, Space, Repository, Module, File, Function, Application, Interface, Flow, Entity, Table, DataStore, ExternalSystem, and the edges between them</td><td>Until the next run of the same repository replaces its facts</td><td>Worker (write stage); API (org and space projection)</td></tr>
-            <tr><td><span class="tag mem">Memory</span></td><td>The resolver index, every extracted fact, the call graph, the graph plan</td><td>One job</td><td>Worker</td></tr>
+            <tr><td><span class="tag neo">Neo4j</span></td><td>The graph: Organization, Space, Repository, Module, File, Application, Interface, Flow (with its trace), Step, Entity, Table, DataStore, ExternalSystem, and the edges between them</td><td>Until a later run of the same repository changes or removes a fact; unchanged facts are left alone</td><td>Worker (write stage); API (org and space projection)</td></tr>
+            <tr><td><span class="tag mem">Memory</span></td><td>The resolver index, every extracted fact, the call graph (never stored), the graph plan</td><td>One job</td><td>Worker</td></tr>
             <tr><td><span class="tag code">Disk</span></td><td>The clone at <code>/tmp/steno-workspaces/job-N/</code> and the facts file <code>job-N-facts.json</code></td><td>Clone: one job. Facts file: until you delete it</td><td>Worker</td></tr>
           </tbody>
         </table>
@@ -483,7 +483,7 @@ pre .c { color: var(--muted); }
             <text class="lbl" x="440" y="334">ingestion_stage row</text>
             <text class="lbl" x="440" y="356">after every stage</text>
             <line class="ln neo" x1="600" y1="410" x2="918" y2="410" marker-end="url(#a2neo)"/>
-            <text class="lbl" x="660" y="404">write: MERGE nodes and edges, delete stale</text>
+            <text class="lbl" x="660" y="404">write: only what changed; delete what's gone</text>
             <line class="ln pg" x1="600" y1="436" x2="422" y2="436" marker-end="url(#a2pg)"/>
             <text class="lbl" x="440" y="430">status = succeeded</text>
 
@@ -521,8 +521,8 @@ pre .c { color: var(--muted); }
             <tr><td><code>parse</code></td><td>Picks the rule packs that apply, lists the files once, reads every Python file into the symbol resolver's symbol table, builds a syntax tree per file. No rules run.</td><td>the rule engine, holding the symbol resolver and the trees</td></tr>
             <tr><td><code>extract</code></td><td>Runs every rule on every file: facts, facts with blanks, and clues</td><td>the raw facts</td></tr>
             <tr><td><code>assemble</code></td><td>Combines clues across files into complete facts: URL prefix chains, entity → table, SDK clients, partial references; writes the facts JSON</td><td>completed facts</td></tr>
-            <tr><td><code>flows</code></td><td>Finds modules and applications, builds the call graph, one Flow per entry point, rolls effects up onto flows</td><td>the graph plan</td></tr>
-            <tr><td><code>write</code></td><td>MERGE the plan into Neo4j by stable ID, then delete what earlier runs of this repository left</td><td>the graph</td></tr>
+            <tr><td><code>flows</code></td><td>Finds modules and applications, builds the call graph in memory, one Flow per entry point with its trace, Steps for its significant functions (carrying their effects), rolls effects up onto flows</td><td>the graph plan</td></tr>
+            <tr><td><code>write</code></td><td>Compare the plan with the graph by stable ID; write new and changed facts, delete what this repository no longer has, log each change in <code>fact_change</code>, move <code>last_ingested_sha</code></td><td>the graph, the change history</td></tr>
             <tr><td><code>cards</code></td><td>Skipped: LLM purposes and narratives aren't built</td><td>nothing</td></tr>
           </tbody>
         </table>
@@ -554,13 +554,13 @@ pre .c { color: var(--muted); }
           <tbody>
             <tr><td><code>/graph/overview</code>, <code>/graph/space</code></td><td>One level of the containment tree and the links between its children</td><td>Loads the whole containment tree and every effect edge, then rolls each deep node up to the child of this level that contains it</td></tr>
             <tr><td><code>/graph/application</code></td><td>An application's interfaces, flows, tables, outbound targets (or, with <code>layer=code</code>, its modules and files)</td><td>Queries around one Application node; groups endpoints by resource such as <code>/api/jobs</code></td></tr>
-            <tr><td><code>/graph/flow</code></td><td>A flow as steps, in the order they run, with what each step reads and writes</td><td>Re-walks <code>INVOKES</code> from the entry function (up to 12 hops), sorts calls by <code>seq</code>, hides non-significant helpers but follows their calls</td></tr>
-            <tr><td><code>/graph/node</code></td><td>One node's properties, provenance, and a link to the source line at the ingested commit</td><td>One node plus its edges; the link is built from the repository's clone URL</td></tr>
-            <tr><td><code>/graph/search</code></td><td>Name matches</td><td>The <code>searchable_text</code> full-text index</td></tr>
+            <tr><td><code>/graph/flow</code></td><td>A flow as steps, in the order they run, with what each step reads and writes</td><td>Reads the Flow's stored trace: every function in order. By default shows only its Steps (significant entries); "All functions" shows the whole trace, with helpers that are never expanded tagged <em>helper</em></td></tr>
+            <tr><td><code>/graph/node</code></td><td>One node's properties, provenance, and a link to the source line at the ingested commit</td><td>One node plus its edges (a trace entry is read from its flow); the link is built from the repository's clone URL</td></tr>
+            <tr><td><code>/graph/search</code></td><td>Name matches, and flows whose trace contains a matching function</td><td>The <code>searchable_text</code> full-text index, plus <code>trace_symbols</code> on Flow nodes</td></tr>
           </tbody>
         </table>
       </div>
-      <p>So a flow on screen is <em>two</em> computations: the builder decided which functions belong to a flow (and stored a <code>functions</code> count on it), and the flow view walks the call graph again to draw it. Steps aren't stored as <code>Step</code> nodes yet; the view derives them from <code>INVOKES</code> every time.</p>
+      <p>A flow on screen is <em>one</em> computation: the builder walked the call graph once and stored the result as the flow's trace and its Step nodes. The view only reads them. Clicking a step opens its Step node; clicking a function that isn't a step opens its trace entry.</p>
     </section>
 
     <!-- 7 -->
@@ -592,14 +592,14 @@ uv run steno extract ~/projects/contextualized --json out.json   <span class="c"
         <table>
           <thead><tr><th>Design piece</th><th>Today</th><th>What you'll see</th></tr></thead>
           <tbody>
-            <tr><td>Step nodes (D31 L2)</td><td><span class="tag no">not built</span></td><td>Flows have <code>ENTRY</code> into a Function; steps are derived by the flow view</td></tr>
+            <tr><td>Steps (L2) and traces (L3) instead of Function nodes (D60)</td><td><span class="tag yes">built</span></td><td>No Function nodes or <code>INVOKES</code>. Each Flow has a <code>trace</code>; its significant functions are Step nodes with their effects</td></tr>
             <tr><td>Cards, flow purposes and narratives</td><td><span class="tag no">not built</span></td><td>No <code>card</code> property; search matches names only</td></tr>
-            <tr><td>Coverage report</td><td><span class="tag no">not built</span></td><td>Dropped matches are only in the facts file</td></tr>
-            <tr><td>Incremental updates, delta</td><td><span class="tag no">not built</span></td><td>Every job is a full re-ingest; <code>fact_change</code> stays empty</td></tr>
+            <tr><td>Coverage report (D62)</td><td><span class="tag part">schema only</span></td><td>Triage states and signal kinds exist in <code>coverage_item</code>; nothing writes them. Effects no flow reaches are listed in the flows stage's metrics as <code>unreached_effects</code>; dropped matches are in the facts file</td></tr>
+            <tr><td>Nightly updates, delta (D59)</td><td><span class="tag part">partial</span></td><td>Workers queue a run each night for repositories whose branch moved; every run writes only what changed and logs it in <code>fact_change</code>. Commits aren't mapped to PRs yet (<code>job_commit</code> stays empty)</td></tr>
             <tr><td>Config property clues</td><td><span class="tag part">partial</span></td><td>The engine can run config rules, but no pack has one, so no YAML or .env value feeds resolution</td></tr>
             <tr><td>Java (rules, resolver, deps)</td><td><span class="tag no">not built</span></td><td>Java packs never enable; no Java functions or flows</td></tr>
             <tr><td>Entry points other than HTTP</td><td><span class="tag part">FastAPI only</span></td><td>Schedules, consumers and CLI commands aren't flows. Steno's own worker loop, for example, isn't a flow</td></tr>
-            <tr><td>Identifying the database</td><td><span class="tag part">placeholder</span></td><td>Every table hangs off one "Every table hangs off one "Relational store (not identified yet)" per spacelt;repoEvery table hangs off one "Relational store (not identified yet)" per spacegt; relational store (not identified yet)" per repository</td></tr>
+            <tr><td>Identifying the database</td><td><span class="tag part">placeholder</span></td><td>Every table hangs off one "Relational store (not identified yet)" per repository</td></tr>
             <tr><td>Jev, LLM, MCP tools</td><td><span class="tag no">not built</span></td><td>MCP answers <code>ping</code> only</td></tr>
           </tbody>
         </table>

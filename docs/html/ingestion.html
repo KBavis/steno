@@ -322,7 +322,7 @@ pre .k-emit { color: var(--neo); font-weight: 500; }
             <tr><td>extract</td><td>What does each code shape mean?<span class="eg">e.g. <code>@router.post(path)</code> on a function is an endpoint; its router prefix is still blank</span></td><td>Facts, facts with blanks, clues</td><td>75 nodes · 230 edges · 91 clues · 1.8 s</td><td><code>extraction/engine.py</code></td></tr>
             <tr><td>assemble</td><td>What goes in each blank?<span class="eg">e.g. <code>/api</code> + <code>/jobs</code> + <code>/projects/{project_id}</code> → <code>/api/jobs/projects/{project_id}</code></span></td><td>Completed facts, the facts JSON</td><td>199 edges · 37 dropped · 1.7 s</td><td><code>assemblers/assemble.py</code></td></tr>
             <tr><td>flows</td><td>What does each entry point reach, and how does it all fit in the graph?<span class="eg">e.g. that endpoint's handler reaches 115 functions (the diff task's work, then the embed task's), so its Flow writes to <code>job</code>, <code>record_lock</code>, <code>pull_request</code>, …</span></td><td>A graph plan: nodes and edges with stable IDs</td><td>494 nodes · 1,268 edges · 33 flows · 5.3 s</td><td><code>graph/structure.py</code>, <code>graph/build.py</code></td></tr>
-            <tr><td>write</td><td>What does Neo4j need to change?<span class="eg">e.g. <code>MERGE</code> the endpoint by its ID; a function deleted since the last run is removed</span></td><td>The graph, updated in place</td><td>MERGE, then remove stale facts</td><td><code>graph/writer.py</code></td></tr>
+            <tr><td>write</td><td>What does Neo4j need to change?<span class="eg">e.g. an endpoint that didn't change isn't touched; a step whose function was deleted is removed</span></td><td>The graph, updated in place; <code>fact_change</code></td><td>Compare by stable ID, then write only the differences</td><td><code>graph/writer.py</code></td></tr>
             <tr><td>cards</td><td>What does each flow do, in words? (LLM)<span class="eg">e.g. a purpose like "starts a sync job for each of a project's data sources"</span></td><td>Skipped: not built</td><td>skipped</td><td>not built</td></tr>
           </tbody>
         </table>
@@ -402,7 +402,7 @@ pre .k-emit { color: var(--neo); font-weight: 500; }
           <tbody>
             <tr><td><code>dry_run</code></td><td>Every stage, including write: the graph is real. Only LLM text is skipped; the cards stage will report what it would have cost (D26).</td></tr>
             <tr><td><code>full</code></td><td>The same, plus LLM cards once they're built</td></tr>
-            <tr><td><code>incremental</code></td><td>Only the files changed since the last run. Defined, not built.</td></tr>
+            <tr><td><code>nightly</code> (a trigger, not a mode)</td><td>Each night workers queue a <code>full</code> run for every repository whose branch moved since <code>last_ingested_sha</code> (<code>STENO_NIGHTLY_AT</code>, UTC; <code>steno job nightly</code> by hand). Every run analyzes the whole repository and writes only what changed (D59).</td></tr>
           </tbody>
         </table>
       </div>
@@ -666,7 +666,7 @@ id: fastapi-endpoint
         <li><span><strong>Scope.</strong> <code>enclosing(job.py, 28)</code> → function <code>app.api.routers.job.run_project_jobs</code>, no class.</span></li>
         <li><span><strong>Captures.</strong> Each capture's text is parsed by Python's <code>ast</code> into an expression the resolver can work with.</span></li>
         <li><span><strong>where</strong> <code>$TASKS: {type: [fastapi.BackgroundTasks, …]}</code>. <code>type_of(background_tasks)</code> → <code>fastapi.BackgroundTasks</code>. It passes.</span></li>
-        <li><span><strong>emit</strong> an <code>INVOKES</code> edge from <code>run_project_jobs</code> to <code>symbol_of(svc.run_project_jobs)</code> → <code>app.services.job.JobService.run_project_jobs</code>, with <code>async: true</code>. (How the resolver gets that answer is drawn out in section 07.)</span></li>
+        <li><span><strong>emit</strong> an <code>INVOKES</code> edge from <code>run_project_jobs</code> to <code>symbol_of(svc.run_project_jobs)</code> → <code>app.services.job.JobService.run_project_jobs</code>, with <code>async: true</code>, into the in-memory call graph (it isn't written to Neo4j). (How the resolver gets that answer is drawn out in section 07.)</span></li>
       </ol>
       <p>Config rules run before all code rules, so their <code>property</code> clues can feed <code>value_of</code>. No pack ships a config rule today, so that step does nothing yet.</p>
 
@@ -937,21 +937,22 @@ client:
       <div class="kicker">Stage 6 · <code>pipeline.flows</code> → <code>graph/structure.py</code>, <code>graph/build.py</code></div>
       <div class="io">
         <div><b>Reads</b>Completed facts, entry points, the symbol resolver, the build files</div>
-        <div><b>Does</b>Decides the graph's shape: modules, applications, code nodes, flows, IDs</div>
-        <div><b>Leaves</b>A graph plan in memory: 494 nodes, 1,268 edges, each with a stable ID</div>
+        <div><b>Does</b>Decides the graph's shape: modules, applications, flows with their traces and steps, IDs</div>
+        <div><b>Leaves</b>A graph plan in memory: 513 nodes, 1,291 edges, each with a stable ID. The call graph itself is thrown away.</div>
       </div>
       <p class="lede">Facts so far are loose: "this function writes to table <code>job</code>". Flows fits them into one tree (organization → space → application → …) and works out which code each entry point actually runs. It's pure planning: nothing is written yet, which is why it can be tested without a database.</p>
       <ol class="steps">
         <li><span><strong>Structure.</strong> Every folder with a build file (<code>pyproject.toml</code>, <code>requirements*.txt</code>, <code>package.json</code>, <code>pom.xml</code>, …) is a <code>Module</code>. A module that contains an entry point is a <code>Service</code> and gets an <code>Application</code>, named after the repository plus the folder in a monorepo. Contextualized: <code>.</code>, <code>apps/backend</code> (Service → <code>contextualized-backend</code>), <code>apps/frontend/app</code>. The application is joined to its module by <code>BUILT_FROM</code>.</span></li>
         <li><span><strong>Fact nodes.</strong> Every extracted node gets its stable ID (section 10): endpoints and entities under their application, tables under a placeholder data store for the repository, external systems by host. Each gets <code>BELONGS_TO</code> its owner.</span></li>
         <li><span><strong>Fact edges.</strong> Each extracted edge, with its ends filled in: <code>@app</code> becomes the application whose module holds the file, an <code>{http: …}</code> target becomes an <code>ExternalSystem</code> keyed by host.</span></li>
-        <li><span><strong>Call graph.</strong> Ask the resolver for <code>invocations</code> of all 486 functions, add the async <code>INVOKES</code> edges rules found (background tasks), then walk from the 33 entry points. Everything reached becomes a <code>Function</code> node, with its <code>File</code> and <code>INVOKES</code> edges carrying call order, line, conditional and in-loop. A call to an inherited method follows the subclass it was made on: <code>Task.run</code> reached through <code>DiffTaskRunner(…).run()</code> gets its own node, <em>Task.run as DiffTaskRunner</em>, whose calls go to Diff's methods. A call to an abstract method picked at runtime goes to every implementation, marked <code>candidate</code>. A function is <code>significant</code> when it, or anything below it, reads, writes or calls out.</span></li>
-        <li><span><strong>Flows.</strong> One <code>Flow</code> per entry point: <code>STARTS</code> from the trigger, <code>ENTRY</code> into the handler, and every effect of every function it reaches copied onto the flow as a <code>rollup</code> edge.</span></li>
+        <li><span><strong>Call graph, in memory.</strong> Ask the resolver for <code>invocations</code> of the functions the entry points reach, merge in the async calls rules found (background tasks), and walk from the entry points: 278 of 460 functions are reached. A call to an inherited method follows the subclass it was made on: <code>Task.run</code> reached through <code>DiffTaskRunner(…).run()</code> runs as <em>Task.run as DiffTaskRunner</em>, whose calls go to Diff's methods. A call to an abstract method picked at runtime goes to every implementation, marked <code>candidate</code>. A function is <code>significant</code> when it, or anything below it, reads, writes or calls out; a <code>utility</code> when 3 or more functions call it and nothing architectural is below it. None of this is written as nodes (D60).</span></li>
+        <li><span><strong>Flows, traces and steps.</strong> One <code>Flow</code> per entry point, <code>STARTS</code> from its trigger. Walking from the handler gives its <strong>trace</strong>: every function it calls, in order, once per call site, stored on the Flow as JSON with file and lines. A utility is listed but not expanded, and a function already expanded is listed again as a <code>repeat</code>. Each significant entry becomes a <code>Step</code> node, chained <code>FIRST_STEP</code> / <code>SUBSTEP</code> / <code>NEXT</code>, carrying its own effects; every effect is also copied onto the flow as a <code>rollup</code> edge. Effects in code no entry point reaches aren't written; they're listed as <code>unreached_effects</code> in the stage's metrics (29 here).</span></li>
+        <li><span><strong>Files.</strong> A <code>File</code> node for each file a flow runs through (46), under its module, with how many traced functions it holds.</span></li>
       </ol>
       <h3>One flow, as it lands in the graph</h3>
       <figure>
         <div class="diagram">
-          <svg viewBox="0 0 1000 440" role="img" aria-label="The flow for POST /api/jobs/projects/{project_id}. Architecture side: the application exposes the endpoint, the endpoint starts the flow, the flow belongs to the application, and the flow reads and writes tables as rollups; tables belong to a placeholder data store. Code side: the application is built from the apps/backend module; the flow's entry is the router handler, which asynchronously invokes JobService.run_project_jobs, which invokes run_data_source_job and more than a hundred other functions, including the diff and embed tasks' own methods; one of those, RecordLockService.lock, has the real WRITES_TO record_lock edge that the flow's rollup copies.">
+          <svg viewBox="0 0 1000 440" role="img" aria-label="The flow for POST /api/jobs/projects/{project_id}. Architecture side: the application exposes the endpoint, the endpoint starts the flow, the flow belongs to the application, and the flow reads and writes tables as rollups. Below: the application is built from the apps/backend module; the flow's first step is the router handler, whose substep is JobService.run_project_jobs, then run_data_source_job, then create_job, which has the real WRITES_TO job edge that the flow's rollup copies. The flow also stores its trace: 144 entries, every function it calls in order.">
             <defs>
               <marker id="m10" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker>
               <marker id="m10n" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head neo" d="M0,0 L10,5 L0,10 z"/></marker>
@@ -960,7 +961,7 @@ client:
             <rect class="panel" x="10" y="10" width="980" height="210" rx="10"/>
             <text class="ms" x="24" y="30">ARCHITECTURE NODES · searched, carded later</text>
             <rect class="panel" x="10" y="236" width="980" height="194" rx="10"/>
-            <text class="ms" x="24" y="256">CODE NODES · visited for detail</text>
+            <text class="ms" x="24" y="256">STEPS (L2) AND THE TRACE (L3) · visited for detail</text>
 
             <!-- architecture -->
             <rect class="box neo" x="30" y="80" width="170" height="50" rx="7"/>
@@ -971,12 +972,12 @@ client:
             <text class="m" x="276" y="118">POST /api/jobs/projects/{…}</text>
             <rect class="box neo" x="530" y="80" width="170" height="50" rx="7"/>
             <text class="t" x="546" y="100">Flow</text>
-            <text class="m" x="546" y="118">functions = 115</text>
+            <text class="m" x="546" y="118">trace: 144 entries</text>
             <rect class="box" x="790" y="46" width="180" height="40" rx="7"/>
             <text class="t" x="806" y="71">Table  job</text>
             <rect class="box" x="790" y="100" width="180" height="40" rx="7"/>
-            <text class="t" x="806" y="125">Table  record_lock</text>
-            <text class="s" x="790" y="158">+ data_source, embed_task, diff_task</text>
+            <text class="t" x="806" y="125">Table  pull_request</text>
+            <text class="s" x="790" y="158">+ 13 more tables and stores</text>
             <rect class="box off" x="790" y="170" width="180" height="40" rx="7"/>
             <text class="s" x="806" y="194">DataStore (not identified yet)</text>
 
@@ -986,55 +987,63 @@ client:
             <text class="lbl" x="499" y="97" text-anchor="middle">STARTS</text>
             <path class="ln neo" d="M615,80 L615,52 L115,52 L115,78" marker-end="url(#m10n)"/>
             <text class="lbl" x="365" y="46" text-anchor="middle">BELONGS_TO</text>
-            <line class="ln neo" x1="700" y1="96" x2="788" y2="68" marker-end="url(#m10n)"/>
-            <text class="lbl" x="712" y="72">READS, WRITES</text>
+            <line class="ln neo dash" x1="700" y1="96" x2="788" y2="68" marker-end="url(#m10n)"/>
+            <text class="lbl" x="712" y="72">WRITES_TO</text>
+            <text class="lbl" x="712" y="86">rollup</text>
             <line class="ln neo dash" x1="700" y1="114" x2="788" y2="120" marker-end="url(#m10n)"/>
-            <text class="lbl" x="716" y="134">WRITES_TO</text>
-            <text class="lbl" x="716" y="148">rollup</text>
+            <text class="lbl" x="716" y="140">READS, WRITES</text>
             <line class="ln soft" x1="880" y1="140" x2="880" y2="168" marker-end="url(#m10)"/>
 
-            <!-- code -->
-            <rect class="box code" x="30" y="300" width="170" height="50" rx="7"/>
-            <text class="t" x="46" y="320">Module:Service</text>
-            <text class="m" x="46" y="338">apps/backend</text>
-            <rect class="box code" x="260" y="300" width="210" height="50" rx="7"/>
-            <text class="t" x="276" y="320">Function (handler)</text>
-            <text class="m" x="276" y="338">job.run_project_jobs</text>
-            <rect class="box code" x="530" y="300" width="200" height="50" rx="7"/>
-            <text class="t" x="546" y="320">Function</text>
-            <text class="m" x="546" y="338">JobService.run_project_jobs</text>
-            <rect class="box code" x="790" y="300" width="180" height="50" rx="7"/>
-            <text class="t" x="806" y="320">Function</text>
-            <text class="m" x="806" y="338">run_data_source_job</text>
-            <text class="s" x="790" y="372">… 112 more, including</text>
-            <rect class="box code" x="790" y="380" width="180" height="40" rx="7"/>
-            <text class="m" x="806" y="405">RecordLockService.lock</text>
+            <!-- steps -->
+            <rect class="box code" x="30" y="290" width="170" height="50" rx="7"/>
+            <text class="t" x="46" y="310">Module:Service</text>
+            <text class="m" x="46" y="328">apps/backend</text>
+            <rect class="box neo" x="260" y="290" width="200" height="50" rx="7"/>
+            <text class="t" x="276" y="310">Step 1</text>
+            <text class="m" x="276" y="328">job.run_project_jobs</text>
+            <rect class="box neo" x="530" y="290" width="200" height="50" rx="7"/>
+            <text class="t" x="546" y="310">Step 1.1</text>
+            <text class="m" x="546" y="328">JobService.run_project_jobs</text>
+            <rect class="box neo" x="790" y="290" width="180" height="50" rx="7"/>
+            <text class="t" x="806" y="310">Step 1.1.1</text>
+            <text class="m" x="806" y="328">run_data_source_job</text>
+            <rect class="box neo" x="790" y="370" width="180" height="44" rx="7"/>
+            <text class="t" x="806" y="389">Step 1.1.1.1</text>
+            <text class="m" x="806" y="405">create_job</text>
 
-            <line class="ln code" x1="470" y1="325" x2="528" y2="325" marker-end="url(#m10c)"/>
-            <text class="lbl" x="499" y="317" text-anchor="middle">INVOKES</text>
-            <text class="lbl" x="499" y="345" text-anchor="middle">async</text>
-            <line class="ln code" x1="730" y1="325" x2="788" y2="325" marker-end="url(#m10c)"/>
-            <text class="lbl" x="759" y="317" text-anchor="middle">seq 3</text>
+            <line class="ln neo" x1="460" y1="315" x2="528" y2="315" marker-end="url(#m10n)"/>
+            <text class="lbl" x="494" y="307" text-anchor="middle">SUBSTEP</text>
+            <text class="lbl" x="494" y="333" text-anchor="middle">async</text>
+            <line class="ln neo" x1="730" y1="315" x2="788" y2="315" marker-end="url(#m10n)"/>
+            <text class="lbl" x="759" y="307" text-anchor="middle">SUBSTEP</text>
+            <line class="ln neo" x1="880" y1="340" x2="880" y2="368" marker-end="url(#m10n)"/>
+            <text class="lbl" x="888" y="358">SUBSTEP</text>
+
+            <!-- the trace, stored on the Flow -->
+            <text class="s" x="260" y="364">trace on the Flow: every call, in order</text>
+            <text class="m" x="260" y="382">1  run_project_jobs · 1.1  JobService.run_project_jobs</text>
+            <text class="m" x="260" y="398">1.1.1  get_async_db_session_context  (helper)</text>
+            <text class="m" x="260" y="414">1.1.2  run_data_source_job · … 144 entries, 86 steps</text>
 
             <!-- bridges -->
-            <line class="ln" x1="115" y1="130" x2="115" y2="298" marker-end="url(#m10)"/>
+            <line class="ln" x1="115" y1="130" x2="115" y2="288" marker-end="url(#m10)"/>
             <text class="lbl" x="123" y="216">BUILT_FROM</text>
-            <line class="ln" x1="580" y1="130" x2="400" y2="298" marker-end="url(#m10)"/>
-            <text class="lbl" x="470" y="200">ENTRY</text>
-            <path class="ln" d="M970,400 L984,400 L984,128 L972,128" marker-end="url(#m10)"/>
-            <text class="lbl" x="978" y="280" text-anchor="end">WRITES_TO</text>
-            <text class="lbl" x="978" y="294" text-anchor="end">(the real one)</text>
+            <line class="ln neo" x1="580" y1="130" x2="380" y2="288" marker-end="url(#m10n)"/>
+            <text class="lbl" x="470" y="200">FIRST_STEP</text>
+            <path class="ln" d="M970,392 L984,392 L984,66 L972,66" marker-end="url(#m10)"/>
+            <text class="lbl" x="978" y="250" text-anchor="end">WRITES_TO</text>
+            <text class="lbl" x="978" y="264" text-anchor="end">(the real one)</text>
           </svg>
         </div>
-        <figcaption><b>Two copies of every effect.</b> The real <code>WRITES_TO record_lock</code> sits on <code>RecordLockService.lock</code>, a code node. The flow gets a copy marked <code>rollup</code>, so the architecture side can say what a flow touches without opening code. Without the async <code>INVOKES</code> from the background-task rule, this flow would stop at the handler. Without following <code>Task.run</code> into each task's own methods, it would stop at the lock calls: 22 functions instead of 115.</figcaption>
+        <figcaption><b>Two copies of every effect, and no Function nodes.</b> The real <code>WRITES_TO job</code> sits on the step for <code>create_job</code>. The flow gets a copy marked <code>rollup</code>, so the architecture side can say what a flow touches without opening its steps. Every other function the flow calls, helpers included, is in the trace stored on the Flow, with file and lines, so the code can be read from the git host. Without the async call from the background-task rule, this flow would stop at the handler; without following <code>Task.run</code> into each task's own methods, it would miss most of its 86 steps.</figcaption>
       </figure>
       <h3>Every node and edge carries where it came from</h3>
       <div class="table-wrap">
         <table>
           <thead><tr><th>Property</th><th>Example</th><th>Used for</th></tr></thead>
           <tbody>
-            <tr><td><code>repo</code></td><td><code>contextualized</code></td><td>Which repository's job owns it (write's cleanup)</td></tr>
-            <tr><td><code>ingestion_job</code></td><td><code>7</code></td><td>The Postgres job that wrote it (write's cleanup, and the link back to Postgres)</td></tr>
+            <tr><td><code>repo</code></td><td><code>contextualized</code></td><td>Which repository wrote it (what write compares the plan against)</td></tr>
+            <tr><td><code>ingestion_job</code></td><td><code>7</code></td><td>The Postgres job that last changed it (the link back to Postgres and <code>fact_change</code>)</td></tr>
             <tr><td><code>commit</code></td><td><code>ac93a3b…</code></td><td>Which code it describes; code tools read files at this commit</td></tr>
             <tr><td><code>extracted_by</code></td><td><code>sqlalchemy-session-add</code>, <code>call-graph</code>, <code>flow-rollup</code>, <code>structure</code></td><td>Which rule or step produced it</td></tr>
             <tr><td><code>source_file</code>, <code>source_line</code></td><td><code>apps/backend/app/services/job.py</code>, 53</td><td>Citations</td></tr>
@@ -1050,8 +1059,8 @@ client:
       <div class="kicker">Stage 7 · <code>pipeline.write</code> → <code>graph/writer.py</code> · schema in <code>graph/schema.py</code></div>
       <div class="io">
         <div><b>Reads</b>The graph plan</div>
-        <div><b>Does</b>In one transaction: MERGE every node and edge by ID, then remove what this repository's earlier runs left behind</div>
-        <div><b>Leaves</b>Neo4j matching this commit</div>
+        <div><b>Does</b>In one transaction: compare the plan with what Neo4j holds for this repository, then write only the differences</div>
+        <div><b>Leaves</b>Neo4j matching this commit, a <code>fact_change</code> row per change, and <code>last_ingested_sha</code> moved to this commit</div>
       </div>
 
       <h3>What "schema" means in Neo4j</h3>
@@ -1063,7 +1072,7 @@ client:
         </div>
         <div class="card neo">
           <h4>In <code>graph/schema.py</code>, applied by <code>steno graph init</code></h4>
-          <p>The only things Neo4j enforces: a uniqueness constraint on <code>id</code> for each of the 18 labels, and a full-text index over <code>name</code> and <code>card</code> on <code>:Searchable</code> nodes. A vector index comes once the embedding model is chosen.</p>
+          <p>The only things Neo4j enforces: a uniqueness constraint on <code>id</code> for each of the 17 labels, and a full-text index over <code>name</code> and <code>card</code> on <code>:Searchable</code> nodes. A vector index comes once the embedding model is chosen.</p>
         </div>
       </div>
       <div class="table-wrap">
@@ -1071,8 +1080,8 @@ client:
           <thead><tr><th>Family</th><th>Labels</th><th>Meaning</th></tr></thead>
           <tbody>
             <tr><td>Architecture</td><td>Organization, Space, Application, Interface (HttpEndpoint, KafkaTopic, …), Schedule, Flow, Step, Entity, DataStore, Table, ExternalSystem, …</td><td>What the software does. Search, cards and routing cover only these (the <code>:Searchable</code> ones).</td></tr>
-            <tr><td>Code</td><td>Repository, Module, File, Function</td><td>How it's built. Reached through the bridges, never searched directly.</td></tr>
-            <tr><td>Bridges</td><td><code>Application -BUILT_FROM-&gt; Module</code>, <code>Flow -ENTRY-&gt; Function</code></td><td>Where the two families meet</td></tr>
+            <tr><td>Code</td><td>Repository, Module, File</td><td>How it's built. Never searched directly. Functions aren't nodes: they're in each Flow's <code>trace</code> (D60).</td></tr>
+            <tr><td>Bridges</td><td><code>Application -BUILT_FROM-&gt; Module</code>; steps and trace entries point at a file and lines</td><td>Where the two families meet</td></tr>
           </tbody>
         </table>
       </div>
@@ -1087,7 +1096,7 @@ client:
             <tr><td>Application</td><td>name</td><td><code>app:contextualized-backend</code></td></tr>
             <tr><td>HttpEndpoint</td><td>app, method, path</td><td><code>endpoint:contextualized-backend:POST:/api/jobs/projects/{project_id}</code></td></tr>
             <tr><td>Flow</td><td>app, trigger name</td><td><code>flow:contextualized-backend:POST /api/jobs/projects/{project_id}</code></td></tr>
-            <tr><td>Function</td><td>repo, qualified name</td><td><code>fn:contextualized:app.services.job.JobService.run_project_jobs</code></td></tr>
+            <tr><td>Step</td><td>flow, the function it runs (and which occurrence), not its position</td><td><code>step:flow:contextualized-backend:POST /api/jobs/projects/{project_id}:app.services.job.JobService.create_job</code></td></tr>
             <tr><td>Table</td><td>data store, schema, name</td><td><code>table:datastore:unknown:unresolved:repo-contextualized::job</code></td></tr>
             <tr><td>ExternalSystem</td><td>host, or <code>unresolved</code></td><td><code>external:localhost:11434</code></td></tr>
           </tbody>
@@ -1096,13 +1105,15 @@ client:
 
       <h3>The write, step by step</h3>
       <ol class="steps">
-        <li><span><strong>Nodes.</strong> Grouped by label set, in batches of 500: <code>MERGE (n:Flow {id: row.id}) ON CREATE SET n.first_seen = … SET n += row.props</code>. MERGE means "find it by ID, or create it". It always matches on a label with a uniqueness constraint, so the lookup uses an index.</span></li>
-        <li><span><strong>Edges.</strong> Grouped by type and the labels of both ends: <code>MATCH</code> both ends by ID, <code>MERGE</code> the relationship, set its properties. An edge into a node this job didn't write (its Space, the Organization) matches the node that's already there.</span></li>
-        <li><span><strong>Stale facts.</strong> Delete edges and nodes with this <code>repo</code> but an older <code>ingestion_job</code>: they weren't in this run, so they're gone from the code. Shared nodes (tables, data stores, external systems) are kept, because another repository may point at them, and deleted only once nothing does.</span></li>
+        <li><span><strong>Read.</strong> Every node and edge whose <code>repo</code> is this repository, plus any plan node another repository wrote (a shared table, a channel), with their properties.</span></li>
+        <li><span><strong>Compare</strong> (<code>graph/delta.py</code>), by stable ID. A fact is <em>changed</em> only if something other than its provenance (job, commit, source line) or its code pointers (a step's lines; line numbers inside a trace) differs. Moving a function down a file isn't a change; editing it is (each trace entry carries a hash of the function's syntax tree).</span></li>
+        <li><span><strong>Remove</strong> the edges and nodes this repository had that the plan doesn't: they're gone from the code. Shared nodes (tables, data stores, external systems, channels) are kept, because another repository may point at them, and deleted only once nothing does.</span></li>
+        <li><span><strong>Write</strong> new and changed nodes, grouped by label set in batches of 500: <code>MERGE (n:Flow {id: row.id}) ON CREATE SET n.first_seen = … SET n += row.props</code>, with properties that disappeared set to null. Then new and changed edges the same way. Unchanged facts aren't touched, so they keep the commit their lines were read at.</span></li>
+        <li><span><strong>Record</strong> each change in <code>fact_change</code> (before and after), and for a flow whose trace changed, one row listing the functions added, removed, or modified.</span></li>
       </ol>
       <div class="callout">
         <h4>Why re-running is safe</h4>
-        <p>The whole write (nodes, edges and cleanup) is one Neo4j transaction, so a failed write changes nothing: the graph stays as the previous run left it. Same commit: every MERGE finds an existing node, every property is set to the value it already had, and nothing is stale. A function deleted from the code: it isn't in the new plan, so it keeps the old <code>ingestion_job</code> and step 3 removes it. A dry run writes the graph too; it only skips LLM text.</p>
+        <p>The whole write (read, removals, writes) is one Neo4j transaction, so a failed write changes nothing: the graph stays as the previous run left it. Same commit: nothing differs, so nothing is written and no <code>fact_change</code> rows appear. A function deleted from the code: it drops out of its flows' traces (a trace change), and if it was a step, its Step node is removed. A dry run writes the graph too; it only skips LLM text.</p>
       </div>
     </section>
 
@@ -1151,7 +1162,7 @@ client:
             <text class="m" x="736" y="234">Space {id: space:&lt;row id&gt;}</text>
             <text class="ms" x="736" y="262">INGESTED FROM GIT</text>
             <text class="m" x="736" y="280">Repository · Module · File</text>
-            <text class="m" x="736" y="298">Function · Application</text>
+            <text class="m" x="736" y="298">Application · Step</text>
             <text class="m" x="736" y="316">Interface · Flow · Table …</text>
             <text class="ms" x="736" y="344">EVERY NODE AND EDGE</text>
             <text class="m" x="736" y="362">repo · ingestion_job · commit</text>
@@ -1218,10 +1229,10 @@ client:
         </div>
       </div>
       <div class="finding">
-        <div class="sev"><span class="tag part">not built</span></div>
+        <div class="sev"><span class="tag part">partial</span></div>
         <div>
-          <h4>Postgres doesn't yet record what changed</h4>
-          <p><code>repository.last_ingested_sha</code> is never set, and <code>fact_change</code> (the delta) and <code>coverage_item</code> are defined but never written. Incremental updates and change history need them.</p>
+          <h4>Postgres records what changed, not yet why or what's missing</h4>
+          <p>Each run sets <code>repository.last_ingested_sha</code> and writes a <code>fact_change</code> row per change. <code>job_commit</code> (commits → PRs) and <code>coverage_item</code> (the coverage report) are defined but never written.</p>
           <p class="where">db/models.py</p>
         </div>
       </div>
@@ -1241,7 +1252,7 @@ client:
         <li><span><span class="stage">assemble</span>The prefix chain fills the blank: <code>/api/jobs/projects/{project_id}</code>. Down the call path, <code>session.add(job)</code>'s <code>table_of</code> becomes table <code>job</code>.</span></li>
         <li><span><span class="stage">flows</span><code>apps/backend</code> holds entry points, so it's a Service; the application is <code>contextualized-backend</code>.</span></li>
         <li><span><span class="stage">flows</span>The call graph, plus the async edge, reaches 115 functions: <code>Task.run</code> as <code>DiffTaskRunner</code> (the diff work), then as <code>EmbedTaskRunner</code> (the embedding work). Providers chosen at runtime (GitHub, Bitbucket, Jira, Confluence) are linked as candidates. Every effect rolls up onto the flow: writes to <code>job</code>, <code>record_lock</code>, <code>pull_request</code>, <code>file</code> and more.</span></li>
-        <li><span><span class="stage">write</span><code>MERGE (n:Interface {id: "endpoint:contextualized-backend:POST:/api/jobs/projects/{project_id}"})</code>, then the Flow, its Functions, and their edges, each stamped with this job's ID.</span></li>
+        <li><span><span class="stage">write</span><code>MERGE (n:Interface {id: "endpoint:contextualized-backend:POST:/api/jobs/projects/{project_id}"})</code>, then the Flow with its trace, its Steps, and their edges, each stamped with this job's ID. A later run of the same commit writes none of it again.</span></li>
       </ol>
     </section>
 

@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     # Worker queue polling
     worker_poll_seconds: float = 2.0
 
+    # Nightly ingestion (D59): each night at this time (UTC, HH:MM), queue a run for every
+    # repository whose default branch moved since it was last ingested
+    nightly_enabled: bool = True
+    nightly_at: str = "02:00"
+
     api_host: str = "127.0.0.1"
     api_port: int = 8000
     cors_origins: list[str] = ["http://localhost:5173"]

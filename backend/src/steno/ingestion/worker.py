@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from steno.config import get_settings
 from steno.db.models import IngestionJob, JobStatus
 from steno.db.session import session_scope
+from steno.ingestion import nightly
 from steno.ingestion.pipeline import run_job
 from steno.ingestion.queue import claim_next
 
@@ -43,6 +44,15 @@ def run_once() -> bool:
     return True
 
 
+def check_schedule() -> None:
+    """Queue the nightly runs if they're due (D59)."""
+    try:
+        with session_scope() as session:
+            nightly.maybe_run(session)
+    except Exception:
+        log.exception("nightly: check failed")
+
+
 def run_forever() -> None:
     stopping = False
 
@@ -56,6 +66,10 @@ def run_forever() -> None:
 
     poll = get_settings().worker_poll_seconds
     log.info("worker: polling every %ss", poll)
+    last_check = 0.0
     while not stopping:
+        if time.monotonic() - last_check >= 60:
+            check_schedule()
+            last_check = time.monotonic()
         if not run_once():
             time.sleep(poll)
