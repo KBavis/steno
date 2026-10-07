@@ -18,6 +18,9 @@ from typing import Any
 
 from steno.graph.build import POINTERS, SHARED, GraphPlan
 
+# Neo4j returns a node's `id` among its properties; the plan keeps it apart. Never compared,
+# and never removed.
+IDENTITY = "id"
 VOLATILE = {
     "ingestion_job",
     "last_seen",
@@ -108,19 +111,22 @@ def diff(plan: GraphPlan, existing: Existing) -> Delta:
 
 
 def nulls_for(before: dict[str, Any] | None, after: dict[str, Any]) -> dict[str, None]:
-    """Properties a rewrite should drop: set before, gone now. Never first_seen or cards."""
+    """Properties a rewrite should drop: set before, gone now. Never the id, first_seen, or
+    cards."""
     if before is None:
         return {}
-    return {
-        k: None for k in before if k not in after and k != "first_seen" and not k.startswith(LATER)
-    }
+    keep = {IDENTITY, "first_seen"}
+    return {k: None for k in before if k not in after and k not in keep and not k.startswith(LATER)}
 
 
 def _comparable(props: dict[str, Any]) -> dict[str, Any]:
     out = {
         k: v
         for k, v in props.items()
-        if k not in VOLATILE and k not in NODE_POINTERS and not k.startswith(LATER)
+        if k not in VOLATILE
+        and k not in NODE_POINTERS
+        and k != IDENTITY
+        and not k.startswith(LATER)
     }
     if isinstance(out.get("trace"), str):
         out["trace"] = [_strip_pointers(e) for e in json.loads(out["trace"])]
@@ -194,7 +200,11 @@ def _without_trace(props: dict[str, Any] | None) -> dict[str, Any] | None:
 def _clean(props: dict[str, Any] | None) -> dict[str, Any] | None:
     if props is None:
         return None
-    return {k: v for k, v in props.items() if k not in VOLATILE and not k.startswith(LATER)}
+    return {
+        k: v
+        for k, v in props.items()
+        if k not in VOLATILE and k != IDENTITY and not k.startswith(LATER)
+    }
 
 
 def _trace_change(

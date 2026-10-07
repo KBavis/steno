@@ -4,7 +4,7 @@ import copy
 import json
 
 from steno.graph.build import GraphPlan
-from steno.graph.delta import Existing, changes, diff
+from steno.graph.delta import Existing, changes, diff, nulls_for
 
 FLOW = "flow:demo:POST /x"
 STEP = f"step:{FLOW}:svc.run"
@@ -26,14 +26,24 @@ def _plan(commit: str = "c1", line: int = 10, body: str = "aaa") -> GraphPlan:
 
 
 def _graph_holding(plan: GraphPlan) -> Existing:
-    """The graph as it is after writing `plan`."""
+    """The graph as it is after writing `plan`: Neo4j returns each node's `id` and
+    `first_seen` among its properties."""
     e = Existing()
     for n in plan.nodes.values():
-        e.nodes[n.id] = (n.labels, copy.deepcopy(n.props))
+        stored = {**copy.deepcopy(n.props), "id": n.id, "first_seen": "t0"}
+        e.nodes[n.id] = (n.labels, stored)
         e.repo_nodes.add(n.id)
     for key, edge in plan.edges.items():
         e.edges[key] = copy.deepcopy(edge.props)
     return e
+
+
+def test_a_rewrite_never_removes_the_id():
+    """A changed node is written with the properties that disappeared set to null; its id
+    and first_seen must never be among them."""
+    delta = diff(_plan(body="bbb"), _graph_holding(_plan()))
+    ((_, before, after),) = delta.nodes
+    assert nulls_for(before, after) == {}
 
 
 def test_rewriting_the_same_code_changes_nothing():
