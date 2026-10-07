@@ -42,7 +42,13 @@ CLUE_FIELDS: dict[str, dict[str, str]] = {
     "prefix": {"owner": "symbol", "value": "value"},
     "mount": {"parent": "symbol", "child": "symbol", "prefix": "value"},
     "property": {"key": "text", "value": "value"},
-    "client": {"type": "class", "target": "ref", "operations": "literal", "returns": "literal"},
+    "client": {
+        "type": "class",
+        "target": "ref",
+        "operations": "literal",
+        "returns": "literal",
+        "extends": "literal",
+    },
 }
 NODE_SYMBOL_PROPS = {"prefixed_by"}  # completed later by an assembler, not stored on the node
 
@@ -327,6 +333,20 @@ class Engine:
         value = self.resolver.value_of(cap.expr, ctx.scope) if self.resolver else UNRESOLVED
         return UNRESOLVED_TEXT if value is UNRESOLVED else value
 
+    def _parameter_function(self, ctx: Ctx, spec: Any) -> NodeRef | None:
+        """A function reference that's one of the enclosing function's parameters, as in a
+        helper that wraps `FunctionTool.from_defaults(async_fn=async_fn)`: which function it
+        holds is up to each caller, so the assembler fills it in from the call sites."""
+        cap = self._cap(ctx, spec)
+        if (
+            isinstance(cap, Capture)
+            and isinstance(cap.expr, ast.Name)
+            and ctx.function is not None
+            and cap.expr.id in ctx.function.params
+        ):
+            return NodeRef.of("Function", {"param_of": ctx.function.qualname, "param": cap.expr.id})
+        return None
+
     def _url_template(self, ctx: Ctx, spec: Any) -> str | None:
         """A URL the resolver can't fully know, with its runtime parts as placeholders
         (`https://{domain}/rest/api/content`): the host or the path is often still there."""
@@ -400,9 +420,17 @@ class Engine:
                 url = self._url_template(ctx, body.get("url"))
             return HttpRef(str(method).upper(), url if isinstance(url, str) else UNRESOLVED_TEXT)
         if kind == "Function":
+            held = self._parameter_function(ctx, body.get("symbol"))
+            if held is not None:
+                return held
             symbol = self._symbol(ctx, body.get("symbol"))
             if symbol is _OMIT:
                 raise _Drop("function reference without a symbol")
+            if self.resolver and not isinstance(self.resolver.lookup(str(symbol)), FunctionInfo):
+                # A parameter or a value built at runtime: which function it holds isn't known
+                raise _Drop(
+                    f"function reference {str(symbol).rsplit('.', 1)[-1]!r} isn't a known function"
+                )
             return NodeRef.of("Function", {"symbol": symbol})
         props = {
             k: v for k, v in ((k, self._value(ctx, v)) for k, v in body.items()) if v is not _OMIT

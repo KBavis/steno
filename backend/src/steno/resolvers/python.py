@@ -429,7 +429,7 @@ class PythonResolver:
         if isinstance(expr, (ast.List, ast.ListComp)):
             return "builtins.list"
         if isinstance(expr, ast.Name):
-            return self._name_type(expr.id, scope)
+            return self._name_type(expr.id, scope, getattr(expr, "lineno", None))
         if isinstance(expr, ast.Attribute):
             if self._is_module_ref(expr.value, scope):
                 return None
@@ -457,7 +457,7 @@ class PythonResolver:
                 return ret
         return None
 
-    def _name_type(self, name: str, scope: Scope) -> str | None:
+    def _name_type(self, name: str, scope: Scope, at: int | None = None) -> str | None:
         fn = scope.function
         if fn is not None:
             if (
@@ -467,7 +467,7 @@ class PythonResolver:
             ):
                 return scope.self_type or fn.cls.qualname
             if name in fn.params or name in _local_names(fn.node):
-                return self._local_type(fn, name, scope)
+                return self._local_type(fn, name, scope, at)
         mod = scope.module
         if name in mod.annotations:
             return self.annotation_type(mod.annotations[name], Scope(mod))
@@ -481,7 +481,12 @@ class PythonResolver:
                 return self._name_type(found[1], Scope(found[0]))
         return None
 
-    def _local_type(self, fn: FunctionInfo, name: str, scope: Scope) -> str | None:
+    def _local_type(
+        self, fn: FunctionInfo, name: str, scope: Scope, at: int | None = None
+    ) -> str | None:
+        """A local's type: its annotation if it has one, else the type of what it's assigned.
+        With `at` (the line it's used on), the nearest assignment before that line wins, so a
+        name reassigned in each `match` branch has each branch's type."""
         annotation = fn.params.get(name)
         if annotation is not None:
             return self.annotation_type(annotation, Scope(fn.module))
@@ -492,17 +497,60 @@ class PythonResolver:
                 and node.target.id == name
             ):
                 return self.annotation_type(node.annotation, Scope(fn.module))
+        # (line, how to type it) for each place the name is bound, nearest first
+        bindings: list[tuple[int, Any]] = []
         for node in _walk_body(fn.node):
-            if isinstance(node, ast.Assign) and any(
-                isinstance(t, ast.Name) and t.id == name for t in node.targets
-            ):
-                typ = self.type_of(node.value, scope)
-                if typ:
-                    return typ
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id == name:
+                        bindings.append((node.lineno, lambda v=node.value: self.type_of(v, scope)))
+                    elif isinstance(target, ast.Tuple):  # a, b = f() -> tuple[A, B]
+                        for i, elt in enumerate(target.elts):
+                            if isinstance(elt, ast.Name) and elt.id == name:
+                                bindings.append(
+                                    (
+                                        node.lineno,
+                                        lambda v=node.value, i=i: self._unpacked(v, i, scope),
+                                    )
+                                )
             elif isinstance(node, (ast.With, ast.AsyncWith)):
                 for item in node.items:
                     if isinstance(item.optional_vars, ast.Name) and item.optional_vars.id == name:
-                        return self._with_type(item.context_expr, scope)
+                        bindings.append(
+                            (node.lineno, lambda e=item.context_expr: self._with_type(e, scope))
+                        )
+        before = [b for b in bindings if at is None or b[0] <= at] or bindings
+        ordered = (
+            sorted(before, key=lambda b: -b[0])
+            if at is not None
+            else sorted(before, key=lambda b: b[0])
+        )
+        for _, typed in ordered:
+            typ = typed()
+            if typ:
+                return typ
+        return None
+
+    def _unpacked(self, value: ast.expr, index: int, scope: Scope) -> str | None:
+        """The type of element `index` when `value` is unpacked: from a literal tuple, or a
+        function annotated `-> tuple[A, B]`."""
+        if isinstance(value, ast.Await):
+            value = value.value
+        if isinstance(value, ast.Tuple) and index < len(value.elts):
+            return self.type_of(value.elts[index], scope)
+        if isinstance(value, ast.Call):
+            fn = self.function_of(value.func, scope)
+            ret = fn.node.returns if fn is not None else None
+            if isinstance(ret, ast.Constant) and isinstance(ret.value, str):
+                try:
+                    ret = ast.parse(ret.value, mode="eval").body
+                except SyntaxError:
+                    return None
+            if isinstance(ret, ast.Subscript) and fn is not None:
+                base = self.symbol_of(ret.value, Scope(fn.module)) or ""
+                elts = ret.slice.elts if isinstance(ret.slice, ast.Tuple) else [ret.slice]
+                if base.rsplit(".", 1)[-1] in ("tuple", "Tuple") and index < len(elts):
+                    return self.annotation_type(elts[index], Scope(fn.module))
         return None
 
     def _with_type(self, expr: ast.expr, scope: Scope) -> str | None:
@@ -809,6 +857,32 @@ class PythonResolver:
                 templates.append(self._template(arg, self.scope_of(caller, caller_type), depth))
         return _agree(templates)
 
+    def functions_passed(
+        self, fn: FunctionInfo, name: str, depth: int = 0
+    ) -> list[tuple[FunctionInfo, str, int]]:
+        """The functions callers pass for `fn`'s parameter `name`: (caller, function, line).
+        Followed through helpers that pass their own parameter along, and from an abstract
+        method to its implementations."""
+        if depth > 4 or name not in fn.params:
+            return []
+        params = list(fn.params)
+        bound = fn.cls is not None and params[:1] == ["self"]
+        out: list[tuple[FunctionInfo, str, int]] = []
+        for caller, call in self.callers_of(fn):
+            arg = _argument(call, name, params.index(name), bound)
+            if arg is None:
+                continue
+            if isinstance(arg, ast.Name) and arg.id in caller.params:
+                out += self.functions_passed(caller, arg.id, depth + 1)
+                continue
+            scope = self.scope_of(caller, caller.cls.qualname if caller.cls else None)
+            target, _ = self._call_target(arg, scope)
+            if target is None:
+                continue
+            held = (self.implementations(target) if self.is_abstract(target) else []) or [target]
+            out += [(caller, h.qualname, call.lineno) for h in held]
+        return out
+
     def callers_of(self, fn: FunctionInfo) -> list[tuple[FunctionInfo, ast.Call]]:
         """Every call in the repository that runs `fn`, with the function it's in."""
         if self._callers is None:
@@ -853,6 +927,26 @@ class PythonResolver:
                 return
             if isinstance(node, ast.Call):
                 callee, receiver = self._call_target(node.func, scope)
+                if callee is None:
+                    # A method the declared type doesn't have, but its subclasses do
+                    # (`issue_provider.get_linked_pull_requests()` on the base type)
+                    only_below = self._subclass_methods(node.func, scope)
+                    if only_below:
+                        end = (
+                            node.end_lineno or node.lineno,
+                            node.end_col_offset or node.col_offset,
+                        )
+                        found.append(
+                            Invocation(
+                                only_below[0],
+                                end[0],
+                                end[1],
+                                conditional,
+                                in_loop,
+                                None,
+                                tuple(only_below),
+                            )
+                        )
                 if callee is not None:
                     # Ordered by where each call ends: in `Runner(x).run()`,
                     # the constructor runs first
@@ -882,6 +976,21 @@ class PythonResolver:
         for stmt in fn.node.body:
             visit(stmt, False, False)
         return sorted(found, key=lambda i: (i.line, i.column))
+
+    def _subclass_methods(self, func: ast.expr, scope: Scope) -> list[str]:
+        """`x.m()` where x's repository class has no method `m` but subclasses define it:
+        every subclass version, since which one runs is decided at runtime."""
+        if not isinstance(func, ast.Attribute) or self._is_module_ref(func.value, scope):
+            return []
+        owner = self.type_of(func.value, scope) or self.class_of(func.value, scope)
+        found = self.lookup(owner) if owner else None
+        if not isinstance(found, ClassInfo):
+            return []
+        return sorted(
+            m.qualname
+            for cls in self.subclasses(found.qualname)
+            if (m := cls.methods.get(func.attr)) is not None and not self.is_abstract(m)
+        )
 
     def _call_target(self, func: ast.expr, scope: Scope) -> tuple[FunctionInfo | None, str | None]:
         """The function a call runs, and the repository class it was called on (if any)."""
@@ -1069,7 +1178,11 @@ def _local_names(fn: FuncNode) -> set[str]:
     names = set()
     for node in _walk_body(fn):
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
-            names |= {t.id for t in _targets(node) if isinstance(t, ast.Name)}
+            for t in _targets(node):
+                if isinstance(t, ast.Name):
+                    names.add(t.id)
+                elif isinstance(t, ast.Tuple):  # a, b = ...
+                    names |= {e.id for e in t.elts if isinstance(e, ast.Name)}
         elif isinstance(node, (ast.With, ast.AsyncWith)):
             names |= {
                 i.optional_vars.id for i in node.items if isinstance(i.optional_vars, ast.Name)

@@ -104,6 +104,8 @@ class GraphPlan:
     edges: dict[tuple[str, str, str], GraphEdge] = field(default_factory=dict)
     # What the run measured but doesn't write: call graph size, effects no flow reaches
     stats: dict[str, Any] = field(default_factory=dict)
+    # Functions an entry point reaches (coverage reads it; too large for the stage metrics)
+    reached: set[str] = field(default_factory=set)
 
     def node(self, id: str, labels: list[str], **props: Any) -> str:
         existing = self.nodes.get(id)
@@ -492,14 +494,15 @@ class _Builder:
         self.calls: dict[Key, list[Invocation]] = {}
         self._bind_memo: dict[Key, bool] = {}
         # Calls a rule found that the resolver can't see (a function handed to a background
-        # task): (callee, line), merged into the caller's calls by line
-        rule_calls: dict[str, list[tuple[str, int]]] = defaultdict(list)
+        # task, or to a worker thread): (callee, line, async), merged into the caller's calls
+        rule_calls: dict[str, list[tuple[str, int, bool]]] = defaultdict(list)
         for e in self.x.edges:
             if _is_function(e.src) and _is_function(e.dst):
                 caller = e.src.as_dict.get("symbol")  # type: ignore[union-attr]
                 callee = e.dst.as_dict.get("symbol")  # type: ignore[union-attr]
                 if caller in self.functions and callee in self.functions:
-                    rule_calls[caller].append((callee, e.origin.line))
+                    is_async = bool(e.props.get("async"))
+                    rule_calls[caller].append((callee, e.origin.line, is_async))
 
         self.roots = {
             (ep.function, None) for ep in self.x.entry_points if ep.function in self.functions
@@ -524,6 +527,7 @@ class _Builder:
             k for k in reachable if len(callers[k]) >= UTILITY_FAN_IN and k not in self.significant
         }
         reached_symbols = {k[0] for k in reachable}
+        self.plan.reached = reached_symbols
         unreached = sorted(sym for sym in self.effects if sym not in reached_symbols)
         self.plan.stats.update(
             functions=len(self.functions),
@@ -537,20 +541,22 @@ class _Builder:
             ],
         )
 
-    def _calls_from(self, key: Key, rule_calls: list[tuple[str, int]]) -> list[Call]:
+    def _calls_from(self, key: Key, rule_calls: list[tuple[str, int, bool]]) -> list[Call]:
         """A function's calls in source order. A rule's call to a function the code already
-        calls there marks that call async instead of adding another (D45)."""
+        calls there merges into that call (marking it async if the rule says so) instead of
+        adding another (D45)."""
         out: list[Call] = []
         for inv in self._calls_of(key):
             for target, candidate in self._targets(inv):
                 out.append(Call(target, inv.line, inv.conditional, inv.in_loop, False, candidate))
-        for callee, line in rule_calls:
+        for callee, line, is_async in rule_calls:
             same = [i for i, c in enumerate(out) if c.target[0] == callee]
             if same:
                 c = out[same[0]]
-                out[same[0]] = Call(c.target, c.line, c.conditional, c.in_loop, True, c.candidate)
+                merged = c.is_async or is_async
+                out[same[0]] = Call(c.target, c.line, c.conditional, c.in_loop, merged, c.candidate)
             else:
-                out.append(Call((callee, None), line, is_async=True))
+                out.append(Call((callee, None), line, is_async=is_async))
         return sorted(out, key=lambda c: c.line)  # stable: same-line calls keep their order
 
     def _calls_of(self, key: Key) -> list[Invocation]:

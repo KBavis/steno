@@ -23,7 +23,7 @@ from steno.extraction.facts import (
     Origin,
     TableOfRef,
 )
-from steno.resolvers.python import PythonResolver, Scope
+from steno.resolvers.python import FunctionInfo, PythonResolver, Scope
 
 
 def assemble(x: Extraction, r: PythonResolver | None, repo: Path) -> None:
@@ -32,6 +32,7 @@ def assemble(x: Extraction, r: PythonResolver | None, repo: Path) -> None:
     if r is not None:
         _tables(x, r)
         _clients(x, r, repo)
+        _passed_functions(x, r, repo)
     _partial_references(x)
     _dedupe_edges(x)
 
@@ -126,9 +127,14 @@ def _clients(x: Extraction, r: PythonResolver, repo: Path) -> None:
         receiver = r.type_of(call.func.value, r.scope_of(fn))
         if receiver is None:
             continue
-        for clue in clients:
-            if not r.is_subclass(receiver, [clue.fields["type"]]):
-                continue
+        matched = [c for c in clients if r.is_subclass(receiver, [c.fields["type"]])]
+        props: dict[str, Any] = {}
+        if not matched:
+            # Typed only as a library base class (`FunctionCallingLLM`): every client this app
+            # builds whose type extends it can be the one that runs (D47), like DI candidates
+            matched = [c for c in clients if _extends(r, c, receiver)]
+            props = {"candidate": True, **({"ambiguous": True} if len(matched) > 1 else {})}
+        for clue in matched:
             edge_type = _client_edge(clue, call.func.attr)
             if edge_type:
                 origin = Origin(
@@ -142,10 +148,56 @@ def _clients(x: Extraction, r: PythonResolver, repo: Path) -> None:
                         edge_type,
                         NodeRef.of("Function", {"symbol": fn.qualname}),
                         clue.fields["target"],
-                        {},
+                        dict(props),
                         origin,
                     )
                 )
+
+
+def _extends(r: PythonResolver, clue: ClueFact, receiver: str) -> bool:
+    """Whether a client's type is known to inherit from `receiver`. Library classes aren't
+    read, so the rule lists the library bases its client extends, the whole chain
+    (`extends: [FunctionCallingLLM, LLM, BaseLLM]`)."""
+    bases = clue.fields.get("extends") or []
+    return isinstance(bases, list) and receiver in bases
+
+
+def _passed_functions(x: Extraction, r: PythonResolver, repo: Path) -> None:
+    """A rule's edge to "the function parameter `p` holds" (a helper wrapping
+    `FunctionTool.from_defaults(async_fn=p)`) becomes an edge from each caller of the helper
+    to the function it passes: `_init_tooling` registers `_grep_search_wrapper`."""
+    kept = []
+    for edge in x.edges:
+        dst = edge.dst
+        held = dst.as_dict if isinstance(dst, NodeRef) and dst.label == "Function" else {}
+        if "param_of" not in held:
+            kept.append(edge)
+            continue
+        helper = r.lookup(held["param_of"])
+        passed = (
+            r.functions_passed(helper, held["param"]) if isinstance(helper, FunctionInfo) else []
+        )
+        if not passed:
+            x.dropped.append(
+                (edge.origin, f"function passed as {held['param']!r} isn't known at any call site")
+            )
+            continue
+        for caller, function, line in passed:
+            kept.append(
+                EdgeFact(
+                    edge.type,
+                    NodeRef.of("Function", {"symbol": caller.qualname}),
+                    NodeRef.of("Function", {"symbol": function}),
+                    dict(edge.props),
+                    Origin(
+                        edge.origin.rule,
+                        edge.origin.pack,
+                        caller.module.path.relative_to(repo).as_posix(),
+                        line,
+                    ),
+                )
+            )
+    x.edges[:] = kept
 
 
 def _client_edge(clue: ClueFact, method: str) -> str | None:

@@ -1,0 +1,4 @@
+# The agent runs a tool later, when the model calls it: async, like a background task
+edges:
+  - INVOKES: { from: tools.Tools.build, to: tools.Tools._grep_search, async: true }
+  - INVOKES: { from: tools.Tools.build, to: tools.lookup, async: true }

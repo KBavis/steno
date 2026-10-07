@@ -1,0 +1,4 @@
+# The function reaches FunctionTool through the app's own helper's parameter: the edge goes
+# from the helper's caller to the function it passes
+edges:
+  - INVOKES: { from: tools.Tools.build, to: tools.Tools._grep_search, async: true }

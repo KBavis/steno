@@ -182,7 +182,7 @@ pre .c { color: var(--muted); }
       <li><a href="#parts">Each part</a></li>
       <li><a href="#data">Where data lives</a></li>
       <li><a href="#job">A job, end to end</a></li>
-      <li><a href="#stages">The eight stages</a></li>
+      <li><a href="#stages">The nine stages</a></li>
       <li><a href="#read">Reading the graph back</a></li>
       <li><a href="#debug">When the graph looks wrong</a></li>
       <li><a href="#status">Built and not built</a></li>
@@ -362,7 +362,7 @@ pre .c { color: var(--muted); }
         </div>
         <div class="card mem">
           <h4>Worker <span class="tag yes">built</span></h4>
-          <p>A loop: claim the oldest queued job, run eight stages in order, mark the job succeeded or failed. One job at a time per process; run more processes for parallelism.</p>
+          <p>A loop: claim the oldest queued job, run nine stages in order, mark the job succeeded or failed. One job at a time per process; run more processes for parallelism.</p>
           <span class="where">ingestion/worker.py · queue.py · pipeline.py</span>
         </div>
         <div class="card mem">
@@ -510,7 +510,7 @@ pre .c { color: var(--muted); }
 
     <!-- 5 -->
     <section id="stages">
-      <h2><span class="num">05</span>The eight stages</h2>
+      <h2><span class="num">05</span>The nine stages</h2>
       <p class="lede">The worker's whole job is this list, in this order. Each stage is a function in <code>ingestion/pipeline.py</code> that returns its metrics.</p>
       <div class="table-wrap">
         <table>
@@ -523,6 +523,7 @@ pre .c { color: var(--muted); }
             <tr><td><code>assemble</code></td><td>Combines clues across files into complete facts: URL prefix chains, entity → table, SDK clients, partial references; writes the facts JSON</td><td>completed facts</td></tr>
             <tr><td><code>flows</code></td><td>Finds modules and applications, builds the call graph in memory, one Flow per entry point with its trace, Steps for its significant functions (carrying their effects), rolls effects up onto flows</td><td>the graph plan</td></tr>
             <tr><td><code>write</code></td><td>Compare the plan with the graph by stable ID; write new and changed facts, delete what this repository no longer has, log each change in <code>fact_change</code>, move <code>last_ingested_sha</code></td><td>the graph, the change history</td></tr>
+            <tr><td><code>coverage</code></td><td>Collects what no rule explained (unknown hosts, unexplained I/O calls, uncovered libraries, unreachable code, matches it couldn't check, unparsed files); stores a <code>coverage_item</code> per gap, carrying triage over from the last run</td><td>the coverage report</td></tr>
             <tr><td><code>cards</code></td><td>Skipped: LLM purposes and narratives aren't built</td><td>nothing</td></tr>
           </tbody>
         </table>
@@ -594,7 +595,7 @@ uv run steno extract ~/projects/contextualized --json out.json   <span class="c"
           <tbody>
             <tr><td>Steps (L2) and traces (L3) instead of Function nodes (D60)</td><td><span class="tag yes">built</span></td><td>No Function nodes or <code>INVOKES</code>. Each Flow has a <code>trace</code>; its significant functions are Step nodes with their effects</td></tr>
             <tr><td>Cards, flow purposes and narratives</td><td><span class="tag no">not built</span></td><td>No <code>card</code> property; search matches names only</td></tr>
-            <tr><td>Coverage report (D62)</td><td><span class="tag part">schema only</span></td><td>Triage states and signal kinds exist in <code>coverage_item</code>; nothing writes them. Effects no flow reaches are listed in the flows stage's metrics as <code>unreached_effects</code>; dropped matches are in the facts file</td></tr>
+            <tr><td>Coverage report (D62, D65)</td><td><span class="tag part">partial</span></td><td>Six signals, triage, and the Coverage page are built. Cross-app inconsistencies and unread config aren't</td></tr>
             <tr><td>Nightly updates, delta (D59)</td><td><span class="tag part">partial</span></td><td>Workers queue a run each night for repositories whose branch moved; every run writes only what changed and logs it in <code>fact_change</code>. Commits aren't mapped to PRs yet (<code>job_commit</code> stays empty)</td></tr>
             <tr><td>Config property clues</td><td><span class="tag part">partial</span></td><td>The engine can run config rules, but no pack has one, so no YAML or .env value feeds resolution</td></tr>
             <tr><td>Java (rules, resolver, deps)</td><td><span class="tag no">not built</span></td><td>Java packs never enable; no Java functions or flows</td></tr>

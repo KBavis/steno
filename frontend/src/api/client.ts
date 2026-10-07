@@ -2,7 +2,7 @@
 
 export type JobMode = 'full' | 'dry_run'
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed'
-export type StageName = 'clone' | 'deps' | 'parse' | 'extract' | 'assemble' | 'flows' | 'write' | 'cards'
+export type StageName = 'clone' | 'deps' | 'parse' | 'extract' | 'assemble' | 'flows' | 'write' | 'coverage' | 'cards'
 export type StageStatus = 'running' | 'succeeded' | 'failed' | 'skipped'
 
 export interface Health {
@@ -79,6 +79,57 @@ export interface Stage {
 
 export interface JobDetail extends Job {
   stages: Stage[]
+}
+
+// ---------------------------------------------------------------- coverage
+
+export type CoverageStatus = 'unexplained' | 'ignored' | 'explained'
+export type CoverageSignal = 'unknown_host' | 'external_call' | 'library' | 'unreachable_effect' | 'dropped_match' | 'unparsed'
+
+export interface CoverageSample {
+  file?: string | null
+  line?: number | null
+  function?: string | null
+  detail?: string | null
+  repository: string
+  url?: string | null
+}
+export interface CoverageItem {
+  kind: string
+  signal: CoverageSignal
+  target: string
+  label: string
+  /** In the current scope */
+  occurrences: number
+  status: CoverageStatus
+  applications: { name: string; occurrences: number; space: string | null }[]
+  /** How many spaces those applications are in */
+  spaces: number
+  samples: CoverageSample[]
+}
+export interface CoverageNumbers {
+  applications: number
+  functions: number
+  functions_reachable: number
+  reachable_pct: number | null
+  io_calls: number
+  io_calls_explained: number
+  io_explained_pct: number | null
+  open_items: number
+}
+/** A space or application under the current scope, with its rolled-up numbers */
+export interface CoverageRow extends CoverageNumbers {
+  scope: string
+  kind: 'space' | 'application'
+  label: string
+}
+export interface CoverageReport {
+  scope: string
+  breadcrumbs: { scope: string; label: string }[]
+  summary: CoverageNumbers
+  children: CoverageRow[]
+  items: CoverageItem[]
+  runs: { application: string; repository: string; job_id: number; commit: string | null; finished_at: string | null }[]
 }
 
 // ---------------------------------------------------------------- graph views
@@ -256,6 +307,11 @@ export const api = {
     search: (text: string) => request<SearchHit[]>(`/graph/search?${q({ q: text })}`),
   },
   job: (id: number) => request<JobDetail>(`/jobs/${id}`),
+  coverage: {
+    report: (scope = 'org') => request<CoverageReport>(`/coverage?${q({ scope })}`),
+    triage: (kind: string, target: string, status: CoverageStatus) =>
+      request<{ updated: number }>('/coverage/triage', { method: 'PUT', body: JSON.stringify({ kind, target, status }) }),
+  },
   createJob: (repository_id: number, mode: JobMode) =>
     request<Job>('/jobs', { method: 'POST', body: JSON.stringify({ repository_id, mode }) }),
 }

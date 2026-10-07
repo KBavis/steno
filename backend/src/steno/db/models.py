@@ -117,6 +117,7 @@ class StageName(StrEnum):
     ASSEMBLE = "assemble"
     FLOWS = "flows"
     WRITE = "write"
+    COVERAGE = "coverage"
     CARDS = "cards"
 
 
@@ -136,6 +137,7 @@ class CoverageKind(StrEnum):
     UNMET_JOIN = "unmet_join"  # a blank an assembler couldn't fill, an unresolved call
     INCONSISTENCY = "inconsistency"  # produced but never consumed, a call to a missing endpoint
     CONFIG = "config"  # a config key that looks like a host, URL, topic, or queue, unread
+    UNPARSED = "unparsed"  # a file Steno couldn't read at all
 
 
 class CoverageStatus(StrEnum):
@@ -314,9 +316,15 @@ class CoverageItem(Base):
         ForeignKey("repository.id", ondelete="CASCADE"), index=True
     )
     kind: Mapped[CoverageKind] = mapped_column(_enum(CoverageKind, "coverage_kind"))
+    # Finer than kind (unknown_host, dropped_match, external_call, …), and how it reads
+    signal: Mapped[str] = mapped_column(String(32), default="")
+    label: Mapped[str] = mapped_column(Text, default="")
+    # The key, with kind: the same gap in another run or repository is the same item (D62)
     target_symbol: Mapped[str] = mapped_column(Text)
     occurrences: Mapped[int] = mapped_column(Integer, default=0)
     samples: Mapped[list[Any]] = mapped_column(default=list)
+    # Where it occurs, by application (a repository can build several): name → occurrences
+    applications: Mapped[dict[str, Any]] = mapped_column(default=dict)
     status: Mapped[CoverageStatus] = mapped_column(
         _enum(CoverageStatus, "coverage_status"), default=CoverageStatus.UNEXPLAINED
     )

@@ -1,0 +1,5 @@
+# The caller awaits the thread, so these are ordinary (not async) calls
+edges:
+  - INVOKES: { from: chunks.ChunkService.store, to: chunks.ChunkService._save }
+  - INVOKES: { from: chunks.ChunkService.store, to: chunks.ChunkService._hash }
+  - INVOKES: { from: chunks.warm, to: chunks.load_model }

@@ -203,16 +203,22 @@ UNEXPLAINED (org-wide, top 3)
 
 **Triage states (D62).** Every item is **unexplained**, **ignored** (looked at; not I/O, e.g. a logging or string helper), or **explained** (a rule now covers it). The state persists across runs, so ignored noise stays hidden and the open count per repository trends toward zero instead of staying noisy forever. Each repository gets completeness numbers from it: % of external calls explained, % of functions reachable from an entry point, open items.
 
-**What it looks for (Proposed).** Six signals, each a place a fact could hide:
+**What it looks for.** Each signal is a place a fact could hide. The first version (D65) builds six of them; the other two need more of the org ingested or config rules first.
 
-| Signal | What it catches |
-|---|---|
-| **Unexplained external calls** | Calls leaving first-party code that no rule explains and that aren't marked harmless, grouped by target (pre-filtered by Jev I8) |
-| **Libraries with no pack** | Declared or imported libraries no rule pack covers (`boto3 imported in 40 repos, no pack`) |
-| **Unreachable code** | The share of a repository's functions no entry point reaches, and functions with effects no flow reaches. Large unreachable clusters sharing an annotation or base class usually mean a missing entry-point (receiver) rule. |
-| **Unmet joins** | Facts with blanks the assemblers couldn't fill (partial paths), unresolved calls, ambiguous DI, HTTP calls to unknown hosts |
-| **Cross-app inconsistencies** | A topic or channel produced but never consumed, or consumed but never produced; a call to an endpoint the target app doesn't expose. Each means one side was missed. These get more useful as more of the org is ingested. |
-| **Config no rule read** | Config keys that look like hosts, URLs, topics, or queues that no rule read |
+| Signal | What it catches | Built |
+|---|---|---|
+| **Unknown hosts** | HTTP calls whose host is runtime data (D64), one item per calling class, with each call's URL template. Listed first: they're the `Unknown host` nodes in the graph. | Yes |
+| **Unexplained external calls** | Calls into a library that look like I/O (named like it: `execute`, `post`, `send`, `acomplete`; the stand-in for Jev I8), where no rule matched the call and no rule from the pack covering that library recorded anything in the same function. Grouped by the library function called. | Yes |
+| **Libraries with no pack** | I/O libraries the code imports that no rule pack covers, or any library with unexplained I/O calls (`redis imported in 4 files, no pack`) | Yes |
+| **Unreachable code** | Functions with effects that no entry point reaches. Clusters usually mean a missing entry-point (receiver) rule, or runtime dispatch the call graph can't follow. | Yes |
+| **Couldn't check** | Matches a rule found but couldn't complete because Steno couldn't tell (a condition it couldn't check, a name it couldn't resolve). Drops that are a rule working as designed (`table_of` on something that isn't an entity) aren't listed. | Yes |
+| **Unparsed files** | Files Steno couldn't read at all: nothing in them is in the graph | Yes |
+| **Cross-app inconsistencies** | A topic or channel produced but never consumed, or consumed but never produced; a call to an endpoint the target app doesn't expose. Each means one side was missed. | Later: needs several applications (POC stage B) |
+| **Config no rule read** | Config keys that look like hosts, URLs, topics, or queues that no rule read | Later: needs config rules |
+
+**By application, at any scope (D67).** Each item records the applications it occurs in (from its files' service modules), and the stage records each application's numbers. The report reads like the graph: the organization (its spaces, worst first), a space (its sub-spaces and applications), or one application, each with rolled-up numbers. Items are ranked by reach: how many applications, then spaces, one fix would help.
+
+**How it runs.** A `coverage` stage after `write` collects the items (`coverage/collect.py`) and stores one `coverage_item` per gap, keyed by kind and target, with up to five sample locations. Each item takes its status from the repository's previous run, so an ignored item stays ignored; an item marked explained that comes back is open again (a rule didn't cover it after all). The stage's metrics are the repository's completeness numbers: **% of I/O calls explained**, **% of functions reached** from an entry point, and the item counts. The Admin API serves the org-wide report (`GET /api/coverage`: each repository's latest run, items grouped across repositories) and triage (`PUT /api/coverage/triage`, applied everywhere the item appears); the UI's Coverage page shows both.
 
 The most frequent items are exactly the internal frameworks worth covering. Each can be fixed by:
 1. **Adding a rule** to the org pack, or
@@ -334,6 +340,8 @@ Steno's own small symbol resolver, built on Python's `ast` module (D51); rules s
 2. **Types:** from annotations (`client: httpx.AsyncClient`, `-> Ollama`), constructor assignments (`x = Job()`), `with … as x`, and `self.x` attributes set in `__init__`.
 3. **Methods:** find the method on the resolved type, walking base classes in the repository and, by name, in libraries.
 4. **DI:** FastAPI's `Depends(provider)` uses the parameter's annotation when it's concrete; otherwise the provider's return type.
+
+It also follows (2026-10-07): **tuple unpacking** of a function annotated `-> tuple[A, B]`; a local reassigned in each branch, typed by its **nearest earlier assignment**; a call on a base type to a method **only its subclasses define** (each implementation, marked `candidate`); and a **function passed through a helper's parameter** (`_build_tool(async_fn=self._grep)`), back to what each caller passes.
 
 What it can't follow (dynamic attribute access, values built at runtime, untyped parameters) is marked unresolved and shows up in the coverage report. Pyright or Jedi are options only if those gaps turn out to matter.
 

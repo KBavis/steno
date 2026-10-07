@@ -1,9 +1,10 @@
-import { Building2, FolderGit2, Layers, Network, Plug, type LucideIcon } from 'lucide-react'
+import { Building2, FolderGit2, Layers, Network, Plug, ScanSearch, type LucideIcon } from 'lucide-react'
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { api, type Organization } from './api/client'
 import { HealthStatus } from './components/HealthStatus'
 import { ErrorAlert, Logo } from './components/ui'
 import { ConnectorsPage } from './pages/ConnectorsPage'
+import { CoveragePage } from './pages/CoveragePage'
 import { IngestionPage } from './pages/IngestionPage'
 import { OnboardingPage } from './pages/OnboardingPage'
 import { OrganizationPage } from './pages/OrganizationPage'
@@ -15,6 +16,7 @@ const VisualizePage = lazy(() => import('./pages/VisualizePage').then((m) => ({ 
 const TABS: Record<string, { label: string; icon: LucideIcon }> = {
   ingestion: { label: 'Ingestion', icon: FolderGit2 },
   visualize: { label: 'Visualize', icon: Network },
+  coverage: { label: 'Coverage', icon: ScanSearch },
   spaces: { label: 'Spaces', icon: Layers },
   connectors: { label: 'Connectors', icon: Plug },
   organization: { label: 'Organization', icon: Building2 },
@@ -98,6 +100,7 @@ export default function App() {
       </aside>
       <main className="content">
         {tab === 'ingestion' && <IngestionPage onNavigate={navigate} />}
+        {tab === 'coverage' && <CoveragePage />}
         {tab === 'spaces' && <SpacesPage />}
         {tab === 'connectors' && <ConnectorsPage />}
         {tab === 'organization' && <OrganizationPage organization={org} onChanged={setOrg} />}

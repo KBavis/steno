@@ -10,4 +10,10 @@ where:
 emit:
   - clue: client
     type: $CLS
+    extends:                     # library bases it inherits: a call on any of these may run here
+      - llama_index.core.llms.function_calling.FunctionCallingLLM
+      - llama_index.core.llms.FunctionCallingLLM
+      - llama_index.core.llms.llm.LLM
+      - llama_index.core.llms.LLM
+      - llama_index.core.base.llms.base.BaseLLM
     target: { ExternalSystem: { host: api.openai.com, name: OpenAI } }

@@ -1,0 +1,13 @@
+id: asyncio-to-thread
+description: A function run in a worker thread, e.g. await asyncio.to_thread(self._save_to_chroma_db, nodes, data_source)
+match:
+  rule:
+    # No comma after $FN: "$FN, $$$" would miss to_thread(f) with no arguments
+    pattern: asyncio.to_thread($FN $$$)
+  constraints:
+    FN: { not: { kind: call } }   # to_thread(f) runs f; to_thread(f()) would run whatever f returned
+emit:
+  # The caller awaits it, so it runs in order like a plain call (not async): only the thread differs
+  - edge: INVOKES
+    from: "@function"
+    to: { Function: { symbol: $FN } }

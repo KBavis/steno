@@ -1,0 +1,6 @@
+# The call is on FunctionCallingLLM; Ollama declares it extends that base, so the call may
+# run on the Ollama client this app builds: a candidate, like a DI choice
+clues:
+  - client: { type: llama_index.llms.ollama.Ollama, target: { ExternalSystem: { host: "localhost:11434", name: Ollama } } }
+edges:
+  - CALLS: { from: llm.BaseProvider.complete, to: { ExternalSystem: { host: "localhost:11434" } }, candidate: true }

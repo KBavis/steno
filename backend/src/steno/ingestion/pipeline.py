@@ -16,14 +16,19 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from steno.assemblers.assemble import assemble as run_assemblers
 from steno.config import get_settings
 from steno.connectors.git import clone as git_clone
+from steno.coverage.collect import collect as collect_coverage
 from steno.db.models import (
     ChangeKind,
     Connector,
+    CoverageItem,
+    CoverageKind,
+    CoverageStatus,
     FactChange,
     IngestionJob,
     IngestionStage,
@@ -98,7 +103,9 @@ def parse(ctx: JobContext) -> dict[str, Any]:
     """Pick the rule packs that apply, then read the code once: the symbol resolver's symbol table
     and a syntax tree per file. No rules run yet."""
     assert ctx.workspace is not None
-    packs = [p for p in load_packs(get_settings().rule_packs_dir) if is_enabled(p, ctx.workspace)]
+    all_packs = load_packs(get_settings().rule_packs_dir)
+    ctx.state["all_packs"] = all_packs  # coverage: which libraries any pack covers
+    packs = [p for p in all_packs if is_enabled(p, ctx.workspace)]
     engine = Engine(ctx.workspace, packs)
     engine.parse()
     ctx.state["engine"] = engine
@@ -162,6 +169,7 @@ def flows(ctx: JobContext) -> dict[str, Any]:
         http_systems=[s for p in engine.packs for s in p.http_systems],
     )
     ctx.state["plan"] = plan
+    ctx.state["structure"] = structure
     flow_nodes = [n for n in plan.nodes.values() if n.labels[0] == "Flow"]
     return {
         "modules": {m.path: sorted(m.roles) for m in structure.modules},
@@ -197,6 +205,69 @@ def write(ctx: JobContext) -> dict[str, Any]:
     return {**plan.counts(), "delta": delta.counts(), "fact_changes": len(rows)}
 
 
+def coverage(ctx: JobContext) -> dict[str, Any]:
+    """What no rule explained (docs/ingestion.md §4, Coverage report): one `coverage_item` per
+    gap, keyed by kind and target. Triage carries over from this repository's previous run:
+    an item someone ignored stays ignored (D62)."""
+    engine: Engine = ctx.state["engine"]
+    report = collect_coverage(
+        engine.out,
+        engine.resolver,
+        ctx.state["plan"],
+        ctx.state["all_packs"],
+        _application_of(ctx),
+    )
+    previous = _previous_triage(ctx)
+    for it in report.items:
+        status = previous.get((it.kind, it.target), CoverageStatus.UNEXPLAINED)
+        # "Explained" means a rule covers it now; if it's back, it isn't
+        if status == CoverageStatus.EXPLAINED:
+            status = CoverageStatus.UNEXPLAINED
+        ctx.session.add(
+            CoverageItem(
+                job_id=ctx.job.id,
+                repository_id=ctx.repository.id,
+                kind=CoverageKind(it.kind),
+                signal=it.signal,
+                label=it.label,
+                target_symbol=it.target,
+                occurrences=it.occurrences,
+                samples=it.samples,
+                applications=it.applications,
+                status=status,
+            )
+        )
+    return report.metrics
+
+
+def _application_of(ctx: JobContext) -> Any:
+    """The application a file belongs to: its service module's, else the repository itself
+    (library code, scripts)."""
+    structure = ctx.state["structure"]
+    repo = ctx.repository.name
+
+    def app_of(file: str | None) -> str:
+        module = structure.module_of(file) if file else None
+        if module is not None and "Service" in module.roles:
+            return str(structure.application_name(repo, module))
+        return repo
+
+    return app_of
+
+
+def _previous_triage(ctx: JobContext) -> dict[tuple[str, str], CoverageStatus]:
+    """Each item's status in this repository's latest earlier run that has coverage items."""
+    last = ctx.session.scalar(
+        select(func.max(CoverageItem.job_id)).where(
+            CoverageItem.repository_id == ctx.repository.id, CoverageItem.job_id != ctx.job.id
+        )
+    )
+    if last is None:
+        return {}
+    rows = ctx.session.scalars(select(CoverageItem).where(CoverageItem.job_id == last))
+    return {(r.kind.value, r.target_symbol): r.status for r in rows}
+
+
 def cards(ctx: JobContext) -> dict[str, Any]:
     """Generate LLM purposes and narratives. In a dry run: count tokens and project cost only."""
     raise Skip("not built yet")
@@ -210,6 +281,7 @@ STAGES: list[tuple[StageName, StageFn]] = [
     (StageName.ASSEMBLE, assemble),
     (StageName.FLOWS, flows),
     (StageName.WRITE, write),
+    (StageName.COVERAGE, coverage),
     (StageName.CARDS, cards),
 ]
 

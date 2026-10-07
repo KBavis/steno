@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select
 
 from steno.api.deps import SessionDep
+from steno.api.links import source_url
 from steno.db.models import Repository
 from steno.graph.driver import database, get_driver
 from steno.graph.views import GraphViews
@@ -69,14 +70,8 @@ def search(q: str = Query(..., min_length=1)) -> list[dict[str, Any]]:
 def _source_url(
     session: Any, repo: str | None, commit: str | None, path: str | None, line: int | None
 ) -> str | None:
-    """A link to the exact line at the ingested commit (GitHub and GitLab URL shapes)."""
+    """A link to the exact line at the ingested commit."""
     if not (repo and commit and path):
         return None
     row = session.scalar(select(Repository).where(Repository.name == repo))
-    if row is None or not row.clone_url.startswith("https://"):
-        return None
-    base = row.clone_url.removesuffix(".git")
-    anchor = f"#L{line}" if line else ""
-    if "gitlab" in base:
-        return f"{base}/-/blob/{commit}/{path}{anchor}"
-    return f"{base}/blob/{commit}/{path}{anchor}"
+    return source_url(row.clone_url if row else None, commit, path, line)

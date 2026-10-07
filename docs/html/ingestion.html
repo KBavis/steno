@@ -260,7 +260,7 @@ pre .k-emit { color: var(--neo); font-weight: 500; }
     <header class="intro">
       <div class="eyebrow">Steno · ingestion · as built on main, October 2026</div>
       <h1>How a repository becomes a graph</h1>
-      <p>Ingestion runs eight stages in order. This page starts with all of them on one screen, then takes each stage apart: what it reads, what it does step by step, and what it leaves behind for the next one. Two parts that aren't stages get their own sections, because everything leans on them: the symbol resolver, and how Postgres and Neo4j stay in step.</p>
+      <p>Ingestion runs nine stages in order. This page starts with all of them on one screen, then takes each stage apart: what it reads, what it does step by step, and what it leaves behind for the next one. Two parts that aren't stages get their own sections, because everything leans on them: the symbol resolver, and how Postgres and Neo4j stay in step.</p>
       <p>Every example is real output from running Steno on <a href="https://github.com/KBavis/contextualized">Contextualized</a> at commit <code>ac93a3b</code>: 190 files, 112 Python modules, 486 functions, 9 rule packs, 33 endpoints, 33 flows. Timings are one run on a laptop.</p>
     </header>
 
@@ -323,6 +323,7 @@ pre .k-emit { color: var(--neo); font-weight: 500; }
             <tr><td>assemble</td><td>What goes in each blank?<span class="eg">e.g. <code>/api</code> + <code>/jobs</code> + <code>/projects/{project_id}</code> → <code>/api/jobs/projects/{project_id}</code></span></td><td>Completed facts, the facts JSON</td><td>199 edges · 37 dropped · 1.7 s</td><td><code>assemblers/assemble.py</code></td></tr>
             <tr><td>flows</td><td>What does each entry point reach, and how does it all fit in the graph?<span class="eg">e.g. that endpoint's handler reaches 115 functions (the diff task's work, then the embed task's), so its Flow writes to <code>job</code>, <code>record_lock</code>, <code>pull_request</code>, …</span></td><td>A graph plan: nodes and edges with stable IDs</td><td>494 nodes · 1,268 edges · 33 flows · 5.3 s</td><td><code>graph/structure.py</code>, <code>graph/build.py</code></td></tr>
             <tr><td>write</td><td>What does Neo4j need to change?<span class="eg">e.g. an endpoint that didn't change isn't touched; a step whose function was deleted is removed</span></td><td>The graph, updated in place; <code>fact_change</code></td><td>Compare by stable ID, then write only the differences</td><td><code>graph/writer.py</code></td></tr>
+            <tr><td>coverage</td><td>What did no rule explain?<span class="eg">e.g. the Jira calls' host is runtime data: an <em>Unknown host · JiraDataProvider</em> item, with each call's URL template</span></td><td><code>coverage_item</code> rows, completeness numbers</td><td>30 items</td><td><code>coverage/collect.py</code></td></tr>
             <tr><td>cards</td><td>What does each flow do, in words? (LLM)<span class="eg">e.g. a purpose like "starts a sync job for each of a project's data sources"</span></td><td>Skipped: not built</td><td>skipped</td><td>not built</td></tr>
           </tbody>
         </table>
@@ -365,7 +366,7 @@ pre .k-emit { color: var(--neo); font-weight: 500; }
             <text class="t memt" x="606" y="224">steno worker</text>
             <text class="s" x="606" y="242">one or more processes</text>
             <text class="s" x="606" y="262">one job at a time each</text>
-            <text class="s" x="606" y="282">runs the 8 stages</text>
+            <text class="s" x="606" y="282">runs the 9 stages</text>
             <rect class="box neo" x="820" y="200" width="160" height="110" rx="10"/>
             <text class="t neot" x="836" y="224">Neo4j</text>
             <text class="s" x="836" y="242">the graph</text>
@@ -393,7 +394,7 @@ pre .k-emit { color: var(--neo); font-weight: 500; }
       <ol class="steps">
         <li><span><strong>Asking for a run.</strong> The UI's Run button calls <code>POST /api/jobs</code> with a repository and a mode (<code>make dry-run REPO=x</code> does the same through <code>steno job enqueue</code>). The API inserts a row into <code>ingestion_job</code> with status <code>queued</code> and returns at once. Nothing has run yet.</span></li>
         <li><span><strong>Picking it up.</strong> Each worker (<code>steno worker</code>, started by <code>make worker</code> or <code>make dev</code>) checks the table every 2 seconds. It claims the oldest queued job with <code>SELECT … FOR UPDATE SKIP LOCKED</code>, sets it to <code>running</code>, and commits. <em>SKIP LOCKED</em> means a row another worker is claiming at that moment is skipped, so two workers never get the same job, and running more workers runs more jobs in parallel.</span></li>
-        <li><span><strong>Running it.</strong> The worker runs the eight stages in order (<code>ingestion/pipeline.py</code>). Before each stage it commits an <code>ingestion_stage</code> row marked <code>running</code>; after it, the status (<code>succeeded</code>, <code>skipped</code> or <code>failed</code>), the seconds and the metrics. Committing each row as it goes is what lets the UI show progress live: the Jobs page asks <code>GET /api/jobs/{id}</code> every 2 seconds.</span></li>
+        <li><span><strong>Running it.</strong> The worker runs the nine stages in order (<code>ingestion/pipeline.py</code>). Before each stage it commits an <code>ingestion_stage</code> row marked <code>running</code>; after it, the status (<code>succeeded</code>, <code>skipped</code> or <code>failed</code>), the seconds and the metrics. Committing each row as it goes is what lets the UI show progress live: the Jobs page asks <code>GET /api/jobs/{id}</code> every 2 seconds.</span></li>
         <li><span><strong>Finishing.</strong> If every stage succeeds or is skipped, the job is <code>succeeded</code>. If a stage raises an error, that stage is <code>failed</code>, later stages don't run, and the job is <code>failed</code> with the error message. Either way the clone folder is deleted. Stopping a worker (Ctrl+C) lets the current job finish first.</span></li>
       </ol>
       <div class="table-wrap">

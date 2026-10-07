@@ -1,0 +1,20 @@
+id: llama-index-function-tool
+description: A function registered as an agent tool, e.g. FunctionTool.from_defaults(async_fn=self._grep_search_wrapper, name="grep_search")
+match:
+  rule:
+    pattern: $TOOL.from_defaults($$$)
+    has:
+      kind: argument_list
+      has:
+        kind: keyword_argument
+        all:
+          - has: { field: name, regex: "^(fn|async_fn)$" }
+          - has: { field: value, pattern: $FN }
+where:
+  $TOOL: { class: [llama_index.core.tools.FunctionTool] }
+emit:
+  # The agent runs it later, when the model calls the tool: async, like a background task
+  - edge: INVOKES
+    from: "@function"
+    to: { Function: { symbol: $FN } }
+    async: true
