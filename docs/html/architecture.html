@@ -601,7 +601,8 @@ uv run steno extract ~/projects/contextualized --json out.json   <span class="c"
             <tr><td>Java (rules, resolver, deps)</td><td><span class="tag no">not built</span></td><td>Java packs never enable; no Java functions or flows</td></tr>
             <tr><td>Entry points other than HTTP</td><td><span class="tag part">FastAPI only</span></td><td>Schedules, consumers and CLI commands aren't flows. Steno's own worker loop, for example, isn't a flow</td></tr>
             <tr><td>Identifying the database</td><td><span class="tag part">placeholder</span></td><td>Every table hangs off one "Relational store (not identified yet)" per repository</td></tr>
-            <tr><td>Jev, LLM, MCP tools</td><td><span class="tag no">not built</span></td><td>MCP answers <code>ping</code> only</td></tr>
+            <tr><td>MCP tools (D54)</td><td><span class="tag yes">built</span></td><td><code>search</code>, <code>get_node</code>, <code>get_flow</code>, <code>view_flow_code</code>, <code>find_dependents</code> at <code>/mcp</code>; every call logged in <code>tool_call</code></td></tr>
+            <tr><td>Jev, LLM cards</td><td><span class="tag no">not built</span></td><td>Search matches names only; flows have no purpose or narrative</td></tr>
           </tbody>
         </table>
       </div>

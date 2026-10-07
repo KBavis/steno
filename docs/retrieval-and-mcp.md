@@ -150,6 +150,8 @@ Code usually **isn't local** to the agent. Steno **stores no file contents**. Ev
 
 Transport: **MCP over Streamable HTTP**. Every tool accepts `max_tokens`. Every result carries **confidence**, **citations** (below), and hints for the next call.
 
+**Built (2026-10-07):** `search` (full-text over names, plus flows whose traces contain a matching function), `get_node`, `get_flow`, `view_flow_code` (reads from the git host at the ingested commit; GitHub, GitLab, Bitbucket), and `find_dependents` (`via`: `http`, `messaging`, `data`), in `backend/src/steno/mcp/`. A result over its `max_tokens` loses items from its longest lists and says so in `truncated`. Every call is logged in `tool_call`. Confidence levels (P8) aren't built yet.
+
 ### Citations (Decided: part of V1)
 
 Every fact already records its source (repo, symbol, commit) and every call site its line, so each result **cites where its claims come from**, with a clickable link:
@@ -193,7 +195,7 @@ These views are rollups computed from application-level facts. The future UI ren
 
 | Tool | Purpose | Returns |
 |---|---|---|
-| `get_flow(flow_id \| trigger, expand: none\|sync\|all, detail: significant\|all)` | The ordered step tree, stitched across services when expanded; `detail: all` returns the full trace | Ordered steps (or trace entries) with file and lines, interactions, sync/async markers, and the flows each cross-app step leads to |
+| `get_flow(flow_id \| trigger, expand: none\|sync\|all, detail: significant\|all, levels?, under?)` | The ordered step tree, stitched across services when expanded; `detail: all` returns the full trace. A large flow comes back as an **outline** (D68): as many levels as fit in about 25 steps (or `levels`), each deeper branch folded into the step above it with `inside` (how many steps) and `inside_does` (what they touch); `under: <path>` opens one branch | Ordered steps (or trace entries) with file and lines, interactions, sync/async markers, and the flows each cross-app step leads to |
 | `view_flow_code(flow_id, steps?)` | The code for every step of a flow in **one round trip**, read from the git host at the ingested commit using the trace's file and lines | Source snippets by step |
 | `view_file(repo, path, sha?)` / `list_directory(repo, path, sha?)` | Files not covered by any flow, from the git host at the ingested commit | File contents / listing |
 | `find_symbols(symbols[] \| stack_trace)` | Map stack frames or symbols to the flows whose traces contain them → triggers → upstream callers | Matching trace entries and their flows |
