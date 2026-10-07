@@ -414,8 +414,10 @@ class GraphViews:
 
         Read from the flow's trace (D60): every function it calls, depth-first in source
         order. With `significant_only`, only its Steps are shown (functions with an effect at
-        or below them); the others pass their calls through. Significant entries are drawn
-        as their Step node; the rest are named by their place in the trace.
+        or below them), without repeated calls (their effects are shown where the function
+        first runs); the others pass their calls through. Significant entries are drawn as
+        their Step node; the rest are named by their place in the trace. Each one names its
+        `parent_step` (the nearest shown caller), so the UI can fold a branch into it.
         """
         rows = self._read(
             """
@@ -432,24 +434,27 @@ class GraphViews:
 
         steps: list[dict[str, Any]] = []
         shown_depth: dict[str, int] = {}  # trace path → depth it's drawn at
+        shown_id: dict[str, str] = {}  # trace path → the id it's drawn as
         conditional: dict[str, bool] = {}
         for t in trace:
             path = t["path"]
             parent = path.rsplit(".", 1)[0] if "." in path else None
             conditional[path] = bool(t.get("conditional")) or conditional.get(parent or "", False)
-            # Depth = how many shown ancestors it has
-            depth, p = 0, parent
+            # Depth = how many shown ancestors it has; its parent is the nearest one
+            depth, p, parent_step = 0, parent, None
             while p is not None:
                 if p in shown_depth:
-                    depth = shown_depth[p] + 1
+                    depth, parent_step = shown_depth[p] + 1, shown_id[p]
                     break
                 p = p.rsplit(".", 1)[0] if "." in p else None
-            if significant_only and "step" not in t:
+            if significant_only and ("step" not in t or t.get("repeat")):
                 continue
-            shown_depth[path] = depth
+            node_id = step_of(flow_id, t) if "step" in t else ids.trace_entry_id(flow_id, path)
+            shown_depth[path], shown_id[path] = depth, node_id
             steps.append(
                 {
-                    "id": step_of(flow_id, t) if "step" in t else ids.trace_entry_id(flow_id, path),
+                    "id": node_id,
+                    "parent_step": parent_step,
                     "kind": "function",
                     "label": t["name"],
                     "sub": t["file"],

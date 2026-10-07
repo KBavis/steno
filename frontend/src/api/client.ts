@@ -119,6 +119,15 @@ export interface GraphNode {
   does?: { type: string; op?: string | null; target: string }[]
   /** Flow view: the first step that uses a target */
   first_use?: number | null
+  /** Flow view: the step that calls this one (nearest one shown), and its place in the outline (1.2.3) */
+  parent_step?: string | null
+  outline?: string
+  /** Flow view, folding: whether it has steps under it, whether they're shown, how many are folded into it */
+  has_children?: boolean
+  expanded?: boolean
+  inside?: number
+  /** Flow view: what the steps folded into this one do (distinct targets per kind) */
+  below?: { writes?: number; reads?: number; calls?: number }
   /** Flow view header */
   path?: string
   trigger?: string | null

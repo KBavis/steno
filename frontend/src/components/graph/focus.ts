@@ -5,3 +5,6 @@ export const FocusContext = createContext<ReadonlySet<string> | null>(null)
 
 /** Open a node's details without zooming into it (the (i) on a tile) */
 export const InspectContext = createContext<(id: string) => void>(() => {})
+
+/** Flow view: open or close a step's branch */
+export const ExpandContext = createContext<(id: string, open: boolean) => void>(() => {})

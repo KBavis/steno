@@ -1,8 +1,8 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
-import { ArrowUpRight, BookOpen, ChevronRight, Info, Maximize2, PenLine } from 'lucide-react'
+import { ArrowUpRight, BookOpen, ChevronDown, ChevronRight, Info, Maximize2, PenLine } from 'lucide-react'
 import { useContext } from 'react'
 import { kindStyle } from '../../lib/graphStyle'
-import { FocusContext, InspectContext } from './focus'
+import { ExpandContext, FocusContext, InspectContext } from './focus'
 import type { ClusterData, EntityData } from './layout'
 
 const hueClass = (hue?: number | null) => (hue === null || hue === undefined ? 'hue-none' : `hue-${hue % 8}`)
@@ -258,12 +258,17 @@ export function FlowHeadNode({ data }: NodeProps<Node<EntityData>>) {
   )
 }
 
-/** Flow view: one step, numbered in execution order, with what it does */
+/** Flow view: one step, numbered by its place in the outline, with what it does. A folded
+ * step also says how many steps are inside it and what they touch. */
 export function StepRowNode({ id, data, selected }: NodeProps<Node<EntityData>>) {
   const { node } = data
   const dimmed = useDimmed(id)
+  const toggle = useContext(ExpandContext)
   const does = node.does ?? []
   const shown = does.slice(0, 2)
+  const folded = node.has_children && !node.expanded
+  const below = folded ? node.below ?? {} : {}
+  const belowKinds = (['writes', 'reads', 'calls'] as const).filter((k) => below[k])
   // The class or module it lives in, without the package path; the file is shown below
   const owner = node.container?.split('.').pop()
   const name = owner ? `${owner}.${node.label}` : node.label
@@ -273,12 +278,29 @@ export function StepRowNode({ id, data, selected }: NodeProps<Node<EntityData>>)
         'row',
         'step',
         (node.depth ?? 0) > 0 ? 'is-nested' : '',
-        does.length ? '' : 'is-quiet',
+        does.length || belowKinds.length ? '' : 'is-quiet',
+        folded ? 'is-folded' : '',
         selected ? 'is-selected' : '',
         dimmed ? 'is-dimmed' : '',
       ].join(' ')}
     >
-      <span className="step-num">{node.order}</span>
+      {node.has_children ? (
+        <button
+          className="step-fold nodrag"
+          title={node.expanded ? 'Fold the steps under this one' : `Show the ${node.inside} steps under this one`}
+          aria-label={node.expanded ? 'Fold' : 'Expand'}
+          aria-expanded={node.expanded}
+          onClick={(e) => {
+            e.stopPropagation()
+            toggle(id, !node.expanded)
+          }}
+        >
+          {node.expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        </button>
+      ) : (
+        <span className="step-fold-gap" />
+      )}
+      <span className="step-num">{node.outline ?? node.order}</span>
       <span className="row-text">
         <span className="row-title step-name" title={name}>
           {name}
@@ -318,6 +340,21 @@ export function StepRowNode({ id, data, selected }: NodeProps<Node<EntityData>>)
           )
         })}
         {does.length > shown.length ? <span className="badge">+{does.length - shown.length}</span> : null}
+        {folded ? (
+          <button
+            className="step-inside nodrag"
+            title="Expand to see these steps"
+            onClick={(e) => {
+              e.stopPropagation()
+              toggle(id, true)
+            }}
+          >
+            +{node.inside} inside
+            {belowKinds.map((k) => (
+              <Badge key={k} kind={k} n={below[k] ?? 0} title={`The steps inside ${k} ${below[k]} ${k === 'calls' ? 'systems' : 'tables'}`} />
+            ))}
+          </button>
+        ) : null}
       </span>
       <Handles direction="RIGHT" />
     </div>

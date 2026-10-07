@@ -1843,8 +1843,9 @@
   flex: none;
   display: grid;
   place-items: center;
-  width: 24px;
+  min-width: 24px;
   height: 24px;
+  padding: 0 6px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--hue) 14%, var(--surface));
   color: var(--hue);
@@ -1863,6 +1864,63 @@
   font-size: 12.5px;
   /* room below the baseline, so underscores aren't clipped */
   line-height: 1.5;
+}
+
+/* Fold and unfold the steps under a step */
+.step-fold,
+.step-fold-gap {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-right: -2px;
+}
+
+.step-fold {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.step-fold:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* A folded step stands for the steps under it: drawn as a small stack */
+.step.is-folded {
+  box-shadow:
+    3px 3px 0 -1px var(--surface),
+    3px 3px 0 0 var(--border-strong);
+}
+
+.step-inside {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 4px 1px 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.step-inside:hover {
+  border-style: solid;
+  color: var(--text);
+}
+
+.step-inside .badge {
+  min-width: 0;
 }
 
 .step-tag {

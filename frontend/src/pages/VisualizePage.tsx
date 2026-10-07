@@ -18,7 +18,8 @@ import { ArrowLeft, Check, ChevronRight, Network, RotateCcw, Search, SlidersHori
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, type Crumb, type GraphView, type SearchHit } from '../api/client'
 import { DetailsPanel } from '../components/graph/DetailsPanel'
-import { FocusContext, InspectContext } from '../components/graph/focus'
+import { collapseFlow, expandAll, OPEN_DEPTH, type Expansion } from '../components/graph/collapse'
+import { ExpandContext, FocusContext, InspectContext } from '../components/graph/focus'
 import '../components/graph/graph.css'
 import { DEFAULT_OPTIONS, filterView, layoutView, type EntityData, type ViewOptions } from '../components/graph/layout'
 import { edgeTypes, nodeTypes } from '../components/graph/nodeTypes'
@@ -142,6 +143,9 @@ const rectOf = (n: { internals: { positionAbsolute: { x: number; y: number } }; 
   height: n.measured.height ?? 100,
 })
 
+// A flow's folding before the viewer changes it: OPEN_DEPTH levels open
+const DEFAULT_EXPANSION: Expansion = {}
+
 function Visualizer({ onExit }: { onExit: () => void }) {
   const [route, setRoute] = useState<Route>(parseRoute)
   const [view, setView] = useState<GraphView>()
@@ -153,6 +157,8 @@ function Visualizer({ onExit }: { onExit: () => void }) {
   const [hovered, setHovered] = useState<string>()
   const [options, setOptions] = useState<ViewOptions>(loadOptions)
   const [arrangement, setArrangement] = useState(0)
+  // Which flow steps are open, for the route it was set on (another route starts folded)
+  const [expansion, setExpansion] = useState<{ route: string; open: Expansion }>({ route: '', open: DEFAULT_EXPANSION })
   const flow = useReactFlow()
   const initialized = useNodesInitialized()
   const stageRef = useRef<HTMLDivElement>(null)
@@ -162,6 +168,8 @@ function Visualizer({ onExit }: { onExit: () => void }) {
   const cancel = useRef<() => void>(() => {})
   // Laid-out views by route and settings; hovering a tile fills this so a click starts at once
   const cache = useRef(new Map<string, { at: number; laid: Promise<Laid> }>())
+  // Fetched views by route, so folding a flow lays it out again without fetching it again
+  const fetched = useRef(new Map<string, { at: number; view: Promise<GraphView> }>())
 
   useEffect(() => {
     const onHash = () => setRoute(parseRoute())
@@ -170,26 +178,43 @@ function Visualizer({ onExit }: { onExit: () => void }) {
   }, [])
 
   const routeKey = formatRoute(route)
+  const open = expansion.route === routeKey ? expansion.open : DEFAULT_EXPANSION
+
+  const fetchOnce = useCallback((r: Route): Promise<GraphView> => {
+    const key = formatRoute(r)
+    const hit = fetched.current.get(key)
+    if (hit && Date.now() - hit.at < 30_000) return hit.view
+    const view = fetchView(r)
+    view.catch(() => fetched.current.delete(key))
+    fetched.current.set(key, { at: Date.now(), view })
+    return view
+  }, [])
 
   const prepare = useCallback(
-    (r: Route): Promise<Laid> => {
-      const key = `${formatRoute(r)}|${JSON.stringify(options)}`
+    (r: Route, folding: Expansion = DEFAULT_EXPANSION): Promise<Laid> => {
+      const key = `${formatRoute(r)}|${JSON.stringify(options)}|${r.view === 'flow' ? JSON.stringify(folding) : ''}`
       const hit = cache.current.get(key)
       if (hit && Date.now() - hit.at < 30_000) return hit.laid
-      const laid = fetchView(r).then(async (v) => {
+      const laid = fetchOnce(r).then(async (v) => {
         rememberHues(v)
         const stage = stageRef.current
         const room = { width: (stage?.clientWidth ?? 1400) - 124, height: (stage?.clientHeight ?? 900) - 160 }
         // Only the organization and space levels choose a direction; other views have their own
         const direction = v.view === 'flow' ? 'DOWN' : v.view === 'organization' || v.view === 'space' ? options.direction : 'RIGHT'
-        const out = await layoutView(filterView(v, options), direction, room)
+        const out = await layoutView(filterView(collapseFlow(v, folding), options), direction, room)
         return { view: v, ...out }
       })
       laid.catch(() => cache.current.delete(key))
       cache.current.set(key, { at: Date.now(), laid })
       return laid
     },
-    [options],
+    [options, fetchOnce],
+  )
+
+  const toggleStep = useCallback(
+    (id: string, isOpen: boolean) =>
+      setExpansion((e) => ({ route: routeKey, open: { ...(e.route === routeKey ? e.open : {}), [id]: isOpen } })),
+    [routeKey],
   )
 
   const shownKey = useRef<string>(undefined)
@@ -197,7 +222,7 @@ function Visualizer({ onExit }: { onExit: () => void }) {
     let live = true
     setError(undefined)
     setLoading(true)
-    prepare(route)
+    prepare(route, open)
       .then(({ view: next, nodes: laidNodes, edges: laidEdges }) => {
         if (!live) return
         const stage = stageRef.current
@@ -220,7 +245,8 @@ function Visualizer({ onExit }: { onExit: () => void }) {
           setSelected(undefined)
           setHovered(undefined)
         }
-        const saved = loadPositions(routeKey)
+        // A flow's rows move as it folds, so positions dragged earlier aren't reused there
+        const saved = next.view === 'flow' ? {} : loadPositions(routeKey)
         setView(next)
         setNodes(laidNodes.map((n) => (saved[n.id] ? { ...n, position: saved[n.id] } : n)))
         setBaseEdges(laidEdges)
@@ -236,7 +262,7 @@ function Visualizer({ onExit }: { onExit: () => void }) {
       live = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeKey, options, arrangement])
+  }, [routeKey, options, arrangement, open])
 
   // Once the new view has rendered, play the move into it
   useEffect(() => {
@@ -381,6 +407,7 @@ function Visualizer({ onExit }: { onExit: () => void }) {
           savePositions(routeKey, null)
           setArrangement((n) => n + 1)
         }}
+        onFold={(all) => setExpansion({ route: routeKey, open: all ? expandAll(view, true) : DEFAULT_EXPANSION })}
       />
 
       <DepthRail
@@ -393,6 +420,7 @@ function Visualizer({ onExit }: { onExit: () => void }) {
 
       <div ref={stageRef} className={`viz-stage ${dense ? 'is-dense' : ''} view-${view?.view ?? 'loading'}`}>
         <InspectContext.Provider value={setSelected}>
+          <ExpandContext.Provider value={toggleStep}>
           <FocusContext.Provider value={near}>
             <ReactFlow
               nodes={nodes}
@@ -417,6 +445,7 @@ function Visualizer({ onExit }: { onExit: () => void }) {
               <Controls showInteractive={false} position="bottom-right" fitViewOptions={{ padding: FIT_PADDING, maxZoom: 1.1, duration: 500 }} />
             </ReactFlow>
           </FocusContext.Provider>
+          </ExpandContext.Provider>
         </InspectContext.Provider>
       </div>
 
@@ -495,7 +524,7 @@ function hint(view: GraphView): string {
     case 'code':
       return 'Files grouped by folder; lines are calls between files.'
     default:
-      return `Steps in the order they run (${s.shown} of ${s.functions} functions${s.significant_only ? ', the ones that touch data' : ''}); indented steps are called by the one above. Writes point into tables, reads point back into the step.`
+      return `Steps in the order they run (${s.shown} of ${s.functions} functions${s.significant_only ? ', the ones that touch data' : ''}); indented steps are called by the one above. A folded step shows what the steps inside it touch, and their lines start from it. Writes point into tables, reads point back into the step.`
   }
 }
 
@@ -511,6 +540,7 @@ function TopBar({
   options,
   onOptions,
   onResetArrangement,
+  onFold,
 }: {
   route: Route
   view?: GraphView
@@ -521,6 +551,8 @@ function TopBar({
   options: ViewOptions
   onOptions: (o: ViewOptions) => void
   onResetArrangement: () => void
+  /** Flow view: open every step (true), or go back to the outline (false) */
+  onFold: (all: boolean) => void
 }) {
   const current = crumbs[crumbs.length - 1]
   const kind = route.view === 'organization' ? 'organization' : route.view
@@ -569,6 +601,16 @@ function TopBar({
             </button>
             <button role="tab" aria-selected={route.all} className={route.all ? 'on' : ''} onClick={() => go({ ...route, all: true })}>
               All functions
+            </button>
+          </div>
+        )}
+        {route.view === 'flow' && (
+          <div className="seg" aria-label="Folding">
+            <button onClick={() => onFold(false)} title={`Show the first ${OPEN_DEPTH + 1} levels; expand a step to see inside it`}>
+              Outline
+            </button>
+            <button onClick={() => onFold(true)} title="Show every step">
+              Expand all
             </button>
           </div>
         )}
