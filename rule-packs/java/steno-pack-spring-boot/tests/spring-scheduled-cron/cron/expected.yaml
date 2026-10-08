@@ -1,0 +1,4 @@
+nodes:
+  - Schedule: { kind: cron, expression: "0 55 23 L * ?" }
+entry_points:
+  - { trigger: { Schedule: { kind: cron, expression: "0 55 23 L * ?" } }, function: "com.x.Jobs#monthly()" }

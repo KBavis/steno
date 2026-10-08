@@ -1,0 +1,3 @@
+# The exchange-and-routing-key form isn't covered yet
+edges:
+  - PRODUCES: { from: "com.x.Queues#onEmail(java.lang.String)", to: { Queue: { name: emails.sent } } }

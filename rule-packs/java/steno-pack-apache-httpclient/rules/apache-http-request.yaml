@@ -1,0 +1,13 @@
+id: apache-http-request
+description: An Apache HttpClient request object, e.g. new HttpPost(baseUrl + "/orders")
+match:
+  rule:
+    pattern: new $CLS($URL $$$)
+  constraints:
+    CLS: { regex: "^Http(Get|Post|Put|Patch|Delete|Head|Options)$" }
+  transform:
+    METHOD: { replace: { source: $CLS, replace: "^Http", by: "" } }
+emit:
+  - edge: CALLS
+    from: "@function"
+    to: { http: { method: $METHOD, url: $URL } }

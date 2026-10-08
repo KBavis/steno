@@ -1,0 +1,28 @@
+id: spring-data-repository-read
+description: A repository read, e.g. userRepository.findByUsername(username) or orders.existsById(id), on the table of the entity the repository manages
+match:
+  rule:
+    pattern: $REPO.$METHOD($$$)
+  constraints:
+    METHOD: { regex: "^(find|get|read|query|search|stream|count|exists)\\w*$" }
+where:
+  $REPO:
+    type:
+      - org.springframework.data.repository.Repository
+      - org.springframework.data.repository.CrudRepository
+      - org.springframework.data.repository.ListCrudRepository
+      - org.springframework.data.repository.PagingAndSortingRepository
+      - org.springframework.data.repository.ListPagingAndSortingRepository
+      - org.springframework.data.repository.reactive.ReactiveCrudRepository
+      - org.springframework.data.repository.reactive.ReactiveSortingRepository
+      - org.springframework.data.jpa.repository.JpaRepository
+      - org.springframework.data.jpa.repository.JpaSpecificationExecutor
+      - org.springframework.data.mongodb.repository.MongoRepository
+      - org.springframework.data.mongodb.repository.ReactiveMongoRepository
+      - org.springframework.data.r2dbc.repository.R2dbcRepository
+      - org.springframework.data.elasticsearch.repository.ElasticsearchRepository
+emit:
+  - edge: READS_FROM
+    from: "@function"
+    to: { table_of: $REPO }      # the entity the repository manages (JpaRepository<Order, Long> → Order), then its table
+    operation: select

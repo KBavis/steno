@@ -1,0 +1,25 @@
+id: jms-listener
+description: A method that consumes a queue, e.g. @JmsListener(destination = "${queues.orders}")
+match:
+  rule:
+    kind: method_declaration
+    has:
+      kind: modifiers
+      has:
+        kind: annotation
+        all:
+          - has: { field: name, regex: "^JmsListener$" }
+          - has:
+              field: arguments
+              has:
+                kind: element_value_pair
+                all:
+                  - has: { field: key, regex: "^destination$" }
+                  - has: { field: value, pattern: $QUEUE }
+emit:
+  - node: [Interface, Queue]
+    as: queue
+    name: $QUEUE
+  - entry_point:
+      trigger: queue
+      function: "@function"

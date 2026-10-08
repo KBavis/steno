@@ -1,0 +1,8 @@
+name: steno-pack-apache-httpclient
+version: 0.1.0
+language: java
+source: core
+description: Apache HttpClient 4 and 5 requests (HttpGet, HttpPost, ...)
+enabled_when:
+  dependencies: [org.apache.httpcomponents:httpclient, org.apache.httpcomponents.client5:httpclient5]
+  imports: [org.apache.http, org.apache.hc.client5]

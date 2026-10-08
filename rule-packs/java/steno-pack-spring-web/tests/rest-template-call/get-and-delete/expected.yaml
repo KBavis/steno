@@ -1,0 +1,4 @@
+# cache.put(...) is a Map, not a RestTemplate: no call
+edges:
+  - CALLS: { from: "com.x.UsersGateway#user(java.lang.String)", to: { http: { method: GET, url: "http://users.internal/users/{id}" } } }
+  - CALLS: { from: "com.x.UsersGateway#remove(java.lang.String)", to: { http: { method: DELETE, url: "http://users.internal/users/{id}" } } }

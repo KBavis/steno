@@ -1,0 +1,6 @@
+nodes:
+  - HttpEndpoint: { method: POST, path: /orders }
+  - HttpEndpoint: { method: GET, path: /orders }
+entry_points:
+  - { trigger: POST /orders, function: "com.x.OrderController#create(java.lang.String)" }
+  - { trigger: GET /orders, function: "com.x.OrderController#list()" }

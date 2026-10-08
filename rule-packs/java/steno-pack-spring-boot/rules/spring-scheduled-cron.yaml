@@ -1,0 +1,26 @@
+id: spring-scheduled-cron
+description: A method Spring runs on a schedule, e.g. @Scheduled(cron = "0 55 23 L * ?")
+match:
+  rule:
+    kind: method_declaration
+    has:
+      kind: modifiers
+      has:
+        kind: annotation
+        all:
+          - has: { field: name, regex: "^Scheduled$" }
+          - has:
+              field: arguments
+              has:
+                kind: element_value_pair
+                all:
+                  - has: { field: key, regex: "^(cron)$" }
+                  - has: { field: value, pattern: $EXPR }
+emit:
+  - node: Schedule
+    as: schedule
+    kind: cron
+    expression: $EXPR       # ${...} placeholders resolve from config
+  - entry_point:
+      trigger: schedule
+      function: "@function"

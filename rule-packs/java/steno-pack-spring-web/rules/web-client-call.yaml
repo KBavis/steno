@@ -1,0 +1,18 @@
+id: web-client-call
+description: A RestClient or WebClient request, e.g. webClient.post().uri("/charge/{id}", id).retrieve() (a base URL set on the builder isn't known, so the host usually isn't)
+match:
+  rule:
+    any:
+      - pattern: $C.$VERB().uri($URL $$$)
+      - pattern: $C.method(HttpMethod.$VERB).uri($URL $$$)
+  constraints:
+    VERB: { regex: "^(get|post|put|patch|delete|head|options|GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$" }
+where:
+  $C:
+    type:
+      - org.springframework.web.client.RestClient
+      - org.springframework.web.reactive.function.client.WebClient
+emit:
+  - edge: CALLS
+    from: "@function"
+    to: { http: { method: $VERB, url: $URL } }

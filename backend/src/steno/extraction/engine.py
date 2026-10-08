@@ -7,7 +7,9 @@ The assemblers (`steno.assemblers`) then fill in the blanks from the clues.
 """
 
 import fnmatch
+import itertools
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -15,6 +17,7 @@ from typing import Any
 from ast_grep_py import SgNode, SgRoot
 
 from steno.extraction.facts import (
+    IDENTITY,
     UNRESOLVED_TEXT,
     AppRef,
     ClueFact,
@@ -48,11 +51,22 @@ CLUE_FIELDS: dict[str, dict[str, str]] = {
         "operations": "literal",
         "returns": "literal",
         "extends": "literal",
+        # Declarative and generated HTTP clients: method → {method, path}, under `base`
+        "calls": "literal",
+        "base": "value",
     },
 }
 NODE_SYMBOL_PROPS = {"prefixed_by"}  # completed later by an assembler, not stored on the node
 
 _OMIT = object()  # an optional capture that wasn't bound: the field is left out
+# Config keys whose values are secrets: never read into facts or the property map
+SECRET_KEY = re.compile(
+    r"(pass(word|wd)?|secret|token|credential|private[-_.]?key|api[-_.]?key|auth[-_.]?key)"
+    r"([-_.]|$)",
+    re.IGNORECASE,
+)
+# Interfaces keyed by name across applications: an unknown name would merge unrelated channels
+CHANNELS = {"KafkaTopic", "Queue"}
 
 
 @dataclass
@@ -169,7 +183,11 @@ class Engine:
         node = match.get_match(name)
         if node is None:
             many = match.get_multiple_matches(name)
-            return Capture(", ".join(n.text() for n in many)) if many else None
+            if many:
+                return Capture(", ".join(n.text() for n in many))
+            # A `transform:` output (ast-grep): text, e.g. a class name in snake_case
+            transformed = match.get_transformed(name)
+            return Capture(transformed) if transformed is not None else None
         return Capture(node.text(), resolver.expression(path, node) if resolver else None, node)
 
     def _where(self, ctx: Ctx) -> bool:
@@ -205,6 +223,8 @@ class Engine:
                 self.out.errors.append(f"{rel}: {exc}")
                 continue
             for key, value in entries.items():
+                if SECRET_KEY.search(key):
+                    continue  # secret values are never ingested (DESIGN_DOC §18)
                 m = pattern.match(key)
                 if m:
                     caps = {"KEY": Capture(key), "VALUE": Capture(value)} | {
@@ -248,20 +268,24 @@ class Engine:
             props["method"] = props["method"].upper()
         if labels[-1] == "ExternalSystem" and "host" in props:
             props["host"] = host_of(props["host"]) or UNRESOLVED_TEXT
-        node = NodeFact(labels, props, ctx.origin, pending)
-        self.out.nodes.append(node)
+        nodes = [NodeFact(labels, p, ctx.origin, dict(pending)) for p in _each(props)]
+        for node in nodes:
+            if _unknown_channel(node.labels, node.props):
+                raise _Drop(f"{node.label} name unresolved")
+        self.out.nodes.extend(nodes)
         if "as" in item:
-            ctx.named[item["as"]] = node
+            ctx.named[item["as"]] = nodes[0] if len(nodes) == 1 else nodes
 
     def _emit_edge(self, ctx: Ctx, item: dict[str, Any]) -> None:
-        src, dst = self._ref(ctx, item["from"]), self._ref(ctx, item["to"])
+        srcs, dsts = self._refs(ctx, item["from"]), self._refs(ctx, item["to"])
         props = {}
         for key, spec in item.items():
             if key not in ("edge", "from", "to"):
                 value = self._value(ctx, spec)
                 if value is not _OMIT:
                     props[key] = value
-        self.out.edges.append(EdgeFact(item["edge"], src, dst, props, ctx.origin))
+        for src, dst in itertools.product(srcs, dsts):
+            self.out.edges.append(EdgeFact(item["edge"], src, dst, dict(props), ctx.origin))
 
     def _emit_clue(self, ctx: Ctx, item: dict[str, Any]) -> None:
         kind = item["clue"]
@@ -290,11 +314,11 @@ class Engine:
         self.out.clues.append(ClueFact(kind, fields, ctx.origin))
 
     def _emit_entry_point(self, ctx: Ctx, item: dict[str, Any]) -> None:
-        trigger = self._ref(ctx, item["trigger"])
         function = self._anchor(ctx, item["function"])
-        if not isinstance(trigger, (NodeFact, NodeRef)) or not function:
-            raise _Drop("entry point without a trigger node or function")
-        self.out.entry_points.append(EntryPointFact(trigger, function, ctx.origin))
+        for trigger in self._refs(ctx, item["trigger"]):
+            if not isinstance(trigger, (NodeFact, NodeRef)) or not function:
+                raise _Drop("entry point without a trigger node or function")
+            self.out.entry_points.append(EntryPointFact(trigger, function, ctx.origin))
 
     # ---------------------------------------------------- reading emit values
 
@@ -376,6 +400,8 @@ class Engine:
         return r.canonical(sym)
 
     def _class(self, ctx: Ctx, spec: Any) -> Any:
+        if isinstance(spec, str) and spec.startswith("@"):
+            return self._anchor(ctx, spec) or _OMIT  # `type: "@class"`: the class it's in
         cap = self._cap(ctx, spec)
         if cap is None:
             return spec  # a class named literally in the rule
@@ -391,7 +417,12 @@ class Engine:
             raise _Drop(f"{cap.text!r} isn't a class")
         return cls
 
-    def _ref(self, ctx: Ctx, spec: Any) -> Ref | NodeFact:
+    def _refs(self, ctx: Ctx, spec: Any) -> list[Ref | NodeFact]:
+        """A reference, or one per value when it names several (`topics = {"a", "b"}`)."""
+        ref = self._ref(ctx, spec)
+        return ref if isinstance(ref, list) else [ref]
+
+    def _ref(self, ctx: Ctx, spec: Any) -> Any:
         if isinstance(spec, str):
             if spec == "@app":
                 return AppRef()
@@ -414,10 +445,14 @@ class Engine:
             return TableOfRef(cap.expr, ctx.scope, ctx.resolver.language)
         if kind == "http":
             method = self._value(ctx, body.get("method", "GET"))
-            url = self._value(ctx, body.get("url"))
-            if not isinstance(url, str) or url == UNRESOLVED_TEXT:
-                url = self._url_template(ctx, body.get("url"))
-            return HttpRef(str(method).upper(), url if isinstance(url, str) else UNRESOLVED_TEXT)
+            method = "GET" if method is _OMIT or not isinstance(method, str) else method
+            if "parts" in body:
+                url: Any = self._url_parts(ctx, body["parts"])
+            else:
+                url = self._value(ctx, body.get("url"))
+                if not isinstance(url, str) or url == UNRESOLVED_TEXT:
+                    url = self._url_template(ctx, body.get("url"))
+            return HttpRef(method.upper(), url if isinstance(url, str) else UNRESOLVED_TEXT)
         if kind == "Function":
             held = self._parameter_function(ctx, body.get("symbol"))
             if held is not None:
@@ -438,7 +473,25 @@ class Engine:
             host = host_of(props.pop("host"))
             if host:
                 props["host"] = host
-        return NodeRef.of(kind, props)
+        refs = [NodeRef.of(kind, p) for p in _each(props)]
+        for r in refs:
+            if _unknown_channel([kind], r.as_dict):
+                raise _Drop(f"{kind} name unresolved")
+        return refs[0] if len(refs) == 1 else refs
+
+    def _url_parts(self, ctx: Ctx, parts: list[Any]) -> str | None:
+        """A URL from parts (`[$BASE_URL, $PREFIX, $PATH]`), joined with one `/` between them.
+        A part that isn't bound is left out; one that can't be known becomes a placeholder
+        named after it, so the constant parts survive (D64)."""
+        out = ""
+        for spec in parts:
+            value = self._value(ctx, spec)
+            if value is _OMIT or value == "" or value is None:
+                continue
+            if not isinstance(value, (str, int, float)) or value == UNRESOLVED_TEXT:
+                value = self._url_template(ctx, spec) or "{" + _placeholder(spec) + "}"
+            out = _join_url(out, str(value))
+        return out or None
 
     def _drop(self, ctx: Ctx, reason: str) -> None:
         self.out.dropped.append((ctx.origin, reason))
@@ -448,9 +501,36 @@ class _Drop(Exception):
     """A fact the rule matched but couldn't complete; recorded, not fatal."""
 
 
-def _capture_names(rule: Rule) -> set[str]:
-    import re
+def _each(props: dict[str, Any]) -> list[dict[str, Any]]:
+    """One set of properties per value when a value is a list (`topics = {"a", "b"}`)."""
+    lists = {k: v for k, v in props.items() if isinstance(v, list) and k != "fields"}
+    if not lists or not all(lists.values()):
+        return [props]
+    keys = list(lists)
+    combos = itertools.product(*lists.values())
+    return [props | dict(zip(keys, combo, strict=True)) for combo in combos]
 
+
+def _unknown_channel(labels: list[str], props: dict[str, Any]) -> bool:
+    channel = bool(CHANNELS & set(labels)) or ("Interface" in labels and labels[-1] not in IDENTITY)
+    return channel and props.get("name") == UNRESOLVED_TEXT
+
+
+def _join_url(left: str, right: str) -> str:
+    if not left:
+        return right
+    if left.endswith("/") and right.startswith("/"):
+        return left + right[1:]
+    if left.endswith("/") or right.startswith("/") or left.endswith("//"):
+        return left + right
+    return f"{left}/{right}"
+
+
+def _placeholder(spec: Any) -> str:
+    return spec[1:].lower() if isinstance(spec, str) and spec.startswith("$") else "?"
+
+
+def _capture_names(rule: Rule) -> set[str]:
     text = repr(rule.match) + repr(rule.emit) + repr(rule.where)
     return set(re.findall(r"\$\$?\$?([A-Z_][A-Z0-9_]*)", text))
 

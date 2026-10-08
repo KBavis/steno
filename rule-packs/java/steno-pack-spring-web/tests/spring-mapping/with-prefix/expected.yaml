@@ -1,0 +1,10 @@
+# Paths include the controller's @RequestMapping; a constant path resolves
+nodes:
+  - HttpEndpoint: { method: GET, path: "/orders/{id}" }
+  - HttpEndpoint: { method: POST, path: /orders/bulk }
+edges:
+  - EXPOSES: { from: "@app", to: "GET /orders/{id}" }
+  - EXPOSES: { from: "@app", to: POST /orders/bulk }
+entry_points:
+  - { trigger: "GET /orders/{id}", function: "com.x.OrderController#get(java.lang.String)" }
+  - { trigger: POST /orders/bulk, function: "com.x.OrderController#bulk(java.lang.String)" }

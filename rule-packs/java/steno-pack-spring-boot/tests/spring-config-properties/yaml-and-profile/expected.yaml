@@ -1,0 +1,4 @@
+# Secret keys (password, token, ...) are never read
+clues:
+  - property: { key: app.topics.orders, value: orders-prod }
+  - property: { key: app.topics.orders, value: orders-v1 }

@@ -1,0 +1,4 @@
+# The base URL comes from application.yml (the spring-boot pack's config rule)
+edges:
+  - CALLS: { from: "com.x.PlaidClient#createLinkToken(java.lang.String)", to: { http: { method: POST, url: "https://sandbox.plaid.test/link/token/create" } } }
+  - CALLS: { from: "com.x.PlaidClient#root()", to: { http: { method: GET, url: "https://sandbox.plaid.test" } } }

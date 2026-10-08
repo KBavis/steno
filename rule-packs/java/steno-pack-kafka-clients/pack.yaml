@@ -1,0 +1,8 @@
+name: steno-pack-kafka-clients
+version: 0.1.0
+language: java
+source: core
+description: The plain Kafka client - ProducerRecords and consumer subscriptions
+enabled_when:
+  dependencies: [org.apache.kafka:kafka-clients, org.springframework.kafka:spring-kafka]
+  imports: [org.apache.kafka.clients]

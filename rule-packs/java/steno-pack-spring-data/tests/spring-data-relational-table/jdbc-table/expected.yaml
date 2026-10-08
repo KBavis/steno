@@ -1,0 +1,3 @@
+nodes:
+  - Entity: { name: com.x.Invoice }
+  - Table: { name: invoices }

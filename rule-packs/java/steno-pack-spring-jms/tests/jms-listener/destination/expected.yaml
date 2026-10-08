@@ -1,0 +1,4 @@
+nodes:
+  - Queue: { name: invoices.in }
+entry_points:
+  - { trigger: { Queue: { name: invoices.in } }, function: "com.x.Queues#onInvoice(java.lang.String)" }

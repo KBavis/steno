@@ -203,6 +203,15 @@ class Resolvers:
     def unresolved_calls(self, fn: Function) -> list[UnresolvedCall]:
         return self.for_function(fn).unresolved_calls(fn)
 
+    def entry_function(self, symbol: str) -> str:
+        """The function a flow starts in: the implementation when the entry point is declared
+        on an interface method, else the entry point's own function."""
+        fn = self.function(symbol)
+        if fn is None:
+            return symbol
+        pick = getattr(self.for_function(fn), "entry_function", None)
+        return pick(symbol) if pick else symbol
+
     def rel(self, path: Path) -> str:
         try:
             return path.relative_to(self.root).as_posix()

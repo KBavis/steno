@@ -1,0 +1,14 @@
+name: steno-pack-spring-data
+version: 0.1.0
+language: java
+source: core
+description: Spring Data repositories (reads and writes on their entity's table), MongoDB documents, and Spring Data JDBC / R2DBC tables
+enabled_when:
+  dependencies:
+    - org.springframework.boot:spring-boot-starter-data-jpa
+    - org.springframework.boot:spring-boot-starter-data-mongodb
+    - org.springframework.boot:spring-boot-starter-data-mongodb-reactive
+    - org.springframework.boot:spring-boot-starter-data-jdbc
+    - org.springframework.boot:spring-boot-starter-data-r2dbc
+    - org.springframework.data:spring-data-commons
+  imports: [org.springframework.data]

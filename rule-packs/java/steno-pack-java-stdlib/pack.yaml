@@ -1,0 +1,7 @@
+name: steno-pack-java-stdlib
+version: 0.1.0
+language: java
+source: core
+description: The JDK - java.net.http requests, and work handed to another thread
+enabled_when:
+  always: true

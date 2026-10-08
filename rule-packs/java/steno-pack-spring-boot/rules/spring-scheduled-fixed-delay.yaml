@@ -1,0 +1,26 @@
+id: spring-scheduled-fixed-delay
+description: A method Spring runs on a schedule, e.g. @Scheduled(fixedDelay = 60000)
+match:
+  rule:
+    kind: method_declaration
+    has:
+      kind: modifiers
+      has:
+        kind: annotation
+        all:
+          - has: { field: name, regex: "^Scheduled$" }
+          - has:
+              field: arguments
+              has:
+                kind: element_value_pair
+                all:
+                  - has: { field: key, regex: "^(fixedDelay|fixedDelayString)$" }
+                  - has: { field: value, pattern: $EXPR }
+emit:
+  - node: Schedule
+    as: schedule
+    kind: fixed-delay
+    expression: $EXPR       # ${...} placeholders resolve from config
+  - entry_point:
+      trigger: schedule
+      function: "@function"

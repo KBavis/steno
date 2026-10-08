@@ -1,0 +1,6 @@
+app:
+  topics:
+    orders: orders-v1
+spring:
+  datasource:
+    password: hunter2

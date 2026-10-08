@@ -1,0 +1,2 @@
+nodes:
+  - Schedule: { kind: fixed-rate, expression: 60000 }

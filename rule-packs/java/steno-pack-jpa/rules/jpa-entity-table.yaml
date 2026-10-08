@@ -1,0 +1,41 @@
+id: jpa-entity-table
+description: An entity with an explicit table, e.g. @Entity @Table(name = "transaction", schema = "budget") class Transaction
+match:
+  rule:
+    kind: class_declaration
+    has:
+      kind: modifiers
+      all:
+        - has: { regex: "^@Entity\\b" }
+        - has:
+            kind: annotation
+            all:
+              - has: { field: name, regex: "^Table$" }
+              - has:
+                  field: arguments
+                  has:
+                    kind: element_value_pair
+                    all:
+                      - has: { field: key, regex: "^name$" }
+                      - has: { field: value, pattern: $TABLE }
+              # An optional schema (the first branch that matches wins)
+              - any:
+                  - has:
+                      field: arguments
+                      has:
+                        kind: element_value_pair
+                        all:
+                          - has: { field: key, regex: "^schema$" }
+                          - has: { field: value, pattern: $SCHEMA }
+                  - kind: annotation
+emit:
+  - node: Entity
+    as: entity
+    name: "@class"
+  - node: Table
+    as: table
+    name: $TABLE             # as written; a physical naming strategy may still change it
+    schema: $SCHEMA
+  - edge: MAPS_TO
+    from: entity
+    to: table

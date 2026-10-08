@@ -1,0 +1,13 @@
+id: jms-template-send
+description: Sending to a queue by name, e.g. jmsTemplate.convertAndSend("orders", order) - not the one-argument forms, which use the default destination
+match:
+  rule:
+    pattern: $T.$M($QUEUE, $MSG $$$)
+  constraints:
+    M: { regex: "^(convertAndSend|send)$" }
+where:
+  $T: { type: [org.springframework.jms.core.JmsTemplate, org.springframework.jms.core.JmsOperations, org.springframework.jms.core.JmsMessagingTemplate] }
+emit:
+  - edge: PRODUCES
+    from: "@function"
+    to: { Queue: { name: $QUEUE } }

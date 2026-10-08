@@ -1,0 +1,16 @@
+id: kafka-consumer-subscribe
+description: A consumer that polls a topic itself, e.g. consumer.subscribe(List.of("orders"))
+match:
+  rule:
+    any:
+      - pattern: $C.subscribe(List.of($TOPIC))
+      - pattern: $C.subscribe(Set.of($TOPIC))
+      - pattern: $C.subscribe(Collections.singletonList($TOPIC))
+      - pattern: $C.subscribe(Collections.singleton($TOPIC))
+      - pattern: $C.subscribe(Arrays.asList($TOPIC))
+where:
+  $C: { type: [org.apache.kafka.clients.consumer.KafkaConsumer, org.apache.kafka.clients.consumer.Consumer] }
+emit:
+  - edge: CONSUMES
+    from: "@function"
+    to: { KafkaTopic: { name: $TOPIC } }

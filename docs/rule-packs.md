@@ -72,13 +72,20 @@ emit:                                 # one or more outputs
 | `as: name` | Names an emitted node so later lines in the same rule can refer to it | `as: endpoint` … `to: endpoint` |
 | `{Label: {key: value}}` | An inline reference to a node by its identity; a stub is created if it doesn't exist yet | `to: { KafkaTopic: { name: $TOPIC } }` |
 | `{Label: {some: value}}` with only **some** identity properties | The app's single node that matches. Several matches: marked `ambiguous`; none: a stub. For when code reaches a store without naming it (a framework wrapper around "the" vector store). | `to: { DataStore: { vendor: chroma } }` |
-| `{http: {method, url}}` | An outbound HTTP target; the graph builder decides whether it's another app's endpoint or an `ExternalSystem` | `to: { http: { method: $VERB, url: $URL } }` |
+| `{http: {method, url}}` | An outbound HTTP target; the graph builder decides whether it's another app's endpoint or an `ExternalSystem`. Without `method`, GET. | `to: { http: { method: $VERB, url: $URL } }` |
+| `{http: {method, parts: [...]}}` | **(Proposed; built 2026-10-07)** A URL from parts joined with one `/` between them, for a base URL and a path that are written in different places (a Feign client's `url` and a method's mapping). An unbound part is left out; one that can't be resolved becomes a `{placeholder}`, so the constant parts survive. | `to: { http: { method: $METHOD, parts: [$URL, $PREFIX, $PATH] } }` |
 | `{Function: {symbol: $X}}` | A function that's **referenced, not called** here: a callback, a background task. Symbol resolution turns `$X` into the function's identity. | `to: { Function: { symbol: $TASK } }` When `$X` is a parameter of the enclosing function (a helper that wraps `FunctionTool.from_defaults(async_fn=fn)`), the edge goes from each of the helper's callers to the function it passes. |
 | `{table_of: $X}` | The `Table` an entity maps to (through `MAPS_TO`). `$X` may be the entity class, an instance of it, or one of its attributes (`Job.status`). **If `$X` isn't a mapped entity, the emit is dropped**, so a rule can match broadly (`select(...)`) without producing noise. | `to: { table_of: $MODEL }` |
 
 **Edge properties** listed for an edge in [Knowledge Graph §4](./knowledge-graph.md#4-relationship-types) can be set in the emit, such as `operation: insert` on `WRITES_TO`, or `async: true` on an `INVOKES` between two functions. `INVOKES` goes into the run's in-memory call graph (it isn't stored, D60): a rule's call to a function the code already calls there **merges** into that call, which is how a rule marks an existing call as async; otherwise it adds the call, ordered by its line.
 
-**Optional captures.** A capture bound in only one branch of an `any:` (for example an optional `prefix=` keyword) is simply left out of the emit when that branch didn't match.
+**Optional captures.** A capture bound in only one branch of an `any:` (for example an optional `prefix=` keyword) is simply left out of the emit when that branch didn't match. ast-grep's `any:` stops at the first branch that matches, so a final catch-all branch (`- kind: annotation`) makes a capture optional.
+
+**Transformed captures (Proposed; built 2026-10-07).** ast-grep's `transform:` works as written in its docs, and a transformed variable is used like a capture: `TABLE: { convert: { source: $CLASS, toCase: snakeCase } }` gives `CategoryType` → `category_type`, and `METHOD: { replace: { source: $ANNO, replace: "Mapping$", by: "" } }` gives `PostMapping` → `Post`. Its value is its text.
+
+**Several values, several facts (Proposed; built 2026-10-07).** When an identity property's value is a list (`@KafkaListener(topics = {"refunds", "returns"})`), the node, or the inline reference, is emitted once per value, and the edges and entry points that use it are too.
+
+**A channel with an unknown name is dropped (Proposed; built 2026-10-07).** Topics, queues, and org-defined channels are keyed by name across applications, so one whose name can't be resolved would merge unrelated channels. The emit is dropped instead and shows in the coverage report (`dropped_match`), like D64 for HTTP.
 
 **Captured values are resolved, not taken literally.** When a capture is a variable, a constant, an f-string, a `${placeholder}`, or a settings lookup, the symbol resolver follows it as far as it can (local assignments, constants, config properties). What it can't resolve, such as a URL built from a runtime value, is recorded as **unresolved** with lower confidence and shows up in the coverage report.
 
@@ -197,7 +204,7 @@ Each clue type has exactly one built-in **assembler** that knows how to combine 
 |---|---|---|---|
 | `prefix` | `owner`, `value` | **Prefix chain** | URL prefixes on routers, controllers, blueprints: FastAPI `APIRouter(prefix=…)`, Spring class-level `@RequestMapping` |
 | `mount` | `parent`, `child`, `prefix?` | **Prefix chain** | One router mounted inside another: `include_router`, Express `app.use("/x", router)` |
-| `client` | `type`, `target`, `operations?`, `returns?`, `extends?` | **Client** | SDK client objects that talk to something outside the app without a visible URL: LLM APIs, vector stores, cloud SDKs. A method call on an object of `type` (or a subclass) becomes `CALLS` to `target` when it's an `ExternalSystem`, or `READS_FROM` / `WRITES_TO` per `operations` (method → `read` / `write`) when it's a `DataStore`. Methods not listed produce nothing. `returns` (method → type) tells the symbol resolver what a method hands back, so chained calls keep their type: `client.get_collection(...)` returns a `Collection`, whose `query(...)` is then a read. When a receiver is typed only as a library base class (`FunctionCallingLLM`), every client whose `extends` lists that base is a candidate (`candidate: true`); more than one is marked `ambiguous`, like DI. Library code isn't read, so `extends` names the client's library bases, the whole chain (D66). |
+| `client` | `type`, `target`, `operations?`, `returns?`, `extends?`, `calls?`, `base?` | **Client** | SDK client objects that talk to something outside the app without a visible URL: LLM APIs, vector stores, cloud SDKs. A method call on an object of `type` (or a subclass) becomes `CALLS` to `target` when it's an `ExternalSystem`, or `READS_FROM` / `WRITES_TO` per `operations` (method → `read` / `write`) when it's a `DataStore`. Methods not listed produce nothing. `returns` (method → type) tells the symbol resolver what a method hands back, so chained calls keep their type: `client.get_collection(...)` returns a `Collection`, whose `query(...)` is then a read. When a receiver is typed only as a library base class (`FunctionCallingLLM`), every client whose `extends` lists that base is a candidate (`candidate: true`); more than one is marked `ambiguous`, like DI. Library code isn't read, so `extends` names the client's library bases, the whole chain (D66). **HTTP clients whose source isn't in the repository** (generated OpenAPI clients, internal SDKs; D69): `calls` maps each method to `{method, path}` and `base` is the base URL (a `${placeholder}` resolves from config), so `usersApi.getUser(id)` becomes `CALLS` to `GET {base}/users/{id}`. Methods not in `calls` produce nothing. `type: "@class"` names the class the rule matched in. Clients whose source *is* in the repository (Feign, `@HttpExchange`) don't need a clue: a rule puts the `CALLS` on the interface method itself, and callers' flows step into it (D73). |
 | `property` | `key`, `value`, `profile?` | **Config** | Configuration values, handed to the symbol resolver for `${placeholders}` and settings lookups. Steno emits these automatically for recognized config files; rules emit them only for unusual sources. |
 
 More clue types arrive with the assemblers that need them, e.g. DI bindings with DI resolution ([Ingestion §5](./ingestion.md#5-symbol-and-di-resolution)).
@@ -219,7 +226,9 @@ emit:
     name: $VALUE                          # $KEY and $VALUE are always available
 ```
 
-Most configuration needs **no rule**. Every key and value becomes a `property` clue automatically, so a code rule like `@KafkaListener(topics = "${app.kafka.topics.orders}")` gets the real topic name from the symbol resolver, which reads the `property` clues. Config rules are for when **the config alone states a fact**: a declared topic, a datasource URL (a `DataStore`), a downstream base URL.
+Most configuration needs **no rule beyond the framework's own**. A pack's config rule turns every key and value into a `property` clue (for Spring, `spring-config-properties` in `steno-pack-spring-boot` reads `application*.yml` / `.properties` and `bootstrap*`; profile files sort before the base file, so the base file's value wins), so a code rule like `@KafkaListener(topics = "${app.kafka.topics.orders}")` gets the real topic name from the symbol resolver, which reads the `property` clues. Config rules are for when **the config alone states a fact**: a declared topic, a datasource URL (a `DataStore`), a downstream base URL.
+
+**Secret values are never read (Proposed; built 2026-10-07).** The engine skips any config key that looks like a secret (`password`, `secret`, `token`, `credential`, `private-key`, `api-key`, …) for every config rule, so secrets never reach facts, the facts JSON, or the property map (DESIGN_DOC §18).
 
 ## 6. Packs and layout (Decided)
 
@@ -227,10 +236,17 @@ Rules are published as **versioned packs**, grouped by **ecosystem** (the langua
 
 ```
 rule-packs/
-├─ java/
-│  ├─ steno-pack-spring-web/
-│  ├─ steno-pack-spring-kafka/
-│  └─ steno-pack-jpa/
+├─ java/                        (built 2026-10-07; see ingestion.md, "Java packs")
+│  ├─ steno-pack-spring-boot/   config properties, @Scheduled
+│  ├─ steno-pack-spring-web/    controllers, RestTemplate / RestClient / WebClient, @HttpExchange
+│  ├─ steno-pack-spring-cloud-openfeign/
+│  ├─ steno-pack-jpa/           @Entity / @Table
+│  ├─ steno-pack-spring-data/   repositories, @Document, Spring Data JDBC tables
+│  ├─ steno-pack-spring-kafka/  steno-pack-kafka-clients/
+│  ├─ steno-pack-spring-jms/    steno-pack-spring-amqp/
+│  ├─ steno-pack-okhttp/        steno-pack-apache-httpclient/
+│  ├─ steno-pack-grpc-java/
+│  └─ steno-pack-java-stdlib/   java.net.http, work handed to another thread
 ├─ python/
 │  └─ steno-pack-fastapi/
 ├─ http/                        HTTP signatures: services named by the URLs they're called at

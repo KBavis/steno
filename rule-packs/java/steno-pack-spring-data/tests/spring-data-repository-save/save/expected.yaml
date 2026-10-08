@@ -1,0 +1,2 @@
+edges:
+  - WRITES_TO: { from: "com.x.OrderService#place(com.x.Order)", to: orders, operation: upsert }

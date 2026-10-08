@@ -1,0 +1,3 @@
+# Found through service discovery: the service name is the host
+edges:
+  - CALLS: { from: "com.x.UsersClient#get(java.lang.String)", to: { http: { method: GET, url: "http://users-service/api/users/{id}" } } }

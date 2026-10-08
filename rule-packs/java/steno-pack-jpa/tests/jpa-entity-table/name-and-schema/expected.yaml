@@ -1,0 +1,5 @@
+nodes:
+  - Entity: { name: com.x.Transaction }
+  - Table: { name: transaction, schema: budget }
+edges:
+  - MAPS_TO: { from: com.x.Transaction, to: transaction }

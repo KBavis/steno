@@ -1,0 +1,15 @@
+id: rest-template-call
+description: A RestTemplate call, e.g. restTemplate.getForObject(baseUrl + "/users/{id}", User.class, id) or restTemplate.delete(url)
+match:
+  rule:
+    pattern: $RT.$VERB($URL $$$)
+  constraints:
+    VERB: { regex: "^(getForObject|getForEntity|postForObject|postForEntity|postForLocation|put|patchForObject|delete|headForHeaders|optionsForAllow)$" }
+  transform:
+    METHOD: { replace: { source: $VERB, replace: "^(get|post|put|patch|delete|head|options).*$", by: "$1" } }
+where:
+  $RT: { type: [org.springframework.web.client.RestTemplate, org.springframework.web.client.RestOperations] }
+emit:
+  - edge: CALLS
+    from: "@function"
+    to: { http: { method: $METHOD, url: $URL } }

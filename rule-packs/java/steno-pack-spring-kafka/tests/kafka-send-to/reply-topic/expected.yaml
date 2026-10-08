@@ -1,0 +1,2 @@
+edges:
+  - PRODUCES: { from: "com.x.OrderEvents#onOrder(java.lang.String)", to: { KafkaTopic: { name: orders.validated } } }

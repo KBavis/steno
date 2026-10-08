@@ -1,0 +1,2 @@
+edges:
+  - CALLS: { from: "com.x.UsersGateway#rename(java.lang.String)", to: { http: { method: PATCH, url: "http://users.internal/users/{id}/name" } } }

@@ -1,0 +1,3 @@
+edges:
+  - CALLS: { from: "com.x.Pinger#ping()", to: { http: { method: GET, url: "https://status.internal/ping" } } }
+  - CALLS: { from: "com.x.Pinger#report(java.net.http.HttpRequest.BodyPublisher)", to: { http: { method: POST, url: "https://status.internal/report" } } }

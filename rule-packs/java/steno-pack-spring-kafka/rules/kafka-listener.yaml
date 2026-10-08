@@ -1,0 +1,25 @@
+id: kafka-listener
+description: A method that consumes a topic, e.g. @KafkaListener(topics = "${app.topics.orders}", groupId = "billing")
+match:
+  rule:
+    kind: method_declaration
+    has:
+      kind: modifiers
+      has:
+        kind: annotation
+        all:
+          - has: { field: name, regex: "^KafkaListener$" }
+          - has:
+              field: arguments
+              has:
+                kind: element_value_pair
+                all:
+                  - has: { field: key, regex: "^topics$" }
+                  - has: { field: value, pattern: $TOPIC }       # "orders", "${app.topics.orders}", or {"a", "b"}: one topic each
+emit:
+  - node: [Interface, KafkaTopic]
+    as: topic
+    name: $TOPIC
+  - entry_point:
+      trigger: topic
+      function: "@function"

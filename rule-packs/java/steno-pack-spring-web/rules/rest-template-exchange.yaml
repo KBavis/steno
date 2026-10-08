@@ -1,0 +1,13 @@
+id: rest-template-exchange
+description: A RestTemplate call with the HTTP method as an argument, e.g. restTemplate.exchange(url, HttpMethod.POST, entity, Order.class)
+match:
+  rule:
+    pattern: $RT.$VERB($URL, HttpMethod.$METHOD, $$$)
+  constraints:
+    VERB: { regex: "^(exchange|execute)$" }
+where:
+  $RT: { type: [org.springframework.web.client.RestTemplate, org.springframework.web.client.RestOperations] }
+emit:
+  - edge: CALLS
+    from: "@function"
+    to: { http: { method: $METHOD, url: $URL } }

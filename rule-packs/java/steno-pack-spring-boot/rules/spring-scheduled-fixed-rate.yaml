@@ -1,0 +1,26 @@
+id: spring-scheduled-fixed-rate
+description: A method Spring runs on a schedule, e.g. @Scheduled(fixedRate = 60000)
+match:
+  rule:
+    kind: method_declaration
+    has:
+      kind: modifiers
+      has:
+        kind: annotation
+        all:
+          - has: { field: name, regex: "^Scheduled$" }
+          - has:
+              field: arguments
+              has:
+                kind: element_value_pair
+                all:
+                  - has: { field: key, regex: "^(fixedRate|fixedRateString)$" }
+                  - has: { field: value, pattern: $EXPR }
+emit:
+  - node: Schedule
+    as: schedule
+    kind: fixed-rate
+    expression: $EXPR       # ${...} placeholders resolve from config
+  - entry_point:
+      trigger: schedule
+      function: "@function"

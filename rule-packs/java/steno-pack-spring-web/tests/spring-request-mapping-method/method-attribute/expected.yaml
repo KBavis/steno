@@ -1,0 +1,4 @@
+nodes:
+  - HttpEndpoint: { method: PUT, path: "/orders/{id}/status" }
+entry_points:
+  - { trigger: "PUT /orders/{id}/status", function: "com.x.OrderController#status(java.lang.String)" }

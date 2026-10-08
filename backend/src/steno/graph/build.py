@@ -504,8 +504,14 @@ class _Builder:
                     is_async = bool(e.props.get("async"))
                     rule_calls[caller].append((callee, e.origin.line, is_async))
 
+        # An entry point on an interface method starts in its implementation
+        self.entry_of = {
+            ep.function: self.r.entry_function(ep.function) for ep in self.x.entry_points
+        }
         self.roots = {
-            (ep.function, None) for ep in self.x.entry_points if ep.function in self.functions
+            (self.entry_of[ep.function], None)
+            for ep in self.x.entry_points
+            if self.entry_of[ep.function] in self.functions
         }
         todo = deque(sorted(self.roots, key=_key_order))
         while todo:
@@ -604,14 +610,15 @@ class _Builder:
                 trigger = self._fact_node(ep.trigger)
             else:
                 trigger = self._end(ep.trigger, ep.origin.file, prov)
-            entry = self.functions.get(ep.function)
+            entry_symbol = self.entry_of.get(ep.function, ep.function)
+            entry = self.functions.get(entry_symbol)
             if trigger is None or entry is None:
                 continue
             app = self._app_for(ep.origin.file)
             app_name = self.plan.nodes[app].props["name"] if app else self.ctx.repo
             trigger_name = self.plan.nodes[trigger].props.get("name", trigger)
             flow = ids.flow_id(app_name, trigger_name)
-            trace = self._trace(flow, (ep.function, None))
+            trace = self._trace(flow, (entry_symbol, None))
             stops = sum(len(t.get("unresolved", [])) for t in trace)
             start, end = entry.span
             self.plan.node(
@@ -619,7 +626,7 @@ class _Builder:
                 ["Flow", "Searchable"],
                 name=trigger_name,
                 trigger=trigger_name,
-                entry_symbol=ep.function,
+                entry_symbol=entry_symbol,
                 entry_file=self._rel(entry),
                 entry_start_line=start,
                 entry_end_line=end,

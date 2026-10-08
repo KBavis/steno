@@ -1,0 +1,12 @@
+name: steno-pack-grpc-java
+version: 0.1.0
+language: java
+source: core
+description: gRPC services implemented in Java (generated *ImplBase classes)
+enabled_when:
+  dependencies:
+    - io.grpc:grpc-stub
+    - io.grpc:grpc-api
+    - net.devh:grpc-server-spring-boot-starter
+    - org.springframework.grpc:spring-grpc-spring-boot-starter
+  imports: [io.grpc]

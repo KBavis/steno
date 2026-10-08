@@ -367,7 +367,7 @@ pre .c { color: var(--muted); }
         </div>
         <div class="card mem">
           <h4>Rule engine + symbol resolver <span class="tag yes">built</span></h4>
-          <p>Runs rule packs over the clone (ast-grep), asks each language's symbol resolver (Python, Java) what names and types mean, and assembles clues into complete facts. Everything stays in memory for the job.</p>
+          <p>Runs rule packs over the clone (ast-grep), asks each language's symbol resolver (Python, Java) what names and types mean, and assembles clues into complete facts. Everything stays in memory for the job. Packs: 9 for Python, 13 for a Spring stack (web, Feign, JPA, Spring Data, Kafka, JMS, AMQP, gRPC, HTTP clients, scheduling, config).</p>
           <span class="where">extraction/*  ·  resolvers/*  ·  assemblers/*</span>
         </div>
         <div class="card mem">
@@ -518,7 +518,7 @@ pre .c { color: var(--muted); }
           <tbody>
             <tr><td><code>clone</code></td><td>Shallow clone of the default branch; records the commit SHA</td><td>the workspace folder</td></tr>
             <tr><td><code>deps</code></td><td>Skipped: dependency JARs are only for Java</td><td>nothing</td></tr>
-            <tr><td><code>parse</code></td><td>Picks the rule packs that apply, lists the files once, reads every Python file into the symbol resolver's symbol table, builds a syntax tree per file. No rules run.</td><td>the rule engine, holding the symbol resolver and the trees</td></tr>
+            <tr><td><code>parse</code></td><td>Picks the rule packs that apply, lists the files once, reads the code into each language's symbol resolver (Java through the JVM helper, in one pass), builds a syntax tree per file. No rules run.</td><td>the rule engine, holding the symbol resolver and the trees</td></tr>
             <tr><td><code>extract</code></td><td>Runs every rule on every file: facts, facts with blanks, and clues</td><td>the raw facts</td></tr>
             <tr><td><code>assemble</code></td><td>Combines clues across files into complete facts: URL prefix chains, entity → table, SDK clients, partial references; writes the facts JSON</td><td>completed facts</td></tr>
             <tr><td><code>flows</code></td><td>Finds modules and applications, builds the call graph in memory, one Flow per entry point with its trace, Steps for its significant functions (carrying their effects), rolls effects up onto flows</td><td>the graph plan</td></tr>

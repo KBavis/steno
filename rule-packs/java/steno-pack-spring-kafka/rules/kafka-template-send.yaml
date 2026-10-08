@@ -1,0 +1,15 @@
+id: kafka-template-send
+description: Sending to a topic, e.g. kafkaTemplate.send(topic, key, event) or send("orders", event) - not send(record) or sendDefault(...), whose topic isn't in the call
+match:
+  rule:
+    pattern: $K.send($TOPIC, $V $$$)
+where:
+  $K:
+    type:
+      - org.springframework.kafka.core.KafkaTemplate
+      - org.springframework.kafka.core.KafkaOperations
+      - org.springframework.kafka.core.reactive.ReactiveKafkaProducerTemplate
+emit:
+  - edge: PRODUCES
+    from: "@function"
+    to: { KafkaTopic: { name: $TOPIC } }

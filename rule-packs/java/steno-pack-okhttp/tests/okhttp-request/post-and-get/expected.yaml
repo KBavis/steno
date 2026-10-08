@@ -1,0 +1,3 @@
+edges:
+  - CALLS: { from: "com.x.SuggestionClient#suggest(okhttp3.RequestBody)", to: { http: { method: POST, url: "http://suggestion-engine:8000/suggestion" } } }
+  - CALLS: { from: "com.x.SuggestionClient#health()", to: { http: { method: GET, url: "http://suggestion-engine:8000/health" } } }

@@ -1,0 +1,46 @@
+id: http-exchange-client
+description: A method of a declarative HTTP interface (Spring 6), e.g. @GetExchange("/users/{id}") in an interface annotated @HttpExchange(url = "${users.url}")
+match:
+  rule:
+    kind: method_declaration
+    has:
+      kind: modifiers
+      has:
+        kind: annotation
+        all:
+          - has: { field: name, regex: "^(Get|Post|Put|Patch|Delete)Exchange$", pattern: $ANNO }
+          - has:
+              field: arguments
+              any:
+                - has: { nthChild: 1, not: { kind: element_value_pair }, pattern: $PATH }
+                - has:
+                    kind: element_value_pair
+                    all:
+                      - has: { field: key, regex: "^(value|url)$" }
+                      - has: { field: value, pattern: $PATH }
+    inside:
+      stopBy: end
+      kind: interface_declaration
+      has:
+        kind: modifiers
+        has:
+          has: { field: name, regex: "^HttpExchange$" }
+          any:
+            - kind: marker_annotation              # @HttpExchange: no base URL here
+            - kind: annotation
+              has:
+                field: arguments
+                any:
+                  - has: { nthChild: 1, not: { kind: element_value_pair }, pattern: $BASE }
+                  - has:
+                      kind: element_value_pair
+                      all:
+                        - has: { field: key, regex: "^(value|url)$" }
+                        - has: { field: value, pattern: $BASE }
+  transform:
+    METHOD: { replace: { source: $ANNO, replace: "Exchange$", by: "" } }
+emit:
+  # The interface method is the call: callers' flows step into it (it has no body)
+  - edge: CALLS
+    from: "@function"
+    to: { http: { method: $METHOD, parts: [$BASE, $PATH] } }

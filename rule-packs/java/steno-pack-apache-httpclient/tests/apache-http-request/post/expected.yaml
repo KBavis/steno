@@ -1,0 +1,2 @@
+edges:
+  - CALLS: { from: "com.x.Billing#charge(java.lang.String)", to: { http: { method: POST, url: "https://billing.internal/charges/{id}" } } }

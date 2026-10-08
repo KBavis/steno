@@ -1,0 +1,2 @@
+# A Feign client's prefix belongs to the calls it makes, not to this app's endpoints
+clues: []

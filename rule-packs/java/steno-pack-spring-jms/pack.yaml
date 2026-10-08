@@ -1,0 +1,11 @@
+name: steno-pack-spring-jms
+version: 0.1.0
+language: java
+source: core
+description: Spring JMS listeners and senders (@JmsListener, JmsTemplate)
+enabled_when:
+  dependencies:
+    - org.springframework:spring-jms
+    - org.springframework.boot:spring-boot-starter-artemis
+    - org.springframework.boot:spring-boot-starter-activemq
+  imports: [org.springframework.jms]

@@ -1,0 +1,3 @@
+# rabbit.convertAndSend(...) isn't a JmsTemplate
+edges:
+  - PRODUCES: { from: "com.x.Queues#onInvoice(java.lang.String)", to: { Queue: { name: invoices.out } } }

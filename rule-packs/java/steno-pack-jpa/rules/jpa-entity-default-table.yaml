@@ -1,0 +1,36 @@
+id: jpa-entity-default-table
+description: An entity without a table name, e.g. @Entity class CategoryType - Spring Boot names its table category_type (snake_case of the class name)
+match:
+  rule:
+    kind: class_declaration
+    has: { field: name, pattern: $CLASS }
+    all:
+      - has:
+          kind: modifiers
+          all:
+            - has: { regex: "^@Entity\\b" }
+            # Not @Entity(name = "X"): that rule names the table from X
+            - not:
+                has:
+                  kind: annotation
+                  all:
+                    - has: { field: name, regex: "^Entity$" }
+                    - has: { field: arguments, has: { kind: element_value_pair, has: { field: key, regex: "^name$" } } }
+            - not:
+                has:
+                  kind: annotation
+                  all:
+                    - has: { field: name, regex: "^Table$" }
+                    - has: { field: arguments, has: { kind: element_value_pair, has: { field: key, regex: "^name$" } } }
+  transform:
+    TABLE: { convert: { source: $CLASS, toCase: snakeCase } }
+emit:
+  - node: Entity
+    as: entity
+    name: "@class"
+  - node: Table
+    as: table
+    name: $TABLE
+  - edge: MAPS_TO
+    from: entity
+    to: table

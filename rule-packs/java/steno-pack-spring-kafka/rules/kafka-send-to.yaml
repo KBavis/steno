@@ -1,0 +1,18 @@
+id: kafka-send-to
+description: A listener that replies to another topic, e.g. @SendTo("orders.validated") on a @KafkaListener method
+match:
+  rule:
+    kind: method_declaration
+    has:
+      kind: modifiers
+      all:
+        - has: { regex: "^@KafkaListener\\b" }
+        - has:
+            kind: annotation
+            all:
+              - has: { field: name, regex: "^SendTo$" }
+              - has: { field: arguments, has: { nthChild: 1, not: { kind: element_value_pair }, pattern: $TOPIC } }
+emit:
+  - edge: PRODUCES
+    from: "@function"
+    to: { KafkaTopic: { name: $TOPIC } }

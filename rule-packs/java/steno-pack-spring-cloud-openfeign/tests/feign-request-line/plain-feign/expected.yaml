@@ -1,0 +1,2 @@
+edges:
+  - CALLS: { from: "com.x.GitHub#contributors(java.lang.String,java.lang.String)", to: { http: { method: GET, url: "/repos/{owner}/{repo}/contributors" } } }

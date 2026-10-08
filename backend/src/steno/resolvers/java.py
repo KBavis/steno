@@ -84,6 +84,7 @@ class JavaType:
     kind: str
     is_abstract: bool
     bases: list[str] = field(default_factory=list)
+    entity: str | None = None  # a Spring Data repository's entity
 
 
 class JavaResolver:
@@ -112,6 +113,7 @@ class JavaResolver:
                 t["kind"],
                 bool(t.get("abstract")),
                 t.get("bases", []),
+                t.get("entity"),
             )
             for t in data.get("types", [])
         }
@@ -130,6 +132,11 @@ class JavaResolver:
                 tuple((f.get("param_values") or {}).items()),
             )
             for f in data.get("functions", [])
+        }
+        self._implementations = {
+            f["symbol"]: f["implementations"]
+            for f in data.get("functions", [])
+            if f.get("implementations")
         }
         self._calls: dict[str, list[dict[str, Any]]] = data.get("calls", {})
         self._exprs: dict[tuple[str, int, int, int, int], dict[str, Any]] = {}
@@ -212,6 +219,9 @@ class JavaResolver:
         if parent is None:
             return False
         for kind, field_name in (
+            ("method_declaration", "name"),
+            ("class_declaration", "name"),
+            ("interface_declaration", "name"),
             ("method_invocation", "name"),
             ("field_access", "field"),
             ("marker_annotation", "name"),
@@ -268,6 +278,10 @@ class JavaResolver:
     def template_of(self, expr: Any, scope: Any) -> str | None:
         entry = self._entry(expr)
         template = entry.get("template")
+        if template is None and isinstance(expr, JavaExpr):
+            literal = entry.get("value", _literal(expr.text))
+            if isinstance(literal, str):  # "${base.url}/users": config, or a placeholder
+                template = literal
         if template is None:
             value = self.value_of(expr, scope)
             return str(value) if isinstance(value, (str, int, float)) else None
@@ -295,7 +309,24 @@ class JavaResolver:
     def is_subclass(self, qualname: str | None, targets: list[str]) -> bool:
         if not qualname:
             return False
-        return qualname in targets or any(a in targets for a in self.ancestors(qualname))
+        if qualname in targets or any(a in targets for a in self.ancestors(qualname)):
+            return True
+        return any(self._imported_base(t, targets) for t in [qualname, *self.ancestors(qualname)])
+
+    def _imported_base(self, qualname: str, targets: list[str]) -> bool:
+        """A base named only by its simple name (`extends JpaRepository<…>` with several
+        on-demand imports) is a target when its file imports the target's package on demand."""
+        t = self.types.get(qualname)
+        if t is None:
+            return False
+        imports = set(self._imports.get(t.file, []))
+        return any(
+            "." not in base
+            and target.rsplit(".", 1)[-1] == base
+            and target.rsplit(".", 1)[0] + ".*" in imports
+            for base in t.bases
+            for target in targets
+        )
 
     def ancestors(self, qualname: str) -> list[str]:
         """Every ancestor of a repository type, nearest first (library ones by name)."""
@@ -315,7 +346,19 @@ class JavaResolver:
         return self._ancestors[qualname]
 
     def entity_of(self, expr: Any, scope: Any) -> str | None:
-        return self.class_of(expr, scope) or self.type_of(expr, scope)
+        """The entity behind an expression: the class itself, an instance's class, or the
+        entity a Spring Data repository manages (`orders.save(o)` → Order)."""
+        cls = self.class_of(expr, scope) or self.type_of(expr, scope)
+        for t in [cls, *self.ancestors(cls)] if cls else []:
+            if t in self.types and self.types[t].entity:
+                return self.types[t].entity
+        return cls
+
+    def entry_function(self, symbol: str) -> str:
+        """Where a flow really starts: an endpoint declared on an interface (an OpenAPI-generated
+        `UsersApi`) runs its one implementation."""
+        impls = self._implementations.get(symbol, [])
+        return impls[0] if len(impls) == 1 else symbol
 
     def parameter_of(self, expr: Any, scope: Any) -> str | None:
         fn = scope.function if isinstance(scope, JavaScope) else None

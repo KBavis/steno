@@ -1,0 +1,6 @@
+# Spring Boot's naming: CategoryType → category_type. @Embeddable isn't an entity.
+nodes:
+  - Entity: { name: com.x.CategoryType }
+  - Table: { name: category_type }
+edges:
+  - MAPS_TO: { from: com.x.CategoryType, to: category_type }

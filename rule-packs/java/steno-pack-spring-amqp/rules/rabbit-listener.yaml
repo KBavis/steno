@@ -1,0 +1,25 @@
+id: rabbit-listener
+description: A method that consumes a queue, e.g. @RabbitListener(queues = "orders") or queues = {"a", "b"}
+match:
+  rule:
+    kind: method_declaration
+    has:
+      kind: modifiers
+      has:
+        kind: annotation
+        all:
+          - has: { field: name, regex: "^RabbitListener$" }
+          - has:
+              field: arguments
+              has:
+                kind: element_value_pair
+                all:
+                  - has: { field: key, regex: "^queues$" }
+                  - has: { field: value, pattern: $QUEUE }
+emit:
+  - node: [Interface, Queue]
+    as: queue
+    name: $QUEUE
+  - entry_point:
+      trigger: queue
+      function: "@function"

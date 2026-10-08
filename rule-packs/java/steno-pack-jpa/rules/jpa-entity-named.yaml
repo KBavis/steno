@@ -1,0 +1,37 @@
+id: jpa-entity-named
+description: An entity named in @Entity and no table name, e.g. @Entity(name = "BudgetUser") class User - its table is budget_user
+match:
+  rule:
+    kind: class_declaration
+    has:
+      kind: modifiers
+      all:
+        - has:
+            kind: annotation
+            all:
+              - has: { field: name, regex: "^Entity$" }
+              - has:
+                  field: arguments
+                  has:
+                    kind: element_value_pair
+                    all:
+                      - has: { field: key, regex: "^name$" }
+                      - has: { field: value, kind: string_literal, has: { kind: string_fragment, pattern: $NAME } }
+        - not:
+            has:
+              kind: annotation
+              all:
+                - has: { field: name, regex: "^Table$" }
+                - has: { field: arguments, has: { kind: element_value_pair, has: { field: key, regex: "^name$" } } }
+  transform:
+    TABLE: { convert: { source: $NAME, toCase: snakeCase } }
+emit:
+  - node: Entity
+    as: entity
+    name: "@class"
+  - node: Table
+    as: table
+    name: $TABLE
+  - edge: MAPS_TO
+    from: entity
+    to: table

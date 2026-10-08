@@ -1,0 +1,4 @@
+# The WebClient's base URL is set where it's built, so only the path is known
+edges:
+  - CALLS: { from: "com.x.UsersGateway#charge(java.lang.String)", to: { http: { method: POST, url: "/charge/{id}" } } }
+  - CALLS: { from: "com.x.UsersGateway#charge(java.lang.String)", to: { http: { method: GET, url: "http://users.internal/health" } } }

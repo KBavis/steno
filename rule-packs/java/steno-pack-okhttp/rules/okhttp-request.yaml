@@ -1,0 +1,19 @@
+id: okhttp-request
+description: An OkHttp request, e.g. new Request.Builder().url(baseUrl + "suggestion").post(body).build() - GET unless the chain says otherwise
+match:
+  rule:
+    pattern: $B.build()
+    all:
+      - has: { stopBy: end, pattern: new Request.Builder() }
+      - has: { stopBy: end, pattern: $X.url($URL) }
+      # The method, when the chain names one (the first branch that matches wins)
+      - any:
+          - has:
+              stopBy: end
+              kind: method_invocation
+              has: { field: name, regex: "^(get|post|put|patch|delete|head)$", pattern: $METHOD }
+          - pattern: $B.build()
+emit:
+  - edge: CALLS
+    from: "@function"
+    to: { http: { method: $METHOD, url: $URL } }

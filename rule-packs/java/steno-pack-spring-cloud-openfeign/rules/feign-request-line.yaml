@@ -1,0 +1,21 @@
+id: feign-request-line
+description: A plain Feign method, e.g. @RequestLine("GET /repos/{owner}/{repo}") - the base URL is given at runtime (Feign.builder().target(...)), so the host isn't known
+match:
+  rule:
+    kind: method_declaration
+    has:
+      kind: modifiers
+      has:
+        kind: annotation
+        all:
+          - has: { field: name, regex: "^RequestLine$" }
+          - has:
+              field: arguments
+              has: { kind: string_literal, has: { kind: string_fragment, pattern: $LINE } }
+  transform:
+    METHOD: { replace: { source: $LINE, replace: "^\\s*(\\w+)\\s.*$", by: "$1" } }
+    PATH: { replace: { source: $LINE, replace: "^\\s*\\w+\\s+(\\S+).*$", by: "$1" } }
+emit:
+  - edge: CALLS
+    from: "@function"
+    to: { http: { method: $METHOD, url: $PATH } }

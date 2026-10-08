@@ -1,0 +1,32 @@
+id: spring-data-relational-table
+description: A Spring Data JDBC / R2DBC entity, which has @Table but no @Entity, e.g. @Table("orders") class Order
+match:
+  rule:
+    kind: class_declaration
+    has:
+      kind: modifiers
+      all:
+        - not: { has: { regex: "^@Entity\\b" } }
+        - has:
+            kind: annotation
+            all:
+              - has: { field: name, regex: "^Table$" }
+              - has:
+                  field: arguments
+                  any:
+                    - has: { nthChild: 1, not: { kind: element_value_pair }, pattern: $TABLE }
+                    - has:
+                        kind: element_value_pair
+                        all:
+                          - has: { field: key, regex: "^(value|name)$" }
+                          - has: { field: value, pattern: $TABLE }
+emit:
+  - node: Entity
+    as: entity
+    name: "@class"
+  - node: Table
+    as: table
+    name: $TABLE
+  - edge: MAPS_TO
+    from: entity
+    to: table

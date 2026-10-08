@@ -1,0 +1,2 @@
+edges:
+  - WRITES_TO: { from: "com.x.OrderService#cancel(java.lang.Long)", to: orders, operation: delete }

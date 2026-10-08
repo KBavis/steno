@@ -1,0 +1,3 @@
+edges:
+  - CALLS: { from: "com.x.UsersClient#get(java.lang.String)", to: { http: { method: GET, url: "http://users.internal/users/{id}" } } }
+  - CALLS: { from: "com.x.UsersClient#create(java.lang.String)", to: { http: { method: POST, url: "http://users.internal/users" } } }

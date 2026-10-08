@@ -71,6 +71,8 @@ def _text(value: Any) -> str:
 
 
 def _join_path(prefix: str, path: str) -> str:
+    if not path:  # a method mapped at its controller's own path (`@PostMapping` alone)
+        return prefix or "/"
     joined = (prefix.rstrip("/") + "/" + path.lstrip("/")) if prefix else path
     return joined if joined.startswith(("/", UNRESOLVED_TEXT)) else "/" + joined
 
@@ -133,6 +135,25 @@ def _clients_in(x: Extraction, r: Resolver, repo: Path) -> None:
             matched = [c for c in clients if _extends(r, c, receiver)]
             props = {"candidate": True, **({"ambiguous": True} if len(matched) > 1 else {})}
         for clue in matched:
+            call = (clue.fields.get("calls") or {}).get(method)
+            if call is not None:  # a declarative or generated HTTP client's method
+                x.edges.append(
+                    EdgeFact(
+                        "CALLS",
+                        NodeRef.of("Function", {"symbol": fn.symbol}),
+                        _http_call(clue, call),
+                        dict(props),
+                        Origin(
+                            clue.origin.rule,
+                            clue.origin.pack,
+                            fn.path.relative_to(repo).as_posix(),
+                            line,
+                        ),
+                    )
+                )
+                continue
+            if "calls" in clue.fields:
+                continue  # a method the client doesn't map isn't a call
             edge_type = _client_edge(clue, method)
             if edge_type:
                 origin = Origin(
@@ -194,6 +215,16 @@ def _passed_functions(x: Extraction, r: Resolvers, repo: Path) -> None:
                 )
             )
     x.edges[:] = kept
+
+
+def _http_call(clue: ClueFact, call: Any) -> HttpRef:
+    """`calls: {getUser: {method: GET, path: /users/{id}}}` under `base`, as an HTTP target."""
+    spec = call if isinstance(call, dict) else {"method": "GET", "path": str(call)}
+    base = clue.fields.get("base")
+    base = base if isinstance(base, str) and base != UNRESOLVED_TEXT else ""
+    path = str(spec.get("path", ""))
+    url = (base.rstrip("/") + "/" + path.lstrip("/")) if base and path else (base or path)
+    return HttpRef(str(spec.get("method", "GET")).upper(), url or UNRESOLVED_TEXT)
 
 
 def _client_edge(clue: ClueFact, method: str) -> str | None:

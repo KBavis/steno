@@ -1,0 +1,4 @@
+plaid:
+  api:
+    baseUrl: https://sandbox.plaid.test
+    secret-key: not-a-real-secret

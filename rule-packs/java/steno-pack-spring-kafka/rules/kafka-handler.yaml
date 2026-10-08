@@ -1,0 +1,29 @@
+id: kafka-handler
+description: A @KafkaHandler method of a class-level listener, e.g. @KafkaListener(topics = "orders") class OrderEvents { @KafkaHandler void on(OrderCreated e) }
+match:
+  rule:
+    kind: method_declaration
+    has: { kind: modifiers, has: { regex: "^@KafkaHandler\\b" } }
+    inside:
+      stopBy: end
+      kind: class_declaration
+      has:
+        kind: modifiers
+        has:
+          kind: annotation
+          all:
+            - has: { field: name, regex: "^KafkaListener$" }
+            - has:
+                field: arguments
+                has:
+                  kind: element_value_pair
+                  all:
+                    - has: { field: key, regex: "^topics$" }
+                    - has: { field: value, pattern: $TOPIC }
+emit:
+  - node: [Interface, KafkaTopic]
+    as: topic
+    name: $TOPIC
+  - entry_point:
+      trigger: topic
+      function: "@function"

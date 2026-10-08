@@ -1,0 +1,18 @@
+id: java-http-request
+description: A java.net.http request, e.g. HttpRequest.newBuilder().uri(URI.create(url)).POST(body).build() - GET unless the chain says otherwise
+match:
+  rule:
+    pattern: $B.build()
+    all:
+      - has: { stopBy: end, pattern: HttpRequest.newBuilder($$$) }
+      - has: { stopBy: end, pattern: URI.create($URL) }
+      - any:
+          - has:
+              stopBy: end
+              kind: method_invocation
+              has: { field: name, regex: "^(GET|POST|PUT|DELETE|HEAD)$", pattern: $METHOD }
+          - pattern: $B.build()
+emit:
+  - edge: CALLS
+    from: "@function"
+    to: { http: { method: $METHOD, url: $URL } }

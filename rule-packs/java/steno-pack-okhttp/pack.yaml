@@ -1,0 +1,8 @@
+name: steno-pack-okhttp
+version: 0.1.0
+language: java
+source: core
+description: OkHttp requests built with Request.Builder
+enabled_when:
+  dependencies: [com.squareup.okhttp3:okhttp]
+  imports: [okhttp3]

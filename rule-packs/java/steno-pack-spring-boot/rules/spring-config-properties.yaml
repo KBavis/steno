@@ -1,0 +1,19 @@
+id: spring-config-properties
+description: Every setting in application.yml / application-*.yml / .properties and bootstrap files, e.g. plaid.api.baseUrl, so @Value("${...}") and other ${placeholders} resolve. Profile files sort first, so the base file's value wins; secret keys are skipped by the engine.
+kind: config
+files:
+  - "**/application.yml"
+  - "**/application.yaml"
+  - "**/application.properties"
+  - "**/application-*.yml"
+  - "**/application-*.yaml"
+  - "**/application-*.properties"
+  - "**/bootstrap.yml"
+  - "**/bootstrap.yaml"
+  - "**/bootstrap.properties"
+match:
+  key: "**"
+emit:
+  - clue: property
+    key: $KEY
+    value: $VALUE

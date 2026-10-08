@@ -1,0 +1,6 @@
+# An OpenAPI-style interface: the endpoint is declared there; its flow starts in the
+# implementation (the graph builder follows the entry point to UsersController)
+nodes:
+  - HttpEndpoint: { method: GET, path: "/users/{id}" }
+entry_points:
+  - { trigger: "GET /users/{id}", function: "com.x.UsersApi#getUser(java.lang.String)" }

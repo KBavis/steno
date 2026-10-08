@@ -1,0 +1,8 @@
+name: steno-pack-spring-amqp
+version: 0.1.0
+language: java
+source: core
+description: Spring AMQP (RabbitMQ) listeners and senders
+enabled_when:
+  dependencies: [org.springframework.boot:spring-boot-starter-amqp, org.springframework.amqp:spring-rabbit]
+  imports: [org.springframework.amqp]

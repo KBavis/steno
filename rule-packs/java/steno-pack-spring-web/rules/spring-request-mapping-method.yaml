@@ -1,0 +1,47 @@
+id: spring-request-mapping-method
+description: A handler method mapped with @RequestMapping and an HTTP method, e.g. @RequestMapping(value = "/x", method = RequestMethod.POST)
+match:
+  rule:
+    kind: method_declaration
+    has:
+      kind: modifiers
+      has:
+        kind: annotation
+        all:
+          - has: { field: name, regex: "^RequestMapping$" }
+          - has:
+              field: arguments
+              all:
+                - has:
+                    kind: element_value_pair
+                    all:
+                      - has: { field: key, regex: "^method$" }
+                      - has: { field: value, kind: field_access, has: { field: field, pattern: $METHOD } }
+                - any:
+                    - has: { nthChild: 1, not: { kind: element_value_pair }, pattern: $PATH }
+                    - has:
+                        kind: element_value_pair
+                        all:
+                          - has: { field: key, regex: "^(value|path)$" }
+                          - has: { field: value, pattern: $PATH }
+                    # no path: the controller's own path (the first branch that matches wins)
+                    - kind: annotation_argument_list
+    inside:
+      stopBy: end
+      any:
+        - kind: class_declaration
+          has: { kind: modifiers, has: { regex: "^@(Rest)?Controller\\b" } }
+        - kind: interface_declaration
+          not: { has: { kind: modifiers, has: { regex: "^@(FeignClient|HttpExchange)\\b" } } }
+emit:
+  - node: [Interface, HttpEndpoint]
+    as: endpoint
+    method: $METHOD
+    path: $PATH
+    prefixed_by: "@class"
+  - edge: EXPOSES
+    from: "@app"
+    to: endpoint
+  - entry_point:
+      trigger: endpoint
+      function: "@function"

@@ -1,0 +1,41 @@
+id: spring-mapping-root
+description: A handler method at its controller's own path, e.g. @PostMapping or @GetMapping(produces = "application/json")
+match:
+  rule:
+    kind: method_declaration
+    has:
+      kind: modifiers
+      has:
+        any:
+          - kind: marker_annotation
+            has: { field: name, regex: "^(Get|Post|Put|Patch|Delete)Mapping$", pattern: $ANNO }
+          - kind: annotation
+            all:
+              - has: { field: name, regex: "^(Get|Post|Put|Patch|Delete)Mapping$", pattern: $ANNO }
+              - not:
+                  has:
+                    field: arguments
+                    any:
+                      - has: { nthChild: 1, not: { kind: element_value_pair } }
+                      - has: { kind: element_value_pair, has: { field: key, regex: "^(value|path)$" } }
+    inside:
+      stopBy: end
+      any:
+        - kind: class_declaration
+          has: { kind: modifiers, has: { regex: "^@(Rest)?Controller\\b" } }
+        - kind: interface_declaration
+          not: { has: { kind: modifiers, has: { regex: "^@(FeignClient|HttpExchange)\\b" } } }
+  transform:
+    METHOD: { replace: { source: $ANNO, replace: "Mapping$", by: "" } }
+emit:
+  - node: [Interface, HttpEndpoint]
+    as: endpoint
+    method: $METHOD
+    path: ""
+    prefixed_by: "@class"
+  - edge: EXPOSES
+    from: "@app"
+    to: endpoint
+  - entry_point:
+      trigger: endpoint
+      function: "@function"

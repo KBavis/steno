@@ -1,0 +1,11 @@
+id: rabbit-template-send
+description: Sending straight to a queue through the default exchange, e.g. rabbitTemplate.convertAndSend("orders", order) - the exchange-and-routing-key form isn't covered yet
+match:
+  rule:
+    pattern: $T.convertAndSend($QUEUE, $MSG)
+where:
+  $T: { type: [org.springframework.amqp.rabbit.core.RabbitTemplate, org.springframework.amqp.core.AmqpTemplate, org.springframework.amqp.rabbit.core.RabbitOperations] }
+emit:
+  - edge: PRODUCES
+    from: "@function"
+    to: { Queue: { name: $QUEUE } }

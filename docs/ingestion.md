@@ -188,6 +188,24 @@ Rules are published as **versioned packs**, like ESLint shareable configs or the
 
 Org-specific packs are usually a handful of rules for internal frameworks.
 
+**Java packs (built 2026-10-07).** 39 rules in 13 packs, with 42 test cases (all packs together: 81 cases, all passing):
+
+| Pack | Rules |
+|---|---|
+| `steno-pack-spring-boot` | every `application*.yml` / `.properties` key as a `property` clue; `@Scheduled` cron, fixed-rate, fixed-delay → `Schedule` + entry point |
+| `steno-pack-spring-web` | class-level `@RequestMapping` prefix; `@Get/Post/Put/Patch/DeleteMapping` with and without a path; `@RequestMapping(method = …)`; endpoints declared on an API interface start their flow in its one implementation; `RestTemplate` (`getForObject` … `delete`, `exchange` with `HttpMethod`); `RestClient` / `WebClient` (`.post().uri(…)`); `@HttpExchange` interfaces |
+| `steno-pack-spring-cloud-openfeign` | `@FeignClient(url = …)` methods (base URL from config), `@FeignClient("service")` (the service name is the host), plain Feign `@RequestLine` |
+| `steno-pack-jpa` | `@Entity` + `@Table(name, schema)`; `@Entity` alone (snake_case table, Spring Boot's default); `@Entity(name = …)` |
+| `steno-pack-spring-data` | repository reads (`find*`, `get*`, `exists*`, `count*`, …), saves, deletes, and custom updates, on the table of the entity the repository manages (`JpaRepository<Order, Long>` → `Order` → its table); MongoDB `@Document`; Spring Data JDBC / R2DBC `@Table` |
+| `steno-pack-spring-kafka`, `steno-pack-kafka-clients` | `@KafkaListener` (topics from `${…}` and arrays), class-level listeners with `@KafkaHandler`, `@SendTo`, `KafkaTemplate.send`, `new ProducerRecord<>(topic, …)`, `consumer.subscribe(…)` |
+| `steno-pack-spring-jms`, `steno-pack-spring-amqp` | `@JmsListener`, `JmsTemplate.convertAndSend`, `@RabbitListener`, `RabbitTemplate.convertAndSend(queue, msg)` |
+| `steno-pack-okhttp`, `steno-pack-apache-httpclient`, `steno-pack-java-stdlib` | `Request.Builder` chains, `new HttpPost(…)`, `java.net.http` requests; `CompletableFuture.runAsync(this::m)` / executors mark the call async |
+| `steno-pack-grpc-java` | methods of a `*Grpc.*ImplBase` subclass → `GrpcMethod` + entry point |
+
+On budgeting-app (205 Java files): 54 flows (53 endpoints and one schedule), all 15 entities mapped to tables, 94.6% of I/O calls explained, Plaid and the suggestion engine named from config, about 5 seconds.
+
+**Not covered yet (Open):** Spring application events (`publishEvent` → `@EventListener`, which needs a rule to name a value's *type*); SQL in `JdbcTemplate` and `@Query(nativeQuery = true)` (table names need SQL parsing); RabbitMQ exchanges and routing keys; Kafka Streams and Spring Cloud Stream bindings; functional `RouterFunction` routes; `server.servlet.context-path`; gRPC client stubs (a `where` that matches type names by pattern); DI choices by `@Qualifier` / `@Primary` / `@Profile`; `spring.datasource.url` → `DataStore`; a physical naming strategy applied to explicit `@Table` names.
+
 ### Coverage report (Decided)
 
 After every ingestion, Steno reports **what no rule explained**, so gaps are measured instead of discovered by accident.

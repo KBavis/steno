@@ -1,0 +1,2 @@
+clues:
+  - prefix: { owner: com.x.OrderController, value: /orders }

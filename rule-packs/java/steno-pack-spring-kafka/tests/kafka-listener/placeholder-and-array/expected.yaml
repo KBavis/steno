@@ -1,0 +1,9 @@
+# The placeholder resolves from application.yml; {"a", "b"} is two topics
+nodes:
+  - KafkaTopic: { name: orders-v1 }
+  - KafkaTopic: { name: refunds }
+  - KafkaTopic: { name: returns }
+entry_points:
+  - { trigger: { KafkaTopic: { name: orders-v1 } }, function: "com.x.OrderEvents#onOrder(java.lang.String)" }
+  - { trigger: { KafkaTopic: { name: refunds } }, function: "com.x.OrderEvents#onRefund(java.lang.String)" }
+  - { trigger: { KafkaTopic: { name: returns } }, function: "com.x.OrderEvents#onRefund(java.lang.String)" }

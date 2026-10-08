@@ -1,0 +1,31 @@
+id: mongo-document
+description: A MongoDB document class and its collection, e.g. @Document(collection = "orders") or @Document("orders") class Order
+match:
+  rule:
+    kind: class_declaration
+    has:
+      kind: modifiers
+      has:
+        kind: annotation
+        all:
+          - has: { field: name, regex: "^Document$" }
+          - has:
+              field: arguments
+              any:
+                - has: { nthChild: 1, not: { kind: element_value_pair }, pattern: $COLLECTION }
+                - has:
+                    kind: element_value_pair
+                    all:
+                      - has: { field: key, regex: "^(collection|value)$" }
+                      - has: { field: value, pattern: $COLLECTION }
+emit:
+  - node: Entity
+    as: entity
+    name: "@class"
+  - node: Table
+    as: collection
+    name: $COLLECTION
+    kind: collection
+  - edge: MAPS_TO
+    from: entity
+    to: collection

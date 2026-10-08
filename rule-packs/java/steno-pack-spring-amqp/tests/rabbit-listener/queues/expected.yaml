@@ -1,0 +1,4 @@
+nodes:
+  - Queue: { name: emails }
+entry_points:
+  - { trigger: { Queue: { name: emails } }, function: "com.x.Queues#onEmail(java.lang.String)" }

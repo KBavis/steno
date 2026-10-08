@@ -1,0 +1,31 @@
+id: spring-controller-prefix
+description: A controller's class-level path, e.g. @RequestMapping("/transactions") on a @RestController (or on the interface it implements)
+match:
+  rule:
+    any:
+      - kind: class_declaration
+      - kind: interface_declaration
+    has:
+      kind: modifiers
+      all:
+        - has:
+            kind: annotation
+            all:
+              - has: { field: name, regex: "^RequestMapping$" }
+              - has:
+                  field: arguments
+                  any:
+                    # @RequestMapping("/x")
+                    - has: { nthChild: 1, not: { kind: element_value_pair }, pattern: $PREFIX }
+                    # @RequestMapping(value = "/x") / (path = "/x")
+                    - has:
+                        kind: element_value_pair
+                        all:
+                          - has: { field: key, regex: "^(value|path)$" }
+                          - has: { field: value, pattern: $PREFIX }
+        # A Feign client's prefix belongs to the calls it makes (openfeign pack), not to endpoints
+        - not: { has: { regex: "^@(FeignClient|HttpExchange)\\b" } }
+emit:
+  - clue: prefix
+    owner: "@class"
+    value: $PREFIX

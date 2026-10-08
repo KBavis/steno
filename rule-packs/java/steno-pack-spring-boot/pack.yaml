@@ -1,0 +1,14 @@
+name: steno-pack-spring-boot
+version: 0.1.0
+language: java
+source: core
+description: Spring Boot configuration (application.yml / .properties feed ${placeholders}) and scheduled jobs
+enabled_when:
+  dependencies:
+    - org.springframework.boot:spring-boot-starter
+    - org.springframework.boot:spring-boot-starter-web
+    - org.springframework.boot:spring-boot-starter-webflux
+    - org.springframework.boot:spring-boot-starter-data-jpa
+    - org.springframework.boot:spring-boot
+    - org.springframework:spring-context
+  imports: [org.springframework.boot, org.springframework.scheduling, org.springframework.context]

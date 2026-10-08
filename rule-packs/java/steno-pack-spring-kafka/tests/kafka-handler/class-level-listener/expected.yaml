@@ -1,0 +1,4 @@
+nodes:
+  - KafkaTopic: { name: notifications }
+entry_points:
+  - { trigger: { KafkaTopic: { name: notifications } }, function: "com.x.Fanout#on(java.lang.String)" }

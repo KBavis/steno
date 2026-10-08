@@ -1,0 +1,27 @@
+id: grpc-service-method
+description: A gRPC method a service implements, e.g. getUser in class UserServiceImpl extends UserServiceGrpc.UserServiceImplBase
+match:
+  rule:
+    kind: method_declaration
+    has: { field: name, pattern: $METHOD }
+    all:
+      - has: { kind: modifiers, all: [ { has: { regex: "^@Override$" } }, { has: { regex: "^public$" } } ] }
+    inside:
+      stopBy: end
+      kind: class_declaration
+      has:
+        field: superclass
+        has: { regex: "Grpc\\.\\w+ImplBase$", pattern: $BASE }
+  transform:
+    SERVICE: { replace: { source: $BASE, replace: "^(?:.*\\.)?(\\w+)Grpc\\..*$", by: "$1" } }
+emit:
+  - node: [Interface, GrpcMethod]
+    as: rpc
+    service: $SERVICE
+    method: $METHOD
+  - edge: EXPOSES
+    from: "@app"
+    to: rpc
+  - entry_point:
+      trigger: rpc
+      function: "@function"

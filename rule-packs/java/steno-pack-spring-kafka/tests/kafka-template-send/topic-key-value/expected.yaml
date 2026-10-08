@@ -1,0 +1,3 @@
+# producer.send(new ProducerRecord<>(...)) has one argument: the record rule covers it
+edges:
+  - PRODUCES: { from: "com.x.OrderEvents#onOrder(java.lang.String)", to: { KafkaTopic: { name: audit } } }

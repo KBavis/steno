@@ -127,7 +127,8 @@ final class Analyzer {
     private final CombinedTypeSolver solver = new CombinedTypeSolver();
     private final RepoTypeSolver repoSolver = new RepoTypeSolver();
 
-    private final Map<CompilationUnit, String> files = new LinkedHashMap<>();
+    // By identity, in reading order: Lombok's members change a tree's equals/hashCode
+    private final Map<CompilationUnit, String> files = new IdentityLinkedMap<>();
     private final Map<String, TypeDeclaration<?>> types = new TreeMap<>();
     private final Map<String, List<String>> bases = new HashMap<>();
     private final Map<Node, Fn> fns = new IdentityHashMap<>();
@@ -351,6 +352,10 @@ final class Analyzer {
         }
         if (fn.isAbstract()) {
             m.put("abstract", true);
+            List<String> impls = implementations(fn);
+            if (!impls.isEmpty()) {
+                m.put("implementations", impls);
+            }
         }
         if (c instanceof ConstructorDeclaration) {
             m.put("constructor", true);
@@ -383,6 +388,10 @@ final class Analyzer {
             m.put("abstract", true);
         }
         m.put("bases", bases.getOrDefault(fqn, List.of()));
+        String entity = repositoryEntity(td);
+        if (entity != null) {
+            m.put("entity", entity);
+        }
         List<String> annotations = new ArrayList<>();
         for (AnnotationExpr a : td.getAnnotations()) {
             String n = typeName(a.getNameAsString(), td);
@@ -392,6 +401,30 @@ final class Analyzer {
             m.put("annotations", annotations);
         }
         return m;
+    }
+
+    /** The entity a Spring Data repository manages: `JpaRepository<Order, Long>` → Order, the
+     *  first type argument of a base that names a repository type. */
+    private String repositoryEntity(TypeDeclaration<?> td) {
+        if (!(td instanceof ClassOrInterfaceDeclaration c)) {
+            return null;
+        }
+        List<ClassOrInterfaceType> declared = new ArrayList<>(c.getExtendedTypes());
+        declared.addAll(c.getImplementedTypes());
+        for (ClassOrInterfaceType t : declared) {
+            if (!t.getNameAsString().endsWith("Repository") || t.getTypeArguments().isEmpty()) {
+                continue;
+            }
+            NodeList<Type> args = t.getTypeArguments().get();
+            if (args.isEmpty()) {
+                continue;
+            }
+            String entity = typeName(args.get(0), td);
+            if (entity != null && types.containsKey(entity)) {
+                return entity;
+            }
+        }
+        return null;
     }
 
     private List<String> baseNames(TypeDeclaration<?> td) {
@@ -456,6 +489,9 @@ final class Analyzer {
             if (call.fn() != null && call.generated()) {
                 counts[3]++;
                 continue; // a Lombok getter: resolved, but not a step
+            }
+            if (call.fn() != null && site instanceof ObjectCreationExpr && isThrowable(call.fn().container())) {
+                continue; // building an exception to throw isn't a step of the flow
             }
             if (call.fn() != null) {
                 counts[0]++;
@@ -581,6 +617,18 @@ final class Analyzer {
             }
         }
         return out;
+    }
+
+    private boolean isThrowable(String fqn) {
+        List<String> chain = new ArrayList<>(ancestors(fqn));
+        chain.add(fqn);
+        for (String t : chain) {
+            String simple = t.substring(t.lastIndexOf('.') + 1);
+            if (simple.endsWith("Exception") || simple.equals("Throwable") || simple.endsWith("Error")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** The first ancestor that isn't in the repository: where inherited library methods live. */
@@ -1239,13 +1287,24 @@ final class Analyzer {
             if (jdkHas("java.lang." + first)) {
                 return "java.lang." + first + rest;
             }
+            List<String> libraryPackages = new ArrayList<>();
             for (ImportDeclaration imp : cu.getImports()) {
                 if (!imp.isStatic() && imp.isAsterisk()) {
                     String cand = imp.getNameAsString() + "." + first;
                     if (types.containsKey(cand) || jdkHas(cand)) {
                         return cand + rest;
                     }
+                    String imported = imp.getNameAsString();
+                    if (!imported.startsWith("java.") && !imported.startsWith("javax.")
+                            && !types.containsKey(imported)) {
+                        libraryPackages.add(imported);
+                    }
                 }
+            }
+            // `import org.springframework.web.client.*;`: a class name found nowhere else can only
+            // come from the one library package imported on demand (when the code compiles)
+            if (libraryPackages.size() == 1 && Character.isUpperCase(first.charAt(0))) {
+                return libraryPackages.get(0) + "." + first + rest;
             }
         }
         if (dot > 0 && Character.isLowerCase(first.charAt(0))) {
@@ -1845,6 +1904,34 @@ final class Analyzer {
             return HexFormat.of().formatHex(d).substring(0, 12);
         } catch (NoSuchAlgorithmException e) {
             return "";
+        }
+    }
+
+    /** An insertion-ordered map keyed by identity. */
+    private static final class IdentityLinkedMap<K, V> extends java.util.AbstractMap<K, V> {
+        private final IdentityHashMap<K, V> map = new IdentityHashMap<>();
+        private final List<K> order = new ArrayList<>();
+
+        @Override
+        public V put(K key, V value) {
+            if (!map.containsKey(key)) {
+                order.add(key);
+            }
+            return map.put(key, value);
+        }
+
+        @Override
+        public V get(Object key) {
+            return map.get(key);
+        }
+
+        @Override
+        public Set<Map.Entry<K, V>> entrySet() {
+            Set<Map.Entry<K, V>> out = new java.util.LinkedHashSet<>();
+            for (K k : order) {
+                out.add(new java.util.AbstractMap.SimpleImmutableEntry<>(k, map.get(k)));
+            }
+            return out;
         }
     }
 

@@ -1,0 +1,10 @@
+name: steno-pack-spring-cloud-openfeign
+version: 0.1.0
+language: java
+source: core
+description: Feign clients (Spring Cloud OpenFeign and plain Feign) - each interface method is an HTTP call
+enabled_when:
+  dependencies:
+    - org.springframework.cloud:spring-cloud-starter-openfeign
+    - io.github.openfeign:feign-core
+  imports: [org.springframework.cloud.openfeign, feign]

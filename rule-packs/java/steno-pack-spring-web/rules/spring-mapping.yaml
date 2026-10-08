@@ -1,0 +1,43 @@
+id: spring-mapping
+description: A handler method with a path, e.g. @PutMapping("/{transactionId}") or @GetMapping(value = "/x", produces = ...) in a @RestController
+match:
+  rule:
+    kind: method_declaration
+    has:
+      kind: modifiers
+      has:
+        kind: annotation
+        all:
+          - has: { field: name, regex: "^(Get|Post|Put|Patch|Delete)Mapping$", pattern: $ANNO }
+          - has:
+              field: arguments
+              any:
+                - has: { nthChild: 1, not: { kind: element_value_pair }, pattern: $PATH }
+                - has:
+                    kind: element_value_pair
+                    all:
+                      - has: { field: key, regex: "^(value|path)$" }
+                      - has: { field: value, pattern: $PATH }
+    inside:
+      stopBy: end
+      any:
+        - kind: class_declaration
+          has: { kind: modifiers, has: { regex: "^@(Rest)?Controller\\b" } }
+        # An API interface the controller implements (OpenAPI-generated servers): the flow
+        # starts in the implementation
+        - kind: interface_declaration
+          not: { has: { kind: modifiers, has: { regex: "^@(FeignClient|HttpExchange)\\b" } } }
+  transform:
+    METHOD: { replace: { source: $ANNO, replace: "Mapping$", by: "" } }
+emit:
+  - node: [Interface, HttpEndpoint]
+    as: endpoint
+    method: $METHOD
+    path: $PATH
+    prefixed_by: "@class"     # the prefix-chain assembler adds the controller's @RequestMapping
+  - edge: EXPOSES
+    from: "@app"
+    to: endpoint
+  - entry_point:
+      trigger: endpoint
+      function: "@function"

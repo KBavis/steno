@@ -1,0 +1,4 @@
+nodes:
+  - GrpcMethod: { service: UserService, method: getUser }
+entry_points:
+  - { trigger: { GrpcMethod: { service: UserService, method: getUser } }, function: "com.x.UserServiceImpl#getUser(GetUserRequest,io.grpc.stub.StreamObserver)" }

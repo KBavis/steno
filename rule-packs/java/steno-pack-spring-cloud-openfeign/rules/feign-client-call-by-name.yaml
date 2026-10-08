@@ -1,0 +1,66 @@
+id: feign-client-call-by-name
+description: A Feign client method found through service discovery, e.g. @GetMapping("/users/{id}") in @FeignClient("users-service") - the service name is the host
+match:
+  rule:
+    kind: method_declaration
+    has:
+      kind: modifiers
+      has:
+        has: { field: name, regex: "^(Get|Post|Put|Patch|Delete)Mapping$", pattern: $ANNO }
+        any:
+          - kind: annotation
+            has:
+              field: arguments
+              any:
+                - has: { nthChild: 1, not: { kind: element_value_pair }, pattern: $PATH }
+                - has:
+                    kind: element_value_pair
+                    all:
+                      - has: { field: key, regex: "^(value|path)$" }
+                      - has: { field: value, pattern: $PATH }
+          - kind: annotation          # @GetMapping(produces = ...): the client's own path
+          - kind: marker_annotation
+    inside:
+      stopBy: end
+      kind: interface_declaration
+      all:
+        - has:
+            kind: modifiers
+            has:
+              kind: annotation
+              all:
+                - has: { field: name, regex: "^FeignClient$" }
+                - not: { has: { field: arguments, has: { kind: element_value_pair, has: { field: key, regex: "^url$" } } } }
+                - has:
+                    field: arguments
+                    any:
+                      - has: { nthChild: 1, not: { kind: element_value_pair }, pattern: $NAME }
+                      - has:
+                          kind: element_value_pair
+                          all:
+                            - has: { field: key, regex: "^(name|value)$" }
+                            - has: { field: value, pattern: $NAME }
+        # An optional class-level @RequestMapping prefix (the first branch that matches wins)
+        - any:
+            - has:
+                kind: modifiers
+                has:
+                  kind: annotation
+                  all:
+                    - has: { field: name, regex: "^RequestMapping$" }
+                    - has:
+                        field: arguments
+                        any:
+                          - has: { nthChild: 1, not: { kind: element_value_pair }, pattern: $PREFIX }
+                          - has:
+                              kind: element_value_pair
+                              all:
+                                - has: { field: key, regex: "^(value|path)$" }
+                                - has: { field: value, pattern: $PREFIX }
+            - kind: interface_declaration
+  transform:
+    METHOD: { replace: { source: $ANNO, replace: "Mapping$", by: "" } }
+emit:
+  - edge: CALLS
+    from: "@function"
+    to: { http: { method: $METHOD, parts: ["http://", $NAME, $PREFIX, $PATH] } }

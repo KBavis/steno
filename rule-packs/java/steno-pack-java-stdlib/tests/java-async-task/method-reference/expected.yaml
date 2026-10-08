@@ -1,0 +1,2 @@
+edges:
+  - INVOKES: { from: "com.x.Receipts#checkout()", to: "com.x.Receipts#sendReceipt()", async: true }

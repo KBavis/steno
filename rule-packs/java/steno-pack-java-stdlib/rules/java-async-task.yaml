@@ -1,0 +1,15 @@
+id: java-async-task
+description: A method handed to another thread, e.g. CompletableFuture.runAsync(this::sendReceipt) or executor.submit(this::reindex) - the call runs async
+match:
+  rule:
+    any:
+      - pattern: CompletableFuture.$M($TASK $$$)
+      - pattern: $EXEC.$M($TASK $$$)
+  constraints:
+    M: { regex: "^(runAsync|supplyAsync|submit|execute|schedule|scheduleAtFixedRate|scheduleWithFixedDelay)$" }
+    TASK: { kind: method_reference }
+emit:
+  - edge: INVOKES
+    from: "@function"
+    to: { Function: { symbol: $TASK } }
+    async: true
