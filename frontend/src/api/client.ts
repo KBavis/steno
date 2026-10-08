@@ -166,6 +166,8 @@ export interface GraphNode {
   /** Trace entries: a helper called from many places, never expanded; a call to a function already shown above */
   utility?: boolean
   repeat?: boolean
+  /** Flow view: calls here (or in folded steps below) Steno couldn't follow; the flow may continue past them */
+  stops?: { call: string; line: number; reason: string; library?: string }[]
   /** Flow view: what a step does, in words (operation and target) */
   does?: { type: string; op?: string | null; target: string }[]
   /** Flow view: the first step that uses a target */

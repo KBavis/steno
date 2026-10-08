@@ -6,7 +6,6 @@
 The assemblers (`steno.assemblers`) then fill in the blanks from the clues.
 """
 
-import ast
 import fnmatch
 import logging
 from dataclasses import dataclass, field
@@ -30,7 +29,8 @@ from steno.extraction.facts import (
     TableOfRef,
     host_of,
 )
-from steno.resolvers.python import UNRESOLVED, ClassInfo, FunctionInfo, PythonResolver, Scope
+from steno.resolvers import build_resolvers
+from steno.resolvers.base import UNRESOLVED, Function, Resolver, Resolvers
 from steno.rule_packs.packs import EXTENSIONS, Pack, Rule
 from steno.source import config_files
 from steno.source.files import is_test_file, source_files
@@ -58,7 +58,7 @@ _OMIT = object()  # an optional capture that wasn't bound: the field is left out
 @dataclass
 class Capture:
     text: str
-    expr: ast.expr | None = None
+    expr: Any = None  # the resolver's expression for it
     node: SgNode | None = None
 
 
@@ -69,9 +69,10 @@ class Ctx:
     rule: Rule
     origin: Origin
     captures: dict[str, Capture]
-    scope: Scope | None = None
-    function: FunctionInfo | None = None
-    cls: ClassInfo | None = None
+    resolver: Resolver | None = None  # the resolver for the file's language
+    scope: Any = None
+    function: Function | None = None
+    cls: str | None = None  # the enclosing class's symbol
     named: dict[str, NodeFact] = field(default_factory=dict)
 
 
@@ -80,7 +81,8 @@ class Engine:
         self.repo = repo
         self.packs = packs
         self.out = Extraction()
-        self.resolver: PythonResolver | None = None
+        # One symbol resolver per language the enabled packs read (D70)
+        self.resolver: Resolvers | None = None
         self.files: list[Path] = []
         self._roots: dict[Path, SgNode] = {}
 
@@ -88,10 +90,12 @@ class Engine:
         """Read the code once: list the files, read them into the symbol table, and build
         a syntax tree for every file a code rule will look at. No rules run here."""
         self.files = list(source_files(self.repo))
-        if any(p.language == "python" for p in self.packs):
-            self.resolver = PythonResolver(self.repo, self.files)
+        languages = {p.language for p in self.packs}
+        if languages & {"python", "java"}:
+            self.resolver = build_resolvers(self.repo, self.files, languages)
             self.out.errors += [
-                f"{p.relative_to(self.repo)}: {msg}" for p, msg in self.resolver.errors
+                f"{p.relative_to(self.repo).as_posix() if p != self.repo else '.'}: {msg}"
+                for p, msg in self.resolver.errors
             ]
         for language in {r.language for p in self.packs for r in p.rules if r.kind == "code"}:
             for path in self._code_files(language):
@@ -103,7 +107,7 @@ class Engine:
         for rule in rules:  # config first: its property clues feed value resolution
             if rule.kind == "config":
                 self._run_config(rule)
-        if self.resolver:
+        if self.resolver:  # one map, shared by every language's resolver
             for clue in self.out.clues:
                 if clue.kind == "property" and "key" in clue.fields:
                     self.resolver.properties[clue.fields["key"]] = clue.fields.get("value")
@@ -150,32 +154,26 @@ class Engine:
     def _emit_match(self, rule: Rule, path: Path, match: SgNode) -> None:
         line = match.range().start.line + 1
         origin = Origin(rule.id, rule.pack, path.relative_to(self.repo).as_posix(), line)
-        fn = cls = None
-        scope = None
-        if self.resolver:
-            fn, cls = self.resolver.enclosing(path, line)
-            module = self.resolver.module_at(path)
-            scope = Scope(module, fn) if module else None
-        captures = {name: self._capture(match, name) for name in _capture_names(rule)}
-        ctx = Ctx(rule, origin, {k: v for k, v in captures.items() if v}, scope, fn, cls)
+        resolver = self.resolver.for_path(path) if self.resolver else None
+        scope, fn, cls = resolver.scope_at(path, line) if resolver else (None, None, None)
+        captures = {
+            name: self._capture(match, name, path, resolver) for name in _capture_names(rule)
+        }
+        ctx = Ctx(rule, origin, {k: v for k, v in captures.items() if v}, resolver, scope, fn, cls)
         if not self._where(ctx):
             return
         self._emit(ctx)
 
     @staticmethod
-    def _capture(match: SgNode, name: str) -> Capture | None:
+    def _capture(match: SgNode, name: str, path: Path, resolver: Resolver | None) -> Capture | None:
         node = match.get_match(name)
         if node is None:
             many = match.get_multiple_matches(name)
             return Capture(", ".join(n.text() for n in many)) if many else None
-        try:
-            expr = ast.parse(node.text().strip(), mode="eval").body
-        except SyntaxError:
-            expr = None
-        return Capture(node.text(), expr, node)
+        return Capture(node.text(), resolver.expression(path, node) if resolver else None, node)
 
     def _where(self, ctx: Ctx) -> bool:
-        r = self.resolver
+        r = ctx.resolver
         for var, cond in ctx.rule.where.items():
             cap = ctx.captures.get(var.lstrip("$"))
             if cap is None or cap.expr is None or r is None or ctx.scope is None:
@@ -302,9 +300,9 @@ class Engine:
 
     def _anchor(self, ctx: Ctx, spec: str) -> str | None:
         if spec == "@function":
-            return ctx.function.qualname if ctx.function else None
+            return ctx.function.symbol if ctx.function else None
         if spec == "@class":
-            return ctx.cls.qualname if ctx.cls else None
+            return ctx.cls
         if spec == "@file":
             return ctx.origin.file
         return None
@@ -328,9 +326,10 @@ class Engine:
         if cap is _OMIT:
             return _OMIT
         assert isinstance(cap, Capture)
-        if ctx.scope is None or cap.expr is None or _names_code(cap.node):
+        r = ctx.resolver
+        if r is None or ctx.scope is None or cap.expr is None or _names_code(r, cap.node):
             return _strip_quotes(cap.text)  # config values, method names, operators: their text
-        value = self.resolver.value_of(cap.expr, ctx.scope) if self.resolver else UNRESOLVED
+        value = r.value_of(cap.expr, ctx.scope)
         return UNRESOLVED_TEXT if value is UNRESOLVED else value
 
     def _parameter_function(self, ctx: Ctx, spec: Any) -> NodeRef | None:
@@ -338,13 +337,11 @@ class Engine:
         helper that wraps `FunctionTool.from_defaults(async_fn=async_fn)`: which function it
         holds is up to each caller, so the assembler fills it in from the call sites."""
         cap = self._cap(ctx, spec)
-        if (
-            isinstance(cap, Capture)
-            and isinstance(cap.expr, ast.Name)
-            and ctx.function is not None
-            and cap.expr.id in ctx.function.params
-        ):
-            return NodeRef.of("Function", {"param_of": ctx.function.qualname, "param": cap.expr.id})
+        if not isinstance(cap, Capture) or cap.expr is None or ctx.resolver is None:
+            return None
+        param = ctx.resolver.parameter_of(cap.expr, ctx.scope) if ctx.scope is not None else None
+        if param is not None and ctx.function is not None:
+            return NodeRef.of("Function", {"param_of": ctx.function.symbol, "param": param})
         return None
 
     def _url_template(self, ctx: Ctx, spec: Any) -> str | None:
@@ -353,7 +350,7 @@ class Engine:
         cap = self._cap(ctx, spec)
         if not isinstance(cap, Capture) or cap.expr is None or ctx.scope is None:
             return None
-        return self.resolver.template_of(cap.expr, ctx.scope) if self.resolver else None
+        return ctx.resolver.template_of(cap.expr, ctx.scope) if ctx.resolver else None
 
     def _text(self, ctx: Ctx, spec: Any) -> Any:
         cap = self._cap(ctx, spec)
@@ -370,12 +367,13 @@ class Engine:
         if cap is _OMIT:
             return _OMIT
         assert isinstance(cap, Capture)
-        if not (self.resolver and ctx.scope and cap.expr is not None):
+        r = ctx.resolver
+        if not (r and ctx.scope and cap.expr is not None):
             return cap.text
-        sym = self.resolver.symbol_of(cap.expr, ctx.scope)
+        sym = r.symbol_of(cap.expr, ctx.scope)
         if sym is None:
             raise _Drop(f"can't resolve {cap.text!r}")
-        return self.resolver.canonical(sym)
+        return r.canonical(sym)
 
     def _class(self, ctx: Ctx, spec: Any) -> Any:
         cap = self._cap(ctx, spec)
@@ -385,8 +383,8 @@ class Engine:
             return _OMIT
         assert isinstance(cap, Capture)
         cls = (
-            self.resolver.class_of(cap.expr, ctx.scope)
-            if self.resolver and ctx.scope and cap.expr
+            ctx.resolver.class_of(cap.expr, ctx.scope)
+            if ctx.resolver and ctx.scope and cap.expr is not None
             else None
         )
         if cls is None:
@@ -412,7 +410,8 @@ class Engine:
             cap = self._cap(ctx, body)
             if not isinstance(cap, Capture) or cap.expr is None or ctx.scope is None:
                 raise _Drop("table_of needs a captured expression")
-            return TableOfRef(cap.expr, ctx.scope)
+            assert ctx.resolver is not None
+            return TableOfRef(cap.expr, ctx.scope, ctx.resolver.language)
         if kind == "http":
             method = self._value(ctx, body.get("method", "GET"))
             url = self._value(ctx, body.get("url"))
@@ -426,7 +425,7 @@ class Engine:
             symbol = self._symbol(ctx, body.get("symbol"))
             if symbol is _OMIT:
                 raise _Drop("function reference without a symbol")
-            if self.resolver and not isinstance(self.resolver.lookup(str(symbol)), FunctionInfo):
+            if ctx.resolver and ctx.resolver.function(str(symbol)) is None:
                 # A parameter or a value built at runtime: which function it holds isn't known
                 raise _Drop(
                     f"function reference {str(symbol).rsplit('.', 1)[-1]!r} isn't a known function"
@@ -456,24 +455,10 @@ def _capture_names(rule: Rule) -> set[str]:
     return set(re.findall(r"\$\$?\$?([A-Z_][A-Z0-9_]*)", text))
 
 
-def _names_code(node: SgNode | None) -> bool:
-    """True for a capture that names code rather than holding a value: an attribute name
-    (the `post` in router.post) or a called function (`update` in update(Model))."""
-    if node is None:
-        return False
-    parent = node.parent()
-    if parent is None:
-        return False
-    for field_name in ("attribute", "function"):
-        child = parent.field(field_name)
-        if child is not None and _span(child) == _span(node):
-            return parent.kind() in ("attribute", "call")
-    return False
-
-
-def _span(node: SgNode) -> tuple[int, int, int, int]:
-    r = node.range()
-    return r.start.line, r.start.column, r.end.line, r.end.column
+def _names_code(r: Resolver, node: SgNode | None) -> bool:
+    """True for a capture that names code rather than holding a value: an attribute or method
+    name (the `post` in router.post) or a called function. Each language's grammar says which."""
+    return node is not None and r.names_code(node)
 
 
 def _strip_quotes(text: str) -> str:

@@ -112,7 +112,7 @@ def parse(ctx: JobContext) -> dict[str, Any]:
     return {
         "packs": [p.name for p in packs],
         "files": len(engine.files),
-        "python_modules": len(engine.resolver.modules) if engine.resolver else 0,
+        "resolvers": engine.resolver.stats() if engine.resolver else {},
         "errors": len(engine.out.errors),
     }
 

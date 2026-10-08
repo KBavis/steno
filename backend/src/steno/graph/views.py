@@ -436,6 +436,7 @@ class GraphViews:
         shown_depth: dict[str, int] = {}  # trace path → depth it's drawn at
         shown_id: dict[str, str] = {}  # trace path → the id it's drawn as
         conditional: dict[str, bool] = {}
+        by_id: dict[str, dict[str, Any]] = {}
         for t in trace:
             path = t["path"]
             parent = path.rsplit(".", 1)[0] if "." in path else None
@@ -448,6 +449,9 @@ class GraphViews:
                     break
                 p = p.rsplit(".", 1)[0] if "." in p else None
             if significant_only and ("step" not in t or t.get("repeat")):
+                # Calls Steno couldn't follow stay visible on the nearest step drawn (D71)
+                if t.get("unresolved") and parent_step in by_id:
+                    by_id[parent_step]["stops"] += t["unresolved"]
                 continue
             node_id = step_of(flow_id, t) if "step" in t else ids.trace_entry_id(flow_id, path)
             shown_depth[path], shown_id[path] = depth, node_id
@@ -469,9 +473,11 @@ class GraphViews:
                     "candidate": bool(t.get("candidate")),
                     "utility": bool(t.get("utility")),
                     "repeat": bool(t.get("repeat")),
+                    "stops": list(t.get("unresolved", [])),
                     "effects_of": t.get("effects", []),
                 }
             )
+            by_id[node_id] = steps[-1]
 
         target_ids = sorted({e["target"] for st in steps for e in st["effects_of"]})
         groups: list[dict[str, Any]] = []
@@ -635,6 +641,7 @@ class GraphViews:
             "utility",
             "repeat",
             "recursive",
+            "unresolved",
         )
         return {
             "id": entry_id,

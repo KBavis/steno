@@ -213,6 +213,7 @@ UNEXPLAINED (org-wide, top 3)
 | **Unreachable code** | Functions with effects that no entry point reaches. Clusters usually mean a missing entry-point (receiver) rule, or runtime dispatch the call graph can't follow. | Yes |
 | **Couldn't check** | Matches a rule found but couldn't complete because Steno couldn't tell (a condition it couldn't check, a name it couldn't resolve). Drops that are a rule working as designed (`table_of` on something that isn't an entity) aren't listed. | Yes |
 | **Unparsed files** | Files Steno couldn't read at all: nothing in them is in the graph | Yes |
+| **Unresolved library types** | Calls that stopped because a value's type comes from a library Steno can't see (`WebClient#post()` returns an unknown type), one item per library. It measures what missing dependency JARs cost and which libraries matter most (D71). The JDK is always available, so a JDK type that isn't known (generics the solver couldn't infer) isn't counted here. | Yes |
 | **Cross-app inconsistencies** | A topic or channel produced but never consumed, or consumed but never produced; a call to an endpoint the target app doesn't expose. Each means one side was missed. | Later: needs several applications (POC stage B) |
 | **Config no rule read** | Config keys that look like hosts, URLs, topics, or queues that no rule read | Later: needs config rules |
 
@@ -275,7 +276,7 @@ Flows depend on knowing that `passSvc.callToFunction()` refers to a specific met
 
 | Option | How | Tradeoff | Status |
 |---|---|---|---|
-| **JavaParser + symbol solver + dependency JARs** | Resolves types from source. The dependency JARs (from `mvn dependency:copy-dependencies`, no full build needed) let it resolve types from libraries too. | Resolves most calls, including through library types. Weaker on complex generics, lambdas, and reflection. Runs as a small JVM helper process called from Python. | **Chosen** |
+| **JavaParser + symbol solver + dependency JARs** | Resolves types from source and the JDK first; dependency JARs are added later (D69, [5.1c](#51c-the-java-resolver-source-first-decided)). | Resolves most calls, including through library types once JARs are added. Weaker on complex generics, lambdas, and reflection. Runs as a small JVM helper process called from Python. | **Chosen** |
 | SCIP (`scip-java`, …) | Runs the real compiler over a full build and outputs every reference | Most accurate, but needs every repo to build in the ingestion environment, which is a large operational effort at org scale | Not planned. Possible future option if measured gaps justify it. |
 | Headless language server (jdtls) | Queries an LSP server | Accurate, slow, harder to run | Not planned |
 
@@ -302,7 +303,7 @@ flowchart TD
     W -- "not ingested" --> N3[Ends at an external symbol<br/>a rule labels it, or a coverage item]
 ```
 
-1. **Receiver type.** `passSvc` is declared as `private final PassService passSvc;` (or a constructor parameter), so its type is `com.x.PassService`. The JavaParser symbol solver finds this from the repo's source, the **dependency JARs**, and the JDK.
+1. **Receiver type.** `passSvc` is declared as `private final PassService passSvc;` (or a constructor parameter), so its type is `com.x.PassService`. The JavaParser symbol solver finds this from the repo's source and the JDK, and later the **dependency JARs** (D69).
 2. **Method declaration.** It finds `PassService#callToFunction(ClientRequest)`, choosing between overloads by argument types, and following inherited methods up the class hierarchy.
 3. **Interface or abstract?** If the declared type is a concrete class, go to step 5.
 4. **DI resolution:** which implementation does the framework inject?
@@ -346,6 +347,37 @@ It also follows (2026-10-07): **tuple unpacking** of a function annotated `-> tu
 What it can't follow (dynamic attribute access, values built at runtime, untyped parameters) is marked unresolved and shows up in the coverage report. Pyright or Jedi are options only if those gaps turn out to matter.
 
 **How it works.** At the start of the parse stage the resolver reads every source file once into a symbol table: source roots and module names, and per module its imports, classes (bases, methods, class values, `self.x` attributes), functions (parameters, annotations, return types, line spans), and module-level values. Nothing is resolved in advance; each question is answered when the engine, an assembler, or the call graph asks it, by recursively asking smaller questions. Clues teach it two things during the run: configuration values (`property`) and library return types (`client` … `returns`).
+
+### 5.1c The Java resolver: source first (Decided, built)
+
+Built 2026-10-07: the shared interface (`resolvers/base.py`), the JVM helper (`resolver-jvm/`, `make resolver`), and the Java resolver that reads its output (`resolvers/java.py`). On budgeting-app (205 Java files) the helper takes about 2 seconds.
+
+**One resolver per language, behind one interface (D70).** The engine asks every resolver the same questions (which symbol a name is, an expression's type and class, a constant's value, a URL template, the enclosing function), and the graph builder and coverage report ask the same call-graph questions (functions, the calls each makes, the calls it couldn't follow, the library calls it makes). It keeps one resolver per language and picks one by the file's language, so a repository with `.py` and `.java` files runs both. Calls between languages aren't resolved: they cross by HTTP or messaging, which the graph already joins. The **property map** from config rules belongs to the engine and is shared by every resolver, so Spring's `@Value("${x}")` reads `application.yml` the same way Python reads settings.
+
+**Resolved in one pass, then looked up (D69).** The Python resolver answers each question in-process when it's asked. Java's symbol table lives in the JVM helper, and asking it one question at a time would cost a round trip per question. Instead, the helper reads the repository once and writes everything the engine could ask: for every call site, the method it calls (overload chosen) or why it couldn't tell; for every expression a rule may capture, its type and constant value. The results are keyed by file and position. The Java resolver on the Python side looks answers up and offers the same interface as the Python one. Nightly runs already re-analyze a repository in full (D59), so this changes nothing about how runs scale.
+
+**What it reads (D69):**
+
+| Source | When | What it resolves |
+|---|---|---|
+| The repository's own source, every module (Maven or Gradle) | Now | All first-party calls, which flows are made of; a monorepo's services and libraries see each other |
+| The JDK (JavaParser reads it from the running JVM) | Now | Streams, `Optional`, collections, lambdas over them: `users.stream().map(this::toDto)` resolves |
+| Dependency JARs | Later, decided by coverage data | Library return types: fluent clients (`WebClient`, Reactor's `Mono`/`Flux`), builders, inherited library methods |
+
+The helper takes a list of JARs that starts empty, so adding them later is configuration, not a redesign. Without JARs, a library type is still **named** from the imports (`private final KafkaTemplate<…> kafkaTemplate;` is `org.springframework.kafka.core.KafkaTemplate`), so rules on declared library types and annotation rules work. What's lost is what a library method **returns**, so a chain through one stops there.
+
+**Lombok (D72).** Lombok generates methods that aren't in the source (`@Getter`, `@Setter`, `@Data`, `@Value`, `@Builder`, `@RequiredArgsConstructor`, `@AllArgsConstructor`), and JavaParser doesn't run annotation processors, even with JARs. The helper adds those members to its symbol table itself, so `user.getEmail()` and constructor injection through `@RequiredArgsConstructor` resolve.
+
+**Gaps are visible, never silent (D71).** A flow that looks complete but stopped partway through is worse than a missing edge, because people trust it. Every resolver reports the calls it couldn't follow, with the line and the reason: `library type` (and which library), `unknown type`, `unknown method`, or `function value` (a function held in a parameter). In a flow's trace, the entry of the function that makes the call lists it under `unresolved` when it may matter: the method is named like a first-party function (a step may be missing) or like I/O (an effect may be). A chain of builder calls (`web.post().uri(…).retrieve()`) therefore shows up once, at `retrieve()`, not call by call. The flow carries `incomplete` and `unresolved_calls`, and `get_flow` shows each stop on the nearest step (`stops`). The coverage report counts every library-type stop under **Unresolved library types**. This applies to every language: in Python the usual gap is a database session whose type isn't annotated (`session.commit()`); `data.get("key")` on parsed JSON isn't listed.
+
+**What the helper resolves, in order.** JavaParser's symbol solver first (generics, lambdas, overloads), then Steno's own lookups when the solver gives up because a library type isn't available: a name's declaration (locals, parameters, fields of the class and its ancestors, static imports), a type name through nested types, imports, the same package, `java.lang`, and on-demand imports; the element type of a stream or collection from declared generics (`order.getItems().stream().filter(i -> …)`); and a method on a repository type or its ancestors by name and argument count. A call to an interface method with one implementation in the repository runs that one (DI can only inject it); with several, each is a `candidate`. A call on `this` from an inherited method, read as a subclass, runs the subclass's version (D58). Lombok-generated members resolve, so types flow through them, but they aren't steps, the way reading a field isn't. Values: string constants and `+`, `String.format`, `formatted`, `concat`, fields with an initializer or assigned once in a constructor, and `@Value("${key}")` on fields and parameters, which the engine fills in from config.
+
+**Dependencies, in order (Proposed, not yet built):**
+1. **Public libraries** (Spring, Reactor, Jackson, Kafka clients) come from Maven Central, which needs no credentials. They're fetched by coordinates without running the repository's build. Running Gradle or Maven on the worker would execute every repository's build scripts, which is a security problem. Exact versions matter little for signatures.
+2. **Internal libraries** (an org's shared models and clients) are linked to their **source** in another ingested repository, by matching an artifact's coordinates to the repository that publishes it. This is better than a compiled JAR: real code, citations, and "who depends on these entities?" The version a dependent asked for is recorded, since the library is ingested at its own head. This connects to the Open question of continuing traces across repositories.
+3. **A private artifact repository** (JFrog, Nexus) as a new kind of connector, with credentials, only for gaps the first two leave.
+
+Each step is taken only when the **Unresolved library types** signal shows it's worth it.
 
 | Question | Answers | Gives up on |
 |---|---|---|

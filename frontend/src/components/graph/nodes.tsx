@@ -324,6 +324,16 @@ export function StepRowNode({ id, data, selected }: NodeProps<Node<EntityData>>)
             <span className="step-tag" title="Called again; its calls are listed where it first runs">again</span>
           ) : null}
           {node.is_async ? <span className="step-tag">async</span> : null}
+          {node.stops?.length ? (
+            <span
+              className="step-tag"
+              title={`Steno couldn't follow ${node.stops.length === 1 ? 'this call' : 'these calls'}; the flow may continue past ${node.stops.length === 1 ? 'it' : 'them'}:\n${node.stops
+                .map((s) => `${s.call} (line ${s.line}): ${s.reason}${s.library ? ` · ${s.library}` : ''}`)
+                .join('\n')}`}
+            >
+              stops here
+            </span>
+          ) : null}
           {node.sub}
         </span>
       </span>

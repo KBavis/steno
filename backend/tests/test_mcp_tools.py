@@ -1,6 +1,6 @@
 """The MCP tools' pure parts: folding a flow into an outline, and fitting a token budget."""
 
-from steno.mcp.tools import _fold, fit
+from steno.mcp.tools import _fold, _stops, fit
 
 
 def _step(path: str, does: list[str] | None = None) -> dict:
@@ -36,3 +36,25 @@ def test_a_long_answer_is_cut_and_says_so():
     assert len(out["steps"]) < 50
     assert out["truncated"]["steps"].startswith(f"{50 - len(out['steps'])} more")
     assert out["next"] == ["a"]
+
+
+def test_stops_fold_into_the_shown_step_above():
+    """A call Steno couldn't follow stays visible however deep it is (D71)."""
+    stop = "web.retrieve() at line 61: library type (org.springframework.web)"
+    steps = [*STEPS[:3], {**STEPS[3], "stops": [stop]}, *STEPS[4:]]
+    shown = {s["path"]: s for s in _fold(steps, 2, None)}
+    assert shown["1.2"]["stops"] == [stop]
+
+
+def test_stops_say_where_and_why():
+    entry = {
+        "unresolved": [
+            {"call": "web.post().uri(…).retrieve()", "line": 61, "reason": "library type",
+             "library": "org.springframework.web"},
+            {"call": "session.commit()", "line": 70, "reason": "unknown type"},
+        ]
+    }  # fmt: skip
+    assert _stops(entry, of="place") == [
+        "in place: web.post().uri(…).retrieve() at line 61: library type (org.springframework.web)",
+        "in place: session.commit() at line 70: unknown type",
+    ]

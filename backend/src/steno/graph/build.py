@@ -14,8 +14,6 @@ entry point, or an effect at or below them) also become Step nodes, which carry 
 Pure: no database access, so it's testable on its own. `writer.py` sends the plan to Neo4j.
 """
 
-import ast
-import hashlib
 import json
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
@@ -35,7 +33,7 @@ from steno.extraction.facts import (
 )
 from steno.graph import ids
 from steno.graph.structure import Module, Structure
-from steno.resolvers.python import FunctionInfo, Invocation, PythonResolver
+from steno.resolvers.base import Function, Invocation, Resolvers, UnresolvedCall, looks_like_io
 from steno.rule_packs.packs import HttpSystem
 
 # Node types search will cover (they'll carry cards; knowledge-graph.md §3, Card properties)
@@ -60,6 +58,7 @@ POINTERS = ("start_line", "end_line", "call_line")
 # inherited method whose calls depend on that (Task.run as DiffTaskRunner), else None
 Key = tuple[str, str | None]
 UNRESOLVED_SYSTEM = "unresolved"
+LANGUAGE_OF = {".py": "python", ".java": "java"}
 
 
 @dataclass(frozen=True)
@@ -155,7 +154,7 @@ class Context:
 
 def build(
     x: Extraction,
-    resolver: PythonResolver | None,
+    resolver: Resolvers | None,
     structure: Structure,
     ctx: Context,
     http_systems: list[HttpSystem] | None = None,
@@ -168,7 +167,7 @@ class _Builder:
     def __init__(
         self,
         x: Extraction,
-        r: PythonResolver | None,
+        r: Resolvers | None,
         s: Structure,
         ctx: Context,
         http_systems: list[HttpSystem],
@@ -179,9 +178,10 @@ class _Builder:
         self.plan = GraphPlan()
         self.now = datetime.now(UTC).isoformat()
         self.apps: dict[str, str] = {}  # module path → application node id
-        self.functions: dict[str, FunctionInfo] = (
-            {f.qualname: f for f in r.functions()} if r is not None else {}
-        )
+        self.functions: dict[str, Function] = {f.symbol: f for f in r.functions()} if r else {}
+        # Names of first-party functions: an unresolved call by one of these names may be a
+        # flow step that's missing (D71)
+        self.first_party_names = {f.name for f in self.functions.values()}
         self.fact_ids: dict[int, str] = {}  # id(NodeFact) → node id
         self.effects: dict[str, list[Effect]] = defaultdict(list)  # function symbol → effects
         self.graph: dict[Key, list[Call]] = {}
@@ -410,7 +410,7 @@ class _Builder:
                 return self._external(host, system.name, prov, key=system.name)
             return self._external(host, host, prov)
         fn = self.functions.get(caller or "")
-        owner = (fn.cls.qualname if fn.cls else fn.module.name) if fn else caller or self.ctx.repo
+        owner = fn.container if fn else caller or self.ctx.repo
         file = (prov.get("source_file") or "").rsplit("/", 1)[-1]
         self.unmet.append(
             {
@@ -489,7 +489,7 @@ class _Builder:
         its own key when it calls something different from the base version (D58). A call to
         an abstract method goes to every implementation, marked `candidate`.
         """
-        if self.r is None:
+        if not self.r:
             return
         self.calls: dict[Key, list[Invocation]] = {}
         self._bind_memo: dict[Key, bool] = {}
@@ -561,7 +561,7 @@ class _Builder:
 
     def _calls_of(self, key: Key) -> list[Invocation]:
         if key not in self.calls:
-            assert self.r is not None
+            assert self.r
             self.calls[key] = self.r.invocations(self.functions[key[0]], self_type=key[1])
         return self.calls[key]
 
@@ -596,7 +596,7 @@ class _Builder:
         """One Flow per entry point: STARTS from its trigger, its trace (L3) on the node, its
         significant functions as Steps (L2) carrying their effects, and every effect rolled
         up onto the flow (L1)."""
-        if self.r is None:
+        if not self.r:
             return
         for ep in self.x.entry_points:
             prov = self._prov(ep.origin.rule, ep.origin.file, ep.origin.line)
@@ -612,6 +612,7 @@ class _Builder:
             trigger_name = self.plan.nodes[trigger].props.get("name", trigger)
             flow = ids.flow_id(app_name, trigger_name)
             trace = self._trace(flow, (ep.function, None))
+            stops = sum(len(t.get("unresolved", [])) for t in trace)
             start, end = entry.span
             self.plan.node(
                 flow,
@@ -627,6 +628,9 @@ class _Builder:
                 trace=json.dumps(trace, separators=(",", ":")),
                 trace_files=sorted({t["file"] for t in trace}),
                 trace_symbols=sorted({t["symbol"] for t in trace}),
+                # Calls Steno couldn't follow: the flow may stop short there (D71)
+                unresolved_calls=stops or None,
+                incomplete=bool(stops) or None,
                 **prov,
             )
             self.plan.edge("STARTS", trigger, flow, **prov)
@@ -659,6 +663,9 @@ class _Builder:
                 if self.graph.get(key):
                     entry["repeat"] = True
                 return
+            gaps = self._gaps(key[0])
+            if gaps:
+                entry["unresolved"] = gaps
             if key in self.utility:
                 return
             expanded.add(key)
@@ -668,7 +675,19 @@ class _Builder:
         visit(root, "1", None, frozenset())
         return entries
 
-    def _entry(self, key: Key, fn: FunctionInfo, path: str, call: Call | None) -> dict[str, Any]:
+    def _gaps(self, symbol: str) -> list[dict[str, Any]]:
+        """The calls in a function Steno couldn't follow that may matter (D71): named like a
+        first-party function (a step that may be missing) or like I/O (an effect that may be).
+        A chain of builder calls through a library type isn't listed call by call; the coverage
+        report counts every one, per library."""
+        assert self.r
+        return [
+            g.describe()
+            for g in self.r.unresolved_calls(self.functions[symbol])
+            if _matters(g, self.first_party_names)
+        ]
+
+    def _entry(self, key: Key, fn: Function, path: str, call: Call | None) -> dict[str, Any]:
         start, end = fn.span
         rel = self._rel(fn)
         counts = self.files.setdefault(rel, {"functions": 0, "significant": 0})
@@ -676,16 +695,15 @@ class _Builder:
             "path": path,
             "symbol": key[0],
             "bound_to": key[1],
-            "name": fn.node.name,
-            "container": fn.cls.qualname if fn.cls else fn.module.name,
+            "name": fn.name,
+            "container": fn.container,
             "file": rel,
             "start_line": start,
             "end_line": end,
             "call_line": call.line if call else None,
             "conditional": bool(call and call.conditional),
             "in_loop": bool(call and call.in_loop),
-            "async": bool(call and call.is_async)
-            or fn.node.__class__.__name__ == "AsyncFunctionDef",
+            "async": bool(call and call.is_async) or fn.is_async,
             "candidate": bool(call and call.candidate),
             "significant": key in self.significant,
             "utility": key in self.utility,
@@ -693,8 +711,8 @@ class _Builder:
                 {"edge": e.type, "target": e.dst, **_pick(e.props, "operation", "method", "url")}
                 for e in self.effects.get(key[0], [])
             ],
-            "doc": _first_sentence(fn.node),
-            "body_hash": self._body_hash(fn),
+            "doc": fn.doc,
+            "body_hash": fn.body_hash,
         }
         if key not in self.counted:  # count each function once per file, not per flow
             self.counted.add(key)
@@ -770,7 +788,7 @@ class _Builder:
                 ["File"],
                 path=rel,
                 name=rel.rsplit("/", 1)[-1],
-                language="python",
+                language=LANGUAGE_OF.get("." + rel.rsplit(".", 1)[-1], "unknown"),
                 functions=counts["functions"],
                 significant=counts["significant"],
                 **prov,
@@ -779,14 +797,9 @@ class _Builder:
             if module:
                 self.plan.edge("BELONGS_TO", fid, ids.module_id(self.ctx.repo, module.path), **prov)
 
-    def _rel(self, fn: FunctionInfo) -> str:
-        assert self.r is not None
-        return fn.module.path.relative_to(self.r.root).as_posix()
-
-    def _body_hash(self, fn: FunctionInfo) -> str:
-        """Changes when the function's code changes, not when it only moves or is reformatted."""
-        dump = ast.dump(fn.node, include_attributes=False)
-        return hashlib.sha1(dump.encode()).hexdigest()[:12]
+    def _rel(self, fn: Function) -> str:
+        assert self.r
+        return self.r.rel(fn.path)
 
 
 def step_of(flow: str, entry: dict[str, Any]) -> str:
@@ -824,11 +837,5 @@ def _reaches_effect(nodes: set[Any], graph: dict[Any, list[Any]], effectful: set
     return result
 
 
-def _first_sentence(node: Any) -> str | None:
-    import ast
-
-    doc = ast.get_docstring(node)
-    if not doc:
-        return None
-    first = doc.strip().split("\n\n")[0].replace("\n", " ")
-    return first.split(". ")[0].rstrip(".") + "." if first else None
+def _matters(gap: UnresolvedCall, first_party: set[str]) -> bool:
+    return gap.method in first_party or looks_like_io(gap.method)

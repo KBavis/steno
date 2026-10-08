@@ -158,7 +158,7 @@ The UI (later) talks to an Admin API for connectors and runs, and uses the same 
 | Application state | **Postgres** | Relational data: connectors, runs, deltas, logs | Decided |
 | Code-pattern rules | **ast-grep / Semgrep** YAML rules (tree-sitter based) | Declarative, many languages, orgs can write their own | Decided |
 | Config rules | YAML / properties path rules | Kafka topics, URLs, and placeholders are in config | Decided |
-| Symbol resolution | **Our own, per language.** Java: JavaParser symbol solver + dependency JARs, run as a JVM helper. Python: a small symbol resolver on Python's `ast` module (D51). | Resolves calls, including through library types, without a full build | Decided (**SCIP not planned**) |
+| Symbol resolution | **Our own, per language, behind one interface (D70).** Java: JavaParser symbol solver as a JVM helper that resolves a repository in one pass, from source and the JDK first, dependency JARs later (D69). Python: a small symbol resolver on Python's `ast` module (D51). | Resolves calls, including through library types, without a full build | Decided (**SCIP not planned**) |
 | DI resolution | Per-framework rule plugins (Spring first) + Jev I1 | The compiler can't know which bean gets injected | Decided |
 | Source access | **git clone** into temporary workspaces | Full source for resolution, rate limits, exact diffs | Decided |
 | Code access | Git host API at the ingested commit, with an in-memory cache. **No stored file contents.** | Simplest; code always matches the graph | Decided |
@@ -240,7 +240,7 @@ flowchart LR
 - **Cloning** into a temporary workspace gives resolution the full source, avoids rate limits, and makes `git diff` exact. 
 - **Config files** become facts (topics, clusters, base URLs, datasources, schedules), plus a property map for placeholders.
 - **Resolving and assembling are different jobs (D56):**
-  - The **symbol resolver**, one per language, answers *what is this?*: which symbol a name refers to, a value's type, the constant it holds. Steno's own (Java: JavaParser symbol solver + dependency JARs; Python: D51). SCIP is not planned. Config placeholders and DI are answered here too: DI by framework rules, then Jev I1. Secret values are never ingested.
+  - The **symbol resolver**, one per language, answers *what is this?*: which symbol a name refers to, a value's type, the constant it holds. Steno's own (Java: JavaParser symbol solver, source and JDK first, JARs later, D69; Python: D51). The engine keeps one resolver per language behind one interface and shares the config property map with all of them (D70). A call no resolver can follow stays visible in the flow (D71). SCIP is not planned. Config placeholders and DI are answered here too: DI by framework rules, then Jev I1. Secret values are never ingested.
   - **Assemblers**, one per clue type and the same for every language, combine clues found in different files into complete facts: a router's prefix + an endpoint's path → the full path.
   - The **graph builder** gives facts stable IDs, creates stubs, and tells internal hosts from vendors.
 - **Passes:**
@@ -457,7 +457,8 @@ Correctness comes first, so it has to be measured:
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Static call graphs miss DI, reflection, and dynamic dispatch | Missing or wrong flow steps | Symbol solver with dependency JARs + DI rules + Jev I1. Mark `ambiguous`. Coverage report. Runtime signals later. |
+| Static call graphs miss DI, reflection, and dynamic dispatch | Missing or wrong flow steps | Symbol solver + DI rules + Jev I1. Mark `ambiguous`. Coverage report. Runtime signals later. |
+| Java resolved without dependency JARs (D69) | Flows stop partway through library chains (fluent clients, Reactor), most in the org's main language | Unresolved calls stay visible in the flow and are counted per library (D71); JARs added in the order the counts justify (public first, internal by source join, private repository last) |
 | Flows can't be found from business-language questions | Search misses the right flow | Business-language flow cards from a stronger model, four retrieval signals, Jev Q4 verification, measured against a question → flow set |
 | Rules overfit to our org | Not agnostic | Rules and plugins, a public second target, the core never depends on org rules |
 | Enterprise scale (millions of functions) | Slow ingestion and queries | No Function nodes (traces instead), nightly runs only for changed repositories, per-file extraction cache, materialized rollups, measure early |
@@ -483,7 +484,7 @@ Correctness comes first, so it has to be measured:
 | D10 | *(Revised by D59: nightly, full re-analysis.)* Incremental updates by commit range on merge to main. PRs are used for attribution. | Superseded |
 | D11 | Steno owns re-ingestion. Contextualized adds attribution and the why. | Decided |
 | D12 | Jev for all decisions rules can't make, at ingestion and query time | Decided |
-| D13 | Steno's own symbol resolution (JavaParser + dependency JARs), with cloning into temporary workspaces. SCIP not planned. | Decided |
+| D13 | Steno's own symbol resolution (JavaParser + dependency JARs), with cloning into temporary workspaces. SCIP not planned. JARs come later: refined by D69. | Decided |
 | D14 | Routing: classify with Jev, then search one scope or fan out in parallel | Decided |
 | D15 | Data store schemas in V2. V1 records entity → table mappings and table-level access. | Decided |
 | D16 | Labels for abstraction, no `IS_A` edges | Decided |
@@ -538,6 +539,10 @@ Correctness comes first, so it has to be measured:
 | D66 | **`client` clues may declare `extends`:** the library base classes the client type inherits (the whole chain). Library code isn't read, so a call on a receiver typed only as a library base (`FunctionCallingLLM`) links to every client the app builds that extends it, marked `candidate` (and `ambiguous` when several), as D47 describes. | Decided |
 | D67 | **The coverage report is read by scope:** organization → space → application, like the graph. Items record the applications they occur in; each scope rolls up its applications' numbers, lists its children worst first, and ranks items by reach (applications, then spaces, then occurrences). | Decided |
 | D68 | **`get_flow` returns an outline:** as many levels as fit in about 25 steps (or `levels`), deeper branches folded into the step above with how many steps are inside and what they touch; `under` opens a branch. Citations cover what's shown. Same folding as the UI (Visualize). | Decided |
+| D69 | **Java resolution starts from source and the JDK; dependency JARs come later.** The JVM helper reads every module of a repository once and writes call targets, types, and constant values keyed by file and position; the Java resolver looks them up. Its JAR list starts empty, so adding JARs is configuration. Refines D13. | Decided |
+| D70 | **One symbol resolver per language, behind one interface.** The engine picks a resolver by file language, so a repository with several languages runs several resolvers. The config property map belongs to the engine and is shared by all of them. | Decided |
+| D71 | **Gaps are visible, never silent.** Every resolver reports the calls it can't follow, with the reason (and the library when it's a library type). The calling function's trace entry lists them under `unresolved` when they may matter (named like a first-party function or like I/O); the flow carries `incomplete` and `unresolved_calls`, and `get_flow` shows the stops; the coverage report counts **unresolved library types** per library. Every language. | Decided |
+| D72 | **The Java resolver supplies Lombok-generated members** (`@Getter`, `@Setter`, `@Data`, `@Value`, `@Builder`, the constructor annotations) itself, since JavaParser doesn't run annotation processors. | Decided |
 | D62 | **The coverage report is aggregated across the organization** (one item per target, ranked by total occurrences across repositories) and every item carries a triage state (unexplained / ignored / explained) that persists across runs, so the report converges instead of staying noisy. Refines D25. | Decided |
 
 ## 21. Open questions
@@ -552,6 +557,8 @@ Correctness comes first, so it has to be measured:
 
 
 - [ ] Naming the service behind an unknown-host call (`Unknown host · JiraDataProvider`): an LLM or decision model reading the calling code, or a person's declaration in an org pack (D64 leaves it unnamed)
+- [ ] Java dependencies, in order (Proposed, [ingestion.md §5.1c](./ingestion.md#51c-the-java-resolver-source-first-decided)): public JARs from Maven Central by coordinates, without running builds; internal libraries linked to their source in another ingested repository by artifact coordinates; a private artifact repository (JFrog, Nexus) connector last. How to read coordinates from Gradle files (version catalogs, BOMs) without running them.
+- [ ] A representative org Java repository to measure against (Spring MVC vs. WebFlux, Lombok, internal client wrappers); `budgeting-app` (Java + Python) until then
 - [ ] How a flow's trace continues into an **ingested library in another repository**, now that library functions aren't stored as nodes (e.g. a per-library summary of each public function's effects, read by dependents' runs)
 
 **Not yet discussed**

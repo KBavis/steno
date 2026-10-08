@@ -358,8 +358,13 @@ class Tools:
             )
         ]
         leads: list[dict[str, Any]] = []
+        shown: dict[str, dict[str, Any]] = {}
         for t in trace:
             if detail == "significant" and ("step" not in t or t.get("repeat")):
+                # A call Steno couldn't follow stays visible on the nearest step above (D71)
+                holder = _nearest(shown, t["path"])
+                if holder is not None:
+                    holder.setdefault("stops", []).extend(_stops(t, of=t["name"]))
                 continue
             entry: dict[str, Any] = {
                 "path": t["path"],
@@ -380,6 +385,9 @@ class Tools:
             ]
             if flags:
                 entry["flags"] = flags
+            if t.get("unresolved"):
+                entry["stops"] = _stops(t)
+            shown[t["path"]] = entry
             if "step" in t:
                 for e in effects.get(step_of(flow_id, t), []):
                     does = f"{VERB[e['type']]} {e['target']}" + (f" ({e['op']})" if e["op"] else "")
@@ -430,6 +438,14 @@ class Tools:
                 else ""
             ),
             "steps": steps,
+            **(
+                {
+                    "incomplete": f"{fl.get('unresolved_calls')} calls Steno couldn't follow; "
+                    "the flow may continue past them (see each step's `stops`)"
+                }
+                if fl.get("incomplete")
+                else {}
+            ),
             **({"leads_to": leads} if leads else {}),
             "citations": citations,
         }
@@ -695,7 +711,29 @@ def _fold(steps: list[dict[str, Any]], levels: int, under: str | None) -> list[d
         for d in s.get("does", []):
             if d not in target.setdefault("inside_does", []):
                 target["inside_does"].append(d)
+        for d in s.get("stops", []):
+            if d not in target.setdefault("stops", []):
+                target["stops"].append(d)
     return shown
+
+
+def _nearest(shown: dict[str, dict[str, Any]], path: str) -> dict[str, Any] | None:
+    """The shown step nearest above a trace path."""
+    while "." in path:
+        path = path.rsplit(".", 1)[0]
+        if path in shown:
+            return shown[path]
+    return None
+
+
+def _stops(t: dict[str, Any], of: str | None = None) -> list[str]:
+    """Where a function's calls stop being followed (D71): `webClient.post().uri(…) at line 61:
+    library type (org.springframework.web)`."""
+    out = []
+    for g in t.get("unresolved", []):
+        why = g["reason"] + (f" ({g['library']})" if g.get("library") else "")
+        out.append(f"{f'in {of}: ' if of else ''}{g['call']} at line {g['line']}: {why}")
+    return out
 
 
 def _span(lines: str) -> tuple[int | None, int | None]:

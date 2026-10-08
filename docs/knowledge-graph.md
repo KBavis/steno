@@ -143,6 +143,7 @@ A flow's **trace** (L3) is the ordered list of every first-party function it run
 | `effects` | What this function does directly: `[{edge: WRITES_TO, target: table:…}]` | | | The step it belongs to, rollups |
 | `significant`, `utility` | Derived tags (see [Significance](#significance-is-a-derived-tag-decided)) | | | Presentation |
 | `step` | On a significant entry: which occurrence of that function's Step this is (its Step node is `step:{flow}:{symbol}[@bound_to][#n]`, keyed by function, not position, so inserting a step doesn't renumber the others) | `1` | `1` | Links L3 to L2 |
+| `unresolved` | The calls this function makes that Steno couldn't follow and that may matter (named like a first-party function or like I/O): each call, its line, why, and the library when it's a library type (D71). The Flow carries `incomplete` and `unresolved_calls`, so a flow that stopped partway never looks complete. | `[{call: "web.post().uri(…).retrieve()", line: 61, reason: "library type", library: "org.springframework.web"}]` | `[{call: "session.commit()", line: 88, reason: "unknown type"}]` | Gaps are visible, never silent |
 | `repeat`, `recursive` | Called again after it was already expanded in this flow (listed, not expanded again); or called while already on the current path | | | Keeps traces bounded |
 | `body_hash` | A hash of the function's syntax tree (ignores moves and formatting) | | | Change history: which functions changed |
 | `doc` | First sentence of its doc comment | | "Creates Job, builds the applicable Tasks, and runs them." | Cards |

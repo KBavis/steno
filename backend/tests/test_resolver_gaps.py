@@ -115,3 +115,25 @@ def test_a_method_only_subclasses_define_links_to_each(tmp_path):
 
 def test_a_function_passed_through_a_helper_is_reached(tmp_path):
     assert ("app.grep_search", False) in _calls(tmp_path)
+
+
+def test_calls_the_resolver_cannot_follow_are_reported(tmp_path: Path) -> None:
+    """D71: an untyped receiver is a gap the flow should show; reading parsed JSON isn't."""
+    from steno.resolvers.python import PythonResolver
+
+    (tmp_path / "svc.py").write_text(
+        dedent(
+            """
+            def save(session, payload):
+                session.commit()
+                return payload.get("id")
+            """
+        )
+    )
+    r = PythonResolver(tmp_path)
+    fn = r.function("svc.save")
+    assert fn is not None
+    gaps = r.unresolved_calls(fn)
+    assert [(g.method, g.reason, g.text) for g in gaps] == [
+        ("commit", "unknown type", "session.commit()")
+    ]

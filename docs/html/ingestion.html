@@ -426,7 +426,7 @@ pre .k-emit { color: var(--neo); font-weight: 500; }
             <tr><td>Rule</td><td>One code shape and what it means: <code>match</code>, optional <code>where</code>, <code>emit</code></td><td>One phrasebook entry</td><td><code>rules/&lt;id&gt;.yaml</code></td></tr>
             <tr><td>Test case</td><td>A trimmed copy of real code and the facts it must produce</td><td>The entry's worked example</td><td><code>tests/&lt;rule&gt;/&lt;case&gt;/</code></td></tr>
             <tr><td>Rule engine</td><td>Reads the code once (parse), then runs every enabled rule on every file (extract)</td><td>The clerk reading every page with the phrasebook</td><td><code>extraction/engine.py</code></td></tr>
-            <tr><td>Symbol resolver</td><td>Answers <em>what is this?</em>: which symbol a name refers to, a value's type, the constant it holds</td><td>The directory of who's who</td><td><code>resolvers/python.py</code></td></tr>
+            <tr><td>Symbol resolver</td><td>Answers <em>what is this?</em>: which symbol a name refers to, a value's type, the constant it holds</td><td>The directory of who's who</td><td><code>resolvers/python.py</code>, <code>resolvers/java.py</code> (one per language, <code>resolvers/base.py</code>)</td></tr>
             <tr><td>Assemblers</td><td>Fill in the blanks in facts from clues found in other files</td><td>Pinning together index cards that belong together</td><td><code>assemblers/assemble.py</code></td></tr>
             <tr><td>Graph builder</td><td>Turns facts and the call graph into nodes and edges with stable IDs</td><td>Filing the cards into folders</td><td><code>graph/build.py</code></td></tr>
             <tr><td>Graph writer</td><td>Saves the plan into Neo4j and removes what's gone</td><td>Putting the folders in the archive</td><td><code>graph/writer.py</code></td></tr>
@@ -453,7 +453,7 @@ pre .k-emit { color: var(--neo); font-weight: 500; }
         <div><b>Leaves</b><code>/tmp/steno-workspaces/job-N/</code> and the commit SHA on the job</div>
       </div>
       <p><strong>clone</strong> fetches the code into a temporary folder that's deleted when the job ends, success or failure. Credentials come from the connector's reference into a secret store, never from Postgres itself. The commit SHA is saved on the job and stamped onto every fact later, so every node in the graph says which commit it came from.</p>
-      <p><strong>deps</strong> exists for Java: it will download the dependency JARs so Java's symbol resolver can answer questions about library types (which <code>send</code> a <code>KafkaTemplate</code> has, what a Spring base class provides). Python's resolver recognizes library types by name from imports, so for Python the stage records itself as skipped.</p>
+      <p><strong>deps</strong> exists for Java: later, it will download dependency JARs so Java's symbol resolver can answer questions about library types (what <code>WebClient#post()</code> returns, what a Spring base class provides). Java starts without them, from source and the JDK (D69). Python's resolver recognizes library types by name from imports, so for Python the stage records itself as skipped.</p>
     </section>
 
     <!-- 4 -->
@@ -689,7 +689,7 @@ id: fastapi-endpoint
     <!-- 6 -->
     <section id="resolve">
       <h2><span class="num">07</span>How the resolver answers</h2>
-      <div class="kicker">Not a stage · <code>resolvers/python.py</code> · asked by extract, assemble and flows</div>
+      <div class="kicker">Not a stage · <code>resolvers/python.py</code> (the examples below) · asked by extract, assemble and flows</div>
       <p class="lede">Every question is answered the same way: look it up in the symbol table from parse, and if the answer depends on something else, ask a smaller question first. The answers below are drawn as the chain of questions the resolver actually asks.</p>
 
       <h3>Example 1 · Which function is <code>svc.run_project_jobs</code>?</h3>
@@ -810,6 +810,13 @@ async with get_async_db_session_context() as session:     <span class="c"># retu
         <div class="card mem"><h4>Lazy</h4><p>Nothing is computed until asked. Most of the symbol table is never touched.</p></div>
         <div class="card mem"><h4>Recursive</h4><p>Each answer is built from smaller answers, all from the same symbol table. A guard stops a question that ends up asking itself.</p></div>
         <div class="card mem"><h4>Never guesses</h4><p>When it doesn't know, the answer is <code>None</code> or <code>UNRESOLVED</code>. The rule decides what that means: skip the match, drop the fact, or record <code>&lt;unresolved&gt;</code>.</p></div>
+      </div>
+      <h3>Java</h3>
+      <p>Every language gets its own resolver behind the same questions, and the engine picks one by file language, so a repository with Python and Java runs both. The config property map is shared by all of them (D70).</p>
+      <div class="grid3">
+        <div class="card mem"><h4>One pass, then lookups</h4><p>Java's symbol table lives in the JVM helper. Instead of a round trip per question, the helper reads the repository once and writes every call target, type and constant, keyed by file and position. The Java resolver looks them up (D69).</p></div>
+        <div class="card mem"><h4>Source and JDK first</h4><p>First-party calls and streams, <code>Optional</code> and collections resolve without JARs. What a <em>library</em> method returns doesn't, so chains through <code>WebClient</code> or <code>Mono</code> stop. JARs come later, in the order coverage shows they matter. Lombok-generated members are added by the helper (D72).</p></div>
+        <div class="card mem"><h4>Gaps stay visible</h4><p>Every resolver reports the calls it can't follow. The calling function's trace entry lists the ones that may matter (named like ours, or like I/O) under <code>unresolved</code>, the flow is marked incomplete, and the coverage report counts unresolved library types per library (D71).</p></div>
       </div>
     </section>
 

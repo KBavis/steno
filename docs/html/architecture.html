@@ -367,8 +367,8 @@ pre .c { color: var(--muted); }
         </div>
         <div class="card mem">
           <h4>Rule engine + symbol resolver <span class="tag yes">built</span></h4>
-          <p>Runs rule packs over the clone (ast-grep), asks the Python symbol resolver what names and types mean, and assembles clues into complete facts. Everything stays in memory for the job.</p>
-          <span class="where">extraction/*  ·  resolvers/python.py  ·  assemblers/*</span>
+          <p>Runs rule packs over the clone (ast-grep), asks each language's symbol resolver (Python, Java) what names and types mean, and assembles clues into complete facts. Everything stays in memory for the job.</p>
+          <span class="where">extraction/*  ·  resolvers/*  ·  assemblers/*</span>
         </div>
         <div class="card mem">
           <h4>Graph builder + writer <span class="tag yes">built</span></h4>
@@ -391,8 +391,8 @@ pre .c { color: var(--muted); }
           <span class="where">graph/schema.py  ·  make graph-init</span>
         </div>
         <div class="card off">
-          <h4>resolver-jvm <span class="tag no">not wired</span></h4>
-          <p>The JavaParser helper builds with Gradle, but nothing in the pipeline calls it yet. The <code>deps</code> stage, which would fetch JARs for it, always skips.</p>
+          <h4>resolver-jvm <span class="tag yes">built</span></h4>
+          <p>The JavaParser helper resolves a repository's Java in one pass, from source and the JDK, Lombok's generated members included, and writes every call target, type and value for the Java resolver to look up (D69, D72). The <code>deps</code> stage, for JARs later, always skips.</p>
           <span class="where">resolver-jvm/</span>
         </div>
         <div class="card off">

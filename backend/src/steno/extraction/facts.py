@@ -3,12 +3,11 @@
 docs/rule-packs.md §3 defines the vocabulary; these are its in-memory form.
 """
 
-import ast
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
 
-from steno.resolvers.python import UNRESOLVED, Scope
+from steno.resolvers.base import UNRESOLVED
 
 UNRESOLVED_TEXT = "<unresolved>"
 
@@ -71,8 +70,9 @@ class HttpRef:
 class TableOfRef:
     """The table an entity maps to; filled in when assembling, dropped if it isn't an entity."""
 
-    expr: ast.expr
-    scope: Scope
+    expr: Any  # the resolver's own expression and scope
+    scope: Any
+    language: str = "python"
 
 
 Ref = AppRef | NodeRef | HttpRef | TableOfRef

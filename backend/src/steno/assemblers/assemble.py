@@ -7,7 +7,6 @@ Each clue type has exactly one assembler here:
 plus the references a rule can't complete on its own: `table_of` and partial identities.
 """
 
-import ast
 from pathlib import Path
 from typing import Any
 
@@ -23,13 +22,13 @@ from steno.extraction.facts import (
     Origin,
     TableOfRef,
 )
-from steno.resolvers.python import FunctionInfo, PythonResolver, Scope
+from steno.resolvers.base import Resolver, Resolvers
 
 
-def assemble(x: Extraction, r: PythonResolver | None, repo: Path) -> None:
+def assemble(x: Extraction, r: Resolvers | None, repo: Path) -> None:
     _dedupe_clues(x)
     _prefix_chains(x)
-    if r is not None:
+    if r:
         _tables(x, r)
         _clients(x, r, repo)
         _passed_functions(x, r, repo)
@@ -79,7 +78,7 @@ def _join_path(prefix: str, path: str) -> str:
 # ---------------------------------------------------------------------- tables
 
 
-def _tables(x: Extraction, r: PythonResolver) -> None:
+def _tables(x: Extraction, r: Resolvers) -> None:
     """`table_of`: the table an entity maps to, from the MAPS_TO edges rules emitted."""
     entity_table = {
         e.src.props.get("name"): e.dst.props.get("name")
@@ -91,7 +90,9 @@ def _tables(x: Extraction, r: PythonResolver) -> None:
         for end in ("src", "dst"):
             ref = getattr(edge, end)
             if isinstance(ref, TableOfRef):
-                table = entity_table.get(_entity_of(ref.expr, ref.scope, r))
+                resolver = r.by_language.get(ref.language)
+                entity = resolver.entity_of(ref.expr, ref.scope) if resolver else None
+                table = entity_table.get(entity)
                 if table is None:
                     x.dropped.append((edge.origin, "table_of: not a mapped entity"))
                     break
@@ -101,32 +102,29 @@ def _tables(x: Extraction, r: PythonResolver) -> None:
     x.edges = kept
 
 
-def _entity_of(expr: ast.expr, scope: Scope, r: PythonResolver) -> str | None:
-    """The entity class behind `Job`, `Job.status`, or an instance like `job`."""
-    if isinstance(expr, ast.Attribute):
-        owner = r.class_of(expr.value, scope)
-        if owner:
-            return owner
-    return r.class_of(expr, scope) or r.type_of(expr, scope)
-
-
 # --------------------------------------------------------------------- clients
 
 
-def _clients(x: Extraction, r: PythonResolver, repo: Path) -> None:
+def _clients(x: Extraction, rs: Resolvers, repo: Path) -> None:
+    for r in rs:
+        _clients_in(x, r, repo)
+
+
+def _clients_in(x: Extraction, r: Resolver, repo: Path) -> None:
     clients = [
-        c for c in x.clues if c.kind == "client" and "type" in c.fields and "target" in c.fields
+        c
+        for c in x.clues
+        if c.kind == "client"
+        and "type" in c.fields
+        and "target" in c.fields
+        and Path(c.origin.file).suffix in r.extensions
     ]
     for c in clients:
         for method, returned in (c.fields.get("returns") or {}).items():
             r.return_hints[(c.fields["type"], method)] = returned
     if not clients:
         return
-    for fn, call in r.method_calls():
-        assert isinstance(call.func, ast.Attribute)
-        receiver = r.type_of(call.func.value, r.scope_of(fn))
-        if receiver is None:
-            continue
+    for fn, receiver, method, line in r.receiver_calls():
         matched = [c for c in clients if r.is_subclass(receiver, [c.fields["type"]])]
         props: dict[str, Any] = {}
         if not matched:
@@ -135,18 +133,18 @@ def _clients(x: Extraction, r: PythonResolver, repo: Path) -> None:
             matched = [c for c in clients if _extends(r, c, receiver)]
             props = {"candidate": True, **({"ambiguous": True} if len(matched) > 1 else {})}
         for clue in matched:
-            edge_type = _client_edge(clue, call.func.attr)
+            edge_type = _client_edge(clue, method)
             if edge_type:
                 origin = Origin(
                     clue.origin.rule,
                     clue.origin.pack,
-                    fn.module.path.relative_to(repo).as_posix(),
-                    call.lineno,
+                    fn.path.relative_to(repo).as_posix(),
+                    line,
                 )
                 x.edges.append(
                     EdgeFact(
                         edge_type,
-                        NodeRef.of("Function", {"symbol": fn.qualname}),
+                        NodeRef.of("Function", {"symbol": fn.symbol}),
                         clue.fields["target"],
                         dict(props),
                         origin,
@@ -154,7 +152,7 @@ def _clients(x: Extraction, r: PythonResolver, repo: Path) -> None:
                 )
 
 
-def _extends(r: PythonResolver, clue: ClueFact, receiver: str) -> bool:
+def _extends(r: Resolver, clue: ClueFact, receiver: str) -> bool:
     """Whether a client's type is known to inherit from `receiver`. Library classes aren't
     read, so the rule lists the library bases its client extends, the whole chain
     (`extends: [FunctionCallingLLM, LLM, BaseLLM]`)."""
@@ -162,7 +160,7 @@ def _extends(r: PythonResolver, clue: ClueFact, receiver: str) -> bool:
     return isinstance(bases, list) and receiver in bases
 
 
-def _passed_functions(x: Extraction, r: PythonResolver, repo: Path) -> None:
+def _passed_functions(x: Extraction, r: Resolvers, repo: Path) -> None:
     """A rule's edge to "the function parameter `p` holds" (a helper wrapping
     `FunctionTool.from_defaults(async_fn=p)`) becomes an edge from each caller of the helper
     to the function it passes: `_init_tooling` registers `_grep_search_wrapper`."""
@@ -173,10 +171,8 @@ def _passed_functions(x: Extraction, r: PythonResolver, repo: Path) -> None:
         if "param_of" not in held:
             kept.append(edge)
             continue
-        helper = r.lookup(held["param_of"])
-        passed = (
-            r.functions_passed(helper, held["param"]) if isinstance(helper, FunctionInfo) else []
-        )
+        helper = r.function(held["param_of"])
+        passed = r.for_function(helper).functions_passed(helper, held["param"]) if helper else []
         if not passed:
             x.dropped.append(
                 (edge.origin, f"function passed as {held['param']!r} isn't known at any call site")
@@ -186,13 +182,13 @@ def _passed_functions(x: Extraction, r: PythonResolver, repo: Path) -> None:
             kept.append(
                 EdgeFact(
                     edge.type,
-                    NodeRef.of("Function", {"symbol": caller.qualname}),
+                    NodeRef.of("Function", {"symbol": caller.symbol}),
                     NodeRef.of("Function", {"symbol": function}),
                     dict(edge.props),
                     Origin(
                         edge.origin.rule,
                         edge.origin.pack,
-                        caller.module.path.relative_to(repo).as_posix(),
+                        caller.path.relative_to(repo).as_posix(),
                         line,
                     ),
                 )

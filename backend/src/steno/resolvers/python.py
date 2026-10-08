@@ -11,14 +11,25 @@ None / UNRESOLVED instead of a guess.
 """
 
 import ast
+import hashlib
 import logging
 import os
 import re
+import sys
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ast_grep_py import SgNode
+
+from steno.resolvers.base import (
+    UNRESOLVED,
+    Invocation,
+    LibraryCall,
+    UnresolvedCall,
+    span,
+)
 from steno.source.files import is_test_file, source_files
 
 log = logging.getLogger(__name__)
@@ -38,14 +49,10 @@ _YIELDING = {
 }
 
 
-class _Unresolved:
-    def __repr__(self) -> str:
-        return "UNRESOLVED"
-
-
-UNRESOLVED: Any = _Unresolved()
 BUILTINS = {"dict", "list", "set", "tuple", "str", "int", "float", "bool", "bytes", "object"}
 FuncNode = ast.FunctionDef | ast.AsyncFunctionDef
+# Standard-library modules that do I/O; the rest of the standard library isn't a library to cover
+STDLIB_IO = {"socket", "smtplib", "ftplib", "urllib", "http", "sqlite3", "subprocess"}
 
 
 @dataclass
@@ -77,6 +84,43 @@ class FunctionInfo:
         start = min([self.node.lineno, *(d.lineno for d in self.node.decorator_list)])
         return start, self.node.end_lineno or self.node.lineno
 
+    # The shared Function interface (resolvers/base.py)
+    language = "python"
+
+    @property
+    def symbol(self) -> str:
+        return self.qualname
+
+    @property
+    def name(self) -> str:
+        return self.node.name
+
+    @property
+    def container(self) -> str:
+        return self.cls.qualname if self.cls else self.module.name
+
+    @property
+    def path(self) -> Path:
+        return self.module.path
+
+    @property
+    def is_async(self) -> bool:
+        return isinstance(self.node, ast.AsyncFunctionDef)
+
+    @property
+    def doc(self) -> str | None:
+        text = ast.get_docstring(self.node)
+        if not text:
+            return None
+        first = text.strip().split("\n\n")[0].replace("\n", " ")
+        return first.split(". ")[0].rstrip(".") + "." if first else None
+
+    @property
+    def body_hash(self) -> str:
+        """Changes when the code changes, not when it only moves or is reformatted."""
+        dump = ast.dump(self.node, include_attributes=False)
+        return hashlib.sha1(dump.encode()).hexdigest()[:12]
+
 
 @dataclass
 class ModuleInfo:
@@ -102,6 +146,9 @@ class Scope:
 
 
 class PythonResolver:
+    language = "python"
+    extensions = (".py",)
+
     def __init__(self, root: Path, files: list[Path] | None = None):
         self.root = root
         self.modules: dict[str, ModuleInfo] = {}
@@ -114,6 +161,7 @@ class PythonResolver:
         self._busy: set[Any] = set()
         self._subclasses: dict[str, list[ClassInfo]] | None = None
         self._callers: dict[str, list[tuple[FunctionInfo, ast.Call]]] | None = None
+        self._unresolved: dict[str, list[UnresolvedCall]] = {}
         self.source_roots = find_source_roots(root)
         for path in files if files is not None else source_files(root):
             if path.suffix == ".py" and not is_test_file(path.relative_to(root)):
@@ -208,6 +256,53 @@ class PythonResolver:
                         if _is_self_attr(target):
                             info.self_attrs.setdefault(target.attr, (sub.value, method, False))
         return info
+
+    # ------------------------------------------------- reading a rule's match
+
+    def expression(self, path: Path, node: SgNode) -> ast.expr | None:
+        try:
+            return ast.parse(node.text().strip(), mode="eval").body
+        except SyntaxError:
+            return None
+
+    def scope_at(
+        self, path: Path, line: int
+    ) -> tuple["Scope | None", "FunctionInfo | None", str | None]:
+        fn, cls = self.enclosing(path, line)
+        module = self.module_at(path)
+        return (Scope(module, fn) if module else None), fn, (cls.qualname if cls else None)
+
+    @staticmethod
+    def names_code(node: SgNode) -> bool:
+        """A capture that names code rather than holding a value: an attribute name (the `post`
+        in router.post) or a called function (`update` in update(Model))."""
+        parent = node.parent()
+        if parent is None:
+            return False
+        for field_name in ("attribute", "function"):
+            child = parent.field(field_name)
+            if child is not None and span(child) == span(node):
+                return parent.kind() in ("attribute", "call")
+        return False
+
+    def parameter_of(self, expr: ast.expr, scope: "Scope") -> str | None:
+        """The enclosing function's parameter an expression is, if it's just that."""
+        fn = scope.function
+        if isinstance(expr, ast.Name) and fn is not None and expr.id in fn.params:
+            return expr.id
+        return None
+
+    def entity_of(self, expr: ast.expr, scope: "Scope") -> str | None:
+        """The entity class behind `Job`, `Job.status`, or an instance like `job`."""
+        if isinstance(expr, ast.Attribute):
+            owner = self.class_of(expr.value, scope)
+            if owner:
+                return owner
+        return self.class_of(expr, scope) or self.type_of(expr, scope)
+
+    def function(self, symbol: str) -> "FunctionInfo | None":
+        found = self.lookup(symbol)
+        return found if isinstance(found, FunctionInfo) else None
 
     # ------------------------------------------------------------------ lookup
 
@@ -917,6 +1012,7 @@ class PythonResolver:
         lands on an abstract method lists the subclasses' implementations (`candidates`).
         """
         found: list[Invocation] = []
+        gaps: list[UnresolvedCall] = []
         scope = self.scope_of(fn, self_type)
 
         def visit(node: ast.AST, conditional: bool, in_loop: bool) -> None:
@@ -931,6 +1027,9 @@ class PythonResolver:
                     # A method the declared type doesn't have, but its subclasses do
                     # (`issue_provider.get_linked_pull_requests()` on the base type)
                     only_below = self._subclass_methods(node.func, scope)
+                    gap = None if only_below else self._gap(node, scope)
+                    if gap is not None:
+                        gaps.append(gap)
                     if only_below:
                         end = (
                             node.end_lineno or node.lineno,
@@ -975,7 +1074,34 @@ class PythonResolver:
 
         for stmt in fn.node.body:
             visit(stmt, False, False)
+        if self_type is None:
+            self._unresolved[fn.qualname] = sorted(gaps, key=lambda g: (g.line, g.column))
         return sorted(found, key=lambda i: (i.line, i.column))
+
+    def unresolved_calls(self, fn: FunctionInfo) -> list[UnresolvedCall]:
+        """Calls in `fn` this resolver couldn't follow (D71): a method on a value whose type
+        isn't known, or a function held in a parameter."""
+        if fn.qualname not in self._unresolved:
+            self.invocations(fn)
+        return self._unresolved[fn.qualname]
+
+    def _gap(self, call: ast.Call, scope: Scope) -> UnresolvedCall | None:
+        func = call.func
+        reason = method = None
+        if isinstance(func, ast.Attribute) and not self._is_module_ref(func.value, scope):
+            if _dict_lookup(call):
+                return None
+            if not (self.class_of(func.value, scope) or self.type_of(func.value, scope)):
+                reason, method = "unknown type", func.attr
+        elif isinstance(func, ast.Name) and scope.function and func.id in scope.function.params:
+            reason, method = "function value", func.id
+        if reason is None or method is None:
+            return None
+        text = ast.unparse(func)
+        text = ("…" + text[-39:] if len(text) > 40 else text) + (
+            "(…)" if call.args or call.keywords else "()"
+        )
+        return UnresolvedCall(call.lineno, call.col_offset, text, method, reason)
 
     def _subclass_methods(self, func: ast.expr, scope: Scope) -> list[str]:
         """`x.m()` where x's repository class has no method `m` but subclasses define it:
@@ -1065,6 +1191,67 @@ class PythonResolver:
                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
                     yield fn, node
 
+    def receiver_calls(self) -> Iterator[tuple[FunctionInfo, str, str, int]]:
+        """Every `receiver.method(...)` whose receiver's type is known: (function, receiver
+        type, method, line). What the `client` assembler matches SDK clients against."""
+        for fn, call in self.method_calls():
+            assert isinstance(call.func, ast.Attribute)
+            receiver = self.type_of(call.func.value, self.scope_of(fn))
+            if receiver is not None:
+                yield fn, receiver, call.func.attr, call.lineno
+
+    def library_calls(self) -> Iterator[LibraryCall]:
+        """Calls from first-party code into a library (closures included, decorators not)."""
+        for fn in self.functions():
+            scope = self.scope_of(fn, fn.cls.qualname if fn.cls else None)
+            for call in _calls(fn.node):
+                symbol = self.symbol_of(call.func, scope)
+                library = self.library_of(symbol) if symbol else None
+                if symbol and library:
+                    yield LibraryCall(
+                        fn,
+                        symbol,
+                        library,
+                        symbol.rsplit(".", 1)[-1],
+                        call.lineno,
+                        call.end_lineno or call.lineno,
+                    )
+
+    def library_of(self, symbol: str) -> str | None:
+        """The library a symbol belongs to; None for first-party code, builtins, and standard
+        library modules that don't do I/O."""
+        top = symbol.split(".")[0]
+        if top in self._first_party or top == "builtins":
+            return None
+        if top in sys.stdlib_module_names and top not in STDLIB_IO:
+            return None
+        return top
+
+    def imported_libraries(self) -> dict[str, list[str]]:
+        """Library → the files that import it (first-party and standard library left out)."""
+        files: dict[str, list[str]] = {}
+        for mod in self.modules.values():
+            tops = {s.split(".")[0] for s in mod.imports.values()} | {
+                s.split(".")[0] for s in mod.module_imports
+            }
+            for top in tops:
+                if top and top not in self._first_party and top not in sys.stdlib_module_names:
+                    files.setdefault(top, []).append(self._rel(mod.path))
+        return files
+
+    @property
+    def _first_party(self) -> set[str]:
+        return {name.split(".")[0] for name in self.modules}
+
+    def _rel(self, path: Path) -> str:
+        try:
+            return path.relative_to(self.root).as_posix()
+        except ValueError:
+            return str(path)
+
+    def stats(self) -> dict[str, Any]:
+        return {"modules": len(self.modules), "functions": sum(1 for _ in self.functions())}
+
 
 PROJECT_MARKERS = ("pyproject.toml", "setup.py", "setup.cfg")
 
@@ -1079,19 +1266,6 @@ def find_source_roots(repo: Path) -> list[Path]:
             project = f.parent
             roots.add(project / "src" if (project / "src").is_dir() else project)
     return sorted(roots)
-
-
-@dataclass(frozen=True)
-class Invocation:
-    callee: str  # qualified name of the called function
-    line: int
-    column: int
-    conditional: bool  # inside an if / try / match / boolean shortcut
-    in_loop: bool
-    # The subclass the call was made on, when `callee` is inherited from a base class
-    receiver: str | None = None
-    # When `callee` is abstract: the subclass methods that can really run
-    candidates: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1155,6 +1329,33 @@ def _argument(call: ast.Call, name: str, position: int, bound: bool) -> ast.expr
     if 0 <= index < len(call.args) and not isinstance(call.args[index], ast.Starred):
         return call.args[index]
     return None
+
+
+def _dict_lookup(call: ast.Call) -> bool:
+    """`data.get("key")`: reading parsed JSON, not I/O, whatever `data` is."""
+    first = call.args[0] if call.args else None
+    return (
+        isinstance(call.func, ast.Attribute)
+        and call.func.attr in ("get", "pop", "setdefault")
+        and isinstance(first, ast.Constant)
+        and isinstance(first.value, (str, int))
+        and not (isinstance(first.value, str) and first.value.startswith(("/", "http")))
+    )
+
+
+def _calls(node: ast.AST) -> list[ast.Call]:
+    """Calls in a function's body, closures included (they run as part of it), not nested
+    classes, and not its decorators (`@router.post(...)` declares a route; it isn't I/O)."""
+    out: list[ast.Call] = []
+    todo: list[ast.AST] = list(getattr(node, "body", []))
+    while todo:
+        n = todo.pop()
+        if isinstance(n, ast.ClassDef):
+            continue
+        if isinstance(n, ast.Call):
+            out.append(n)
+        todo.extend(ast.iter_child_nodes(n))
+    return out
 
 
 def _targets(node: ast.Assign | ast.AnnAssign) -> list[ast.expr]:

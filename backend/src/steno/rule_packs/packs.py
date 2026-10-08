@@ -116,10 +116,32 @@ def _norm(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
+# `implementation 'group:artifact:version'`, `api("group:artifact")`
+_GRADLE_COORDS = re.compile(r"""['"]([\w.\-]+):([\w.\-]+)(?::[^'"]*)?['"]""")
+# `implementation group: 'g', name: 'a'`
+_GRADLE_NAMED = re.compile(
+    r"""group\s*[:=]\s*['"]([\w.\-]+)['"]\s*,\s*name\s*[:=]\s*['"]([\w.\-]+)['"]"""
+)
+_MAVEN_DEP = re.compile(
+    r"<dependency>.*?<groupId>\s*([\w.\-]+)\s*</groupId>.*?<artifactId>\s*([\w.\-]+)\s*</artifactId>",
+    re.DOTALL,
+)
+
+
 def declared_dependencies(repo: Path) -> set[str]:
-    """Dependency names from requirements*.txt and pyproject.toml anywhere in the repository."""
+    """Dependency names from requirements*.txt, pyproject.toml, build.gradle(.kts), and pom.xml
+    anywhere in the repository. Java dependencies are `group:artifact`."""
     names: set[str] = set()
     for f in source_files(repo):
+        if f.name in ("build.gradle", "build.gradle.kts"):
+            text = f.read_text(errors="replace")
+            for pattern in (_GRADLE_COORDS, _GRADLE_NAMED):
+                names |= {_norm(f"{g}:{a}") for g, a in pattern.findall(text)}
+            continue
+        if f.name == "pom.xml":
+            text = f.read_text(errors="replace")
+            names |= {_norm(f"{g}:{a}") for g, a in _MAVEN_DEP.findall(text)}
+            continue
         if re.fullmatch(r"requirements.*\.txt", f.name):
             for line in f.read_text(errors="replace").splitlines():
                 line = line.split("#", 1)[0].strip()
@@ -143,8 +165,12 @@ def _has_language(language: str, repo: Path) -> bool:
 
 
 def _imports_any(language: str, repo: Path, modules: list[str]) -> bool:
-    if language != "python":
-        return False
     names = "|".join(re.escape(m) for m in modules)
-    pattern = re.compile(rf"^\s*(?:from|import)\s+(?:{names})(?:[.\s]|$)", re.MULTILINE)
-    return any(pattern.search(f.read_text(errors="replace")) for f in source_files(repo, (".py",)))
+    if language == "python":
+        pattern = re.compile(rf"^\s*(?:from|import)\s+(?:{names})(?:[.\s]|$)", re.MULTILINE)
+    elif language == "java":
+        pattern = re.compile(rf"^\s*import\s+(?:static\s+)?(?:{names})[.;]", re.MULTILINE)
+    else:
+        return False
+    exts = EXTENSIONS.get(language, ())
+    return any(pattern.search(f.read_text(errors="replace")) for f in source_files(repo, exts))

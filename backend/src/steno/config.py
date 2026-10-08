@@ -24,6 +24,17 @@ class Settings(BaseSettings):
     # Rule packs (docs/rule-packs.md)
     rule_packs_dir: Path = Path(__file__).resolve().parents[3] / "rule-packs"
 
+    # The JVM helper for Java symbol resolution (D69): `make resolver` builds it here
+    resolver_jvm_dir: Path = (
+        Path(__file__).resolve().parents[3]
+        / "resolver-jvm"
+        / "build"
+        / "install"
+        / "steno-resolver"
+    )
+    java_bin: str = "java"
+    resolver_jvm_timeout: int = 1800  # seconds per repository
+
     # Worker queue polling
     worker_poll_seconds: float = 2.0
 
