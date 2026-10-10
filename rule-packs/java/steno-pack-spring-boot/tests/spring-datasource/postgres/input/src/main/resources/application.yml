@@ -1,0 +1,4 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://db.internal:5432/orders?sslmode=require
+    username: app

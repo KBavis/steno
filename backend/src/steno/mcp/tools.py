@@ -552,19 +552,37 @@ class Tools:
         # The flows to start from, and the targets a dependency is "through"
         found: dict[str, dict[str, Any]] = {}
         frontier: list[tuple[str, int]] = []
+        citations: list[dict[str, Any]] = []
+
+        def add(touch: dict[str, Any], hops: int) -> bool:
+            """Record how a flow depends on its target. A flow that both reads and writes a
+            table is a reader *and* a writer: every way it touches the target is kept."""
+            flow = touch["flow"]
+            new = flow not in found
+            entry = found.setdefault(flow, {"how": [], "through": touch["target"], "hops": hops})
+            if touch["how"] not in entry["how"]:
+                entry["how"].append(touch["how"])
+            if touch["file"]:
+                claim = f"{touch['trigger']} {touch['how']} {touch['target']}"
+                citations.append(
+                    self._cite(claim, touch["repo"], touch["commit"], touch["file"], touch["line"])
+                )
+            return new
+
         if direction == "upstream":
             targets = self._targets_of(start, kind)
-            for flow, edge, target in self._flows_touching(targets, types):
-                found.setdefault(flow, {"via": edge, "through": target, "hops": 1})
-                frontier.append((flow, 1))
+            for touch in self._flows_touching(targets, types):
+                if add(touch, 1):
+                    frontier.append((touch["flow"], 1))
             while frontier:
                 flow, hops = frontier.pop()
                 if hops >= depth:
                     continue
-                for caller, edge, target in self._flows_touching(self._triggers(flow), types):
-                    if caller not in found:
-                        found[caller] = {"via": edge, "through": target, "hops": hops + 1}
-                        frontier.append((caller, hops + 1))
+                for touch in self._flows_touching(self._triggers(flow), types):
+                    if touch["flow"] not in found and add(touch, hops + 1):
+                        frontier.append((touch["flow"], hops + 1))
+                    elif found[touch["flow"]]["hops"] == hops + 1:
+                        add(touch, hops + 1)
         else:
             flows = self._flows_of(start, kind)
             frontier = [(f, 0) for f in flows]
@@ -579,7 +597,11 @@ class Tools:
                     for nxt in started:
                         if nxt not in seen and hops + 1 <= depth:
                             seen.add(nxt)
-                            found[nxt] = {"via": edge, "through": target["name"], "hops": hops + 1}
+                            found[nxt] = {
+                                "how": [VERB[edge]],
+                                "through": target["name"],
+                                "hops": hops + 1,
+                            }
                             frontier.append((nxt, hops + 1))
         grouped = self._group(found)
         out: dict[str, Any] = {
@@ -588,7 +610,7 @@ class Tools:
             "direction": direction,
             **({"via": via} if via else {}),
             "dependents" if direction == "upstream" else "downstream_flows": grouped,
-            "citations": [],
+            "citations": _unique(citations),
             "next": ["get_flow(flow id) for how a dependent uses it"],
         }
         if direction == "downstream":
@@ -619,15 +641,30 @@ class Tools:
             )
         ]
 
-    def _flows_touching(self, targets: list[str], types: list[str]) -> list[tuple[str, str, str]]:
+    def _flows_touching(self, targets: list[str], types: list[str]) -> list[dict[str, Any]]:
+        """Every way a flow touches the targets, one row per kind of edge and call site: from
+        the flow's steps, which carry the file and line of the code that does it."""
         if not targets:
             return []
         return [
-            (r["fl"], r["type"], r["target"])
+            {
+                "flow": r["fl"],
+                "trigger": r["trigger"],
+                "how": VERB[r["type"]] + (f" ({r['op']})" if r["op"] else ""),
+                "target": r["target"],
+                "file": r["file"],
+                "line": r["line"],
+                "repo": r["repo"],
+                "commit": r["commit"],
+            }
             for r in self._read(
                 """
-                MATCH (fl:Flow)-[r]->(t) WHERE t.id IN $ids AND r.rollup AND type(r) IN $types
-                RETURN DISTINCT fl.id AS fl, type(r) AS type, t.name AS target
+                MATCH (fl:Flow)<-[:BELONGS_TO]-(:Step)-[r]->(t)
+                WHERE t.id IN $ids AND type(r) IN $types
+                RETURN DISTINCT fl.id AS fl, fl.trigger AS trigger, type(r) AS type,
+                       r.operation AS op, t.name AS target, r.source_file AS file,
+                       r.source_line AS line, fl.repo AS repo, fl.commit AS commit
+                ORDER BY fl, type, file, line
                 """,
                 ids=targets,
                 types=types,
@@ -683,6 +720,16 @@ class Tools:
                 groups.items(), key=lambda kv: min(f["hops"] for f in kv[1])
             )
         ]
+
+
+def _unique(citations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen, out = set(), []
+    for c in citations:
+        key = (c.get("claim"), c.get("file"), c.get("lines"))
+        if key not in seen:
+            seen.add(key)
+            out.append(c)
+    return out
 
 
 def _fold(steps: list[dict[str, Any]], levels: int, under: str | None) -> list[dict[str, Any]]:

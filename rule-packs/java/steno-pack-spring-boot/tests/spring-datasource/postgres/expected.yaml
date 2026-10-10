@@ -1,0 +1,3 @@
+# Vendor, host, and database from the JDBC URL; query parameters and credentials dropped
+nodes:
+  - DataStore: { vendor: postgresql, host: "db.internal:5432", database: orders }

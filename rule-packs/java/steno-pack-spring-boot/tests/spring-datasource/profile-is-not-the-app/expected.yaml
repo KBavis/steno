@@ -1,0 +1,2 @@
+# A profile's database (here a local in-memory one) isn't the application's own
+nodes: []

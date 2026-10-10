@@ -32,6 +32,7 @@ from steno.extraction.facts import (
     Origin,
     Ref,
     TableOfRef,
+    database_of,
     host_of,
 )
 from steno.resolvers import build_resolvers
@@ -120,17 +121,23 @@ class Engine:
     def extract(self) -> Extraction:
         """Run every rule on every file."""
         rules = [r for p in self.packs for r in p.rules]
-        for rule in rules:  # config first: its property clues feed value resolution
-            if rule.kind == "config":
-                self._run_config(rule)
-        if self.resolver:  # one map, shared by every language's resolver
-            for clue in self.out.clues:
-                if clue.kind == "property" and "key" in clue.fields:
-                    self.resolver.properties[clue.fields["key"]] = clue.fields.get("value")
+        # Config first: its property clues feed value resolution. Rules that only read
+        # settings run before rules that state facts from config, which may use them
+        config = [r for r in rules if r.kind == "config"]
+        for rule in sorted(config, key=lambda r: not all("clue" in e for e in r.emit)):
+            self._run_config(rule)
+            self._learn_properties()
+        self._learn_properties()
         for rule in rules:
             if rule.kind == "code":
                 self._run_code(rule)
         return self.out
+
+    def _learn_properties(self) -> None:
+        if self.resolver:  # one map, shared by every language's resolver
+            for clue in self.out.clues:
+                if clue.kind == "property" and "key" in clue.fields:
+                    self.resolver.properties[clue.fields["key"]] = clue.fields.get("value")
 
     # ------------------------------------------------------------ code rules
 
@@ -270,6 +277,15 @@ class Engine:
             props["method"] = props["method"].upper()
         if labels[-1] == "ExternalSystem" and "host" in props:
             props["host"] = host_of(props["host"]) or UNRESOLVED_TEXT
+        if "DataStore" in labels and "url" in props:
+            # A connection URL names the store: vendor, host, database (credentials dropped).
+            # Placeholders come from config; a default (`${DB_HOST:localhost}`) is only a
+            # fallback, often a developer's own machine, so it doesn't name the store.
+            url = self._placeholders(props.pop("url"))
+            store = database_of(url) if "${" not in str(url) else None
+            if store is None:
+                raise _Drop("data store URL unresolved")
+            props = {**store, **props}
         nodes = [NodeFact(labels, p, ctx.origin, dict(pending)) for p in _each(props)]
         for node in nodes:
             if _unknown_channel(node.labels, node.props):
@@ -277,6 +293,17 @@ class Engine:
         self.out.nodes.extend(nodes)
         if "as" in item:
             ctx.named[item["as"]] = nodes[0] if len(nodes) == 1 else nodes
+
+    def _placeholders(self, value: Any) -> Any:
+        """`${key}` and `${key:default}` filled from config properties, when config sets them."""
+        if not isinstance(value, str) or "${" not in value:
+            return value
+        props = self.resolver.properties if self.resolver else {}
+        return re.sub(
+            r"\$\{([^}:]+)(?::[^}]*)?\}",
+            lambda m: str(props[m.group(1)]) if m.group(1) in props else m.group(0),
+            value,
+        )
 
     def _emit_edge(self, ctx: Ctx, item: dict[str, Any]) -> None:
         srcs, dsts = self._refs(ctx, item["from"]), self._refs(ctx, item["to"])

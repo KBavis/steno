@@ -367,7 +367,7 @@ This is different from Steno *generating* rules on its own from the coverage rep
 
 | Pack | Rules |
 |---|---|
-| `steno-pack-spring-boot` | every `application*.yml` / `.properties` key as a `property` clue; `@Scheduled` cron, fixed-rate, fixed-delay → `Schedule` + entry point |
+| `steno-pack-spring-boot` | every `application*.yml` / `.properties` key as a `property` clue; `@Scheduled` cron, fixed-rate, fixed-delay → `Schedule` + entry point; `spring.datasource.url` / `spring.r2dbc.url` in the base config file → the application's `DataStore` (vendor, host, database; credentials dropped), which its tables belong to |
 | `steno-pack-spring-web` | class-level `@RequestMapping` prefix; `@Get/Post/Put/Patch/DeleteMapping` with and without a path; `@RequestMapping(method = …)`; endpoints declared on an API interface start their flow in its one implementation; `RestTemplate` (`getForObject` … `delete`, `exchange` with `HttpMethod`); `RestClient` / `WebClient` (`.post().uri(…)`); `@HttpExchange` interfaces |
 | `steno-pack-spring-cloud-openfeign` | `@FeignClient(url = …)` methods (base URL from config), `@FeignClient("service")` (the service name is the host), plain Feign `@RequestLine` |
 | `steno-pack-jpa` | `@Entity` + `@Table(name, schema)`; `@Entity` alone (snake_case table, Spring Boot's default); `@Entity(name = …)` |
@@ -379,7 +379,7 @@ This is different from Steno *generating* rules on its own from the coverage rep
 
 On budgeting-app (205 Java files): 54 flows (53 endpoints and one schedule), all 15 entities mapped to tables, 94.6% of I/O calls explained, Plaid and the suggestion engine named from config, about 5 seconds.
 
-**Not covered yet (Open):** Spring application events (`publishEvent` → `@EventListener`, which needs a rule to name a value's *type*); SQL in `JdbcTemplate` and `@Query(nativeQuery = true)` (table names need SQL parsing); RabbitMQ exchanges and routing keys; Kafka Streams and Spring Cloud Stream bindings; functional `RouterFunction` routes; `server.servlet.context-path`; gRPC client stubs; DI choices by `@Qualifier` / `@Primary` / `@Profile`; `spring.datasource.url` → `DataStore`; a physical naming strategy applied to explicit `@Table` names.
+**Not covered yet (Open):** Spring application events (`publishEvent` → `@EventListener`, which needs a rule to name a value's *type*); SQL in `JdbcTemplate` and `@Query(nativeQuery = true)` (table names need SQL parsing); RabbitMQ exchanges and routing keys; Kafka Streams and Spring Cloud Stream bindings; functional `RouterFunction` routes; `server.servlet.context-path`; gRPC client stubs; DI choices by `@Qualifier` / `@Primary` / `@Profile`; several datasources in one application; a physical naming strategy applied to explicit `@Table` names.
 
 **Rough size for a Spring and Kafka stack: ~40–60 rules**, written once per framework, not per repository. **Rule count grows with distinct frameworks, not with repositories:** 300 Spring services need the same rules as 3. Each in-house framework adds a handful, and every organization onboarded adds to the shared library.
 

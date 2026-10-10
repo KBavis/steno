@@ -156,6 +156,34 @@ def split_url(value: Any) -> tuple[str | None, str]:
     return (host if host and "{" not in host else None), path
 
 
+def database_of(url: Any) -> dict[str, str] | None:
+    """A database connection URL as a DataStore's identity: vendor, host (with port), and
+    database. `jdbc:postgresql://db.internal:5432/orders` → postgresql, db.internal:5432,
+    orders. Credentials in the URL are dropped. None when it isn't a database URL."""
+    if not isinstance(url, str) or url == UNRESOLVED_TEXT:
+        return None
+    text = url.strip().removeprefix("jdbc:")
+    if text.startswith("oracle:"):  # jdbc:oracle:thin:@//host:1521/service or @host:1521:SID
+        rest = text.split("@", 1)[-1].lstrip("/")
+        host, _, db = rest.partition("/") if "/" in rest else rest.rpartition(":")
+        return {"vendor": "oracle", "host": host, "database": db}
+    if text.startswith("sqlserver://"):  # jdbc:sqlserver://host:1433;databaseName=orders
+        host, _, params = text.removeprefix("sqlserver://").partition(";")
+        opts = dict(p.split("=", 1) for p in params.split(";") if "=" in p)
+        db = opts.get("databaseName") or opts.get("database") or ""
+        return {"vendor": "sqlserver", "host": host, "database": db}
+    if text.startswith("h2:"):
+        return {"vendor": "h2", "host": "embedded", "database": text.split(":")[-1].split(";")[0]}
+    vendor, sep, rest = text.partition("://")
+    if not sep:
+        return None
+    vendor = vendor.split("+")[0].split(":")[-1]  # postgresql+psycopg, mysql:loadbalance
+    rest = rest.split("?")[0]
+    authority, _, path = rest.partition("/")
+    host = authority.rsplit("@", 1)[-1]
+    return {"vendor": vendor, "host": host, "database": path.split("/")[0]}
+
+
 def host_of(value: Any) -> str | None:
     """`https://api.example.com/v1` → `api.example.com`; `localhost:11434` stays as is."""
     if not isinstance(value, str) or value is UNRESOLVED or value == UNRESOLVED_TEXT:

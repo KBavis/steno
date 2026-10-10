@@ -1,0 +1,9 @@
+id: spring-datasource
+description: The application's database, e.g. spring.datasource.url = jdbc:postgresql://db.internal:5432/orders - the tables its entities map to live here. Read from the base config file only (a profile's database, like a local one, isn't the application's own).
+kind: config
+files: ["**/application.yml", "**/application.yaml", "**/application.properties"]
+match:
+  key: "spring.datasource.url"
+emit:
+  - node: [DataStore, Relational]
+    url: $VALUE                 # vendor, host, and database come from the URL; credentials are dropped

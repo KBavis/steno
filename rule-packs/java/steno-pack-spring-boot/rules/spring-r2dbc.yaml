@@ -1,0 +1,9 @@
+id: spring-r2dbc
+description: A reactive application's database, e.g. spring.r2dbc.url = r2dbc:postgresql://db.internal:5432/orders
+kind: config
+files: ["**/application.yml", "**/application.yaml", "**/application.properties"]
+match:
+  key: "spring.r2dbc.url"
+emit:
+  - node: [DataStore, Relational]
+    url: $VALUE

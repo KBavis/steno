@@ -1,0 +1,2 @@
+nodes:
+  - DataStore: { vendor: postgresql, host: "db.internal:5432", database: orders }

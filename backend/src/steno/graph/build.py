@@ -207,6 +207,7 @@ class _Builder:
 
     def run(self) -> GraphPlan:
         self._structure()
+        self.app_stores = self._application_stores()
         for node in self.x.nodes:
             self._fact_node(node)
         for edge in self.x.edges:
@@ -307,7 +308,8 @@ class _Builder:
             if app:
                 p.edge("BELONGS_TO", nid, app, **prov)
         elif label == "Table":
-            nid = self._table(n.props["name"], prov)
+            relational = n.props.get("kind", "table") == "table"
+            nid = self._table(n.props["name"], prov, relational=relational)
         elif label == "DataStore":
             nid = self._datastore(n.props, labels, prov)
         elif label == "ExternalSystem":
@@ -330,9 +332,19 @@ class _Builder:
         self.fact_ids[id(n)] = nid
         return nid
 
-    def _table(self, name: str, prov: dict[str, Any], datastore: str | None = None) -> str:
-        """Tables whose data store isn't known yet hang off the repository's placeholder store."""
-        store = datastore or self._unknown_relational_store(prov)
+    def _table(
+        self,
+        name: str,
+        prov: dict[str, Any],
+        datastore: str | None = None,
+        relational: bool = True,
+    ) -> str:
+        """A table belongs to its application's database when the application configures
+        exactly one (`spring.datasource.url`); otherwise to the repository's placeholder store,
+        until the store is known."""
+        app = self._app_for(prov.get("source_file") or "")
+        known = self.app_stores.get(app) if relational and app else None
+        store = datastore or known or self._unknown_relational_store(prov)
         tid = self.plan.node(
             ids.table_id(store, None, name),
             ["Table", "Searchable"],
@@ -344,6 +356,19 @@ class _Builder:
         )
         self.plan.edge("BELONGS_TO", tid, store, **prov)
         return tid
+
+    def _application_stores(self) -> dict[str, str]:
+        """Each application's database, when its configuration names exactly one relational
+        store (a Spring datasource, a database URL): application node → DataStore node."""
+        found: dict[str, set[str]] = defaultdict(set)
+        for n in self.x.nodes:
+            if n.label == "DataStore" and "Relational" in n.labels:
+                app = self._app_for(n.origin.file)
+                if app:
+                    found[app].add(self._fact_node(n) or "")
+        return {
+            app: next(iter(ids)) for app, ids in found.items() if len(ids) == 1 and "" not in ids
+        }
 
     def _unknown_relational_store(self, prov: dict[str, Any]) -> str:
         """Assume an unidentified store belongs to this repository, so that separate
