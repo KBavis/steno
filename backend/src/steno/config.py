@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="STENO_", env_file=".env", extra="ignore")
 
-    # Postgres: what Steno is told and what it did (DESIGN_DOC D33)
+    # Postgres: what Steno is told and what it did (D33)
     database_url: str = "postgresql+psycopg://steno:steno@localhost:5434/steno"
 
     # Neo4j: what Steno knows
@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     # Where ingestion workers clone repositories; deleted after each run
     workspace_dir: Path = Path("/tmp/steno-workspaces")
 
-    # Rule packs (docs/rule-packs.md)
+    # Rule packs (docs/how-it-works/ingestion/rules-and-packs.md)
     rule_packs_dir: Path = Path(__file__).resolve().parents[3] / "rule-packs"
 
     # The JVM helper for Java symbol resolution (D69): `make resolver` builds it here

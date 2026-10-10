@@ -1,8 +1,9 @@
 """How a repository is built: its modules (build units) and the applications they produce.
 
-docs/knowledge-graph.md §3, Module roles. A Module is the ecosystem's build unit (a Python
+docs/how-it-works/graph-reference.md §3, Module roles. A Module is the ecosystem's build unit
+(a Python
 project, an npm package, a Maven/Gradle module); a `:Service` module produces a deployable
-and gets an Application. Phase 1 detection (Proposed; DESIGN_DOC §21 lists the signals as
+and gets an Application. Phase 1 detection (Proposed; docs/plan/decisions.md lists the signals as
 Open): a module is a Service when rules found entry points in it.
 """
 

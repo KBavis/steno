@@ -1,6 +1,11 @@
 # Use Cases
 
-What Steno is for: the value of having a continuously updated, layered model of an organization's architecture, especially once agents are the ones using it. How it works is covered in the [Design Doc](./DESIGN_DOC.md).
+What Steno is for: the value of having a continuously updated, layered model of an organization's architecture, especially once agents are the ones using it. Part of [Vision](./README.md); how it works is in [How it works](../how-it-works/README.md).
+
+> **In one minute**
+> - Tribal knowledge stops decaying, discovery is paid for once, and senior judgment ("this breaks something downstream") runs on every change.
+> - The lead use cases (★) need only the static graph: PR review with context, breaking-change checks in CI, "grill me" project planning, delta-driven testing, and mapping a stack trace to its flow.
+> - Steno supplies the context. The tools that use it (test generators, CI bots, planning workflows) are built on top, not inside Steno.
 
 ---
 

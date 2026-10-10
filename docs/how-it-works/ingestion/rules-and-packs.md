@@ -1,8 +1,21 @@
 # Rules and Rule Packs
 
-The format of Steno's rules and rule packs: how a rule finds code, what it emits, how facts from different rules are combined, and how a rule proves it works.
+The format of Steno's rules and rule packs: how a rule finds code, what it emits, how facts from different rules are combined, and how a rule proves it works. Part of [Ingestion](./README.md). Status markers: **Decided** · **Proposed** · **Open**. This page is the source of truth for rule syntax (the `rule-pack-author` skill reads it).
 
-Part of the [Design Doc](./DESIGN_DOC.md); it details [Ingestion §4](./ingestion.md#4-rules-and-rule-packs). Status markers: **Decided** · **Proposed** · **Open**.
+> **In one minute**
+> - A rule is an **ast-grep pattern** (`match`, unchanged ast-grep syntax) plus **what it means** in Steno's vocabulary (`emit`: nodes, edges, clues, entry points). An optional `where` checks resolved types.
+> - Rules never reference each other. Facts spread across files are combined by **clues**, labeled with the symbol they're about, and a fixed set of **assemblers**.
+> - Rules come in versioned **packs**, grouped by ecosystem, auto-enabled by dependencies or imports. Every rule ships with **test cases**.
+> - Most organizations need only their framework packs plus a small **org pack** for in-house frameworks. See the [catalog](#10-pack-catalog) for what exists.
+
+```mermaid
+flowchart LR
+    R["Rule<br/>match + where + emit"] --> AG["ast-grep<br/>finds the shape"]
+    AG --> SR["Symbol resolver<br/>checks where, resolves captures"]
+    SR --> E{"emit"}
+    E --> F["Fact"] & B["Fact with a blank"] & C["Clue"]
+    B & C --> AS["Assembler"] --> F2["Complete fact"]
+```
 
 ---
 
@@ -16,7 +29,7 @@ emit:    # WHAT IT MEANS: Steno's vocabulary
 ```
 
 - `match` is plain [ast-grep](https://ast-grep.github.io/) rule syntax (tree-sitter based, many languages). Authors, and their AI assistants, can use ast-grep's docs and playground as they are.
-- `emit` is written in **Steno's vocabulary**: the node and edge types of the [knowledge graph](./knowledge-graph.md), plus clues (below). Whoever writes it has to know that vocabulary; §4 lists it.
+- `emit` is written in **Steno's vocabulary**: the node and edge types of the [knowledge graph](../graph-reference.md), plus clues (below). Whoever writes it has to know that vocabulary; §4 lists it.
 - Rules are **deterministic**. They're fixed YAML, executed by code. No LLM runs during ingestion. (An AI assistant may help a person *write* a rule; see §8.)
 
 ## 2. Anatomy of a rule (Decided)
@@ -60,7 +73,7 @@ emit:                                 # one or more outputs
 | **`clue`** | A partial fact that helps complete other facts: "this router has prefix `/jobs`" | No, it's consumed by an assembler |
 | **`entry_point`** | "This function is started by this trigger" | Indirectly: flows are derived from entry points |
 
-**Rules never create `Flow` or `Step` nodes.** Flows are derived in the flows stage by walking the call graph from every entry point ([Ingestion §2](./ingestion.md#passes-per-application-decided)). A rule only marks where a flow starts.
+**Rules never create `Flow` or `Step` nodes.** Flows are derived in the flows stage by walking the call graph from every entry point ([Ingestion §2](./README.md#2-the-pipeline)). A rule only marks where a flow starts.
 
 ### Referring to things inside `emit`
 
@@ -77,7 +90,7 @@ emit:                                 # one or more outputs
 | `{Function: {symbol: $X}}` | A function that's **referenced, not called** here: a callback, a background task. Symbol resolution turns `$X` into the function's identity. | `to: { Function: { symbol: $TASK } }` When `$X` is a parameter of the enclosing function (a helper that wraps `FunctionTool.from_defaults(async_fn=fn)`), the edge goes from each of the helper's callers to the function it passes. |
 | `{table_of: $X}` | The `Table` an entity maps to (through `MAPS_TO`). `$X` may be the entity class, an instance of it, or one of its attributes (`Job.status`). **If `$X` isn't a mapped entity, the emit is dropped**, so a rule can match broadly (`select(...)`) without producing noise. | `to: { table_of: $MODEL }` |
 
-**Edge properties** listed for an edge in [Knowledge Graph §4](./knowledge-graph.md#4-relationship-types) can be set in the emit, such as `operation: insert` on `WRITES_TO`, or `async: true` on an `INVOKES` between two functions. `INVOKES` goes into the run's in-memory call graph (it isn't stored, D60): a rule's call to a function the code already calls there **merges** into that call, which is how a rule marks an existing call as async; otherwise it adds the call, ordered by its line.
+**Edge properties** listed for an edge in [Knowledge Graph §4](../graph-reference.md#4-relationship-types) can be set in the emit, such as `operation: insert` on `WRITES_TO`, or `async: true` on an `INVOKES` between two functions. `INVOKES` goes into the run's in-memory call graph (it isn't stored, D60): a rule's call to a function the code already calls there **merges** into that call, which is how a rule marks an existing call as async; otherwise it adds the call, ordered by its line.
 
 **Optional captures.** A capture bound in only one branch of an `any:` (for example an optional `prefix=` keyword) is simply left out of the emit when that branch didn't match. ast-grep's `any:` stops at the first branch that matches, so a final catch-all branch (`- kind: annotation`) makes a capture optional.
 
@@ -91,7 +104,7 @@ emit:                                 # one or more outputs
 
 ### Identity: what each node needs
 
-Steno builds every node's stable ID from its identity properties ([Knowledge Graph §3](./knowledge-graph.md#properties-every-fact-carries)), so an emitted node must supply them:
+Steno builds every node's stable ID from its identity properties ([Knowledge Graph §3](../graph-reference.md#properties-every-fact-carries)), so an emitted node must supply them:
 
 | Node | Identity properties | Notes |
 |---|---|---|
@@ -207,7 +220,7 @@ Each clue type has exactly one built-in **assembler** that knows how to combine 
 | `client` | `type`, `target`, `operations?`, `returns?`, `extends?`, `calls?`, `base?` | **Client** | SDK client objects that talk to something outside the app without a visible URL: LLM APIs, vector stores, cloud SDKs. A method call on an object of `type` (or a subclass) becomes `CALLS` to `target` when it's an `ExternalSystem`, or `READS_FROM` / `WRITES_TO` per `operations` (method → `read` / `write`) when it's a `DataStore`. Methods not listed produce nothing. `returns` (method → type) tells the symbol resolver what a method hands back, so chained calls keep their type: `client.get_collection(...)` returns a `Collection`, whose `query(...)` is then a read. When a receiver is typed only as a library base class (`FunctionCallingLLM`), every client whose `extends` lists that base is a candidate (`candidate: true`); more than one is marked `ambiguous`, like DI. Library code isn't read, so `extends` names the client's library bases, the whole chain (D66). **HTTP clients whose source isn't in the repository** (generated OpenAPI clients, internal SDKs; D69): `calls` maps each method to `{method, path}` and `base` is the base URL (a `${placeholder}` resolves from config), so `usersApi.getUser(id)` becomes `CALLS` to `GET {base}/users/{id}`. Methods not in `calls` produce nothing. `type: "@class"` names the class the rule matched in. Clients whose source *is* in the repository (Feign, `@HttpExchange`) don't need a clue: a rule puts the `CALLS` on the interface method itself, and callers' flows step into it (D73). |
 | `property` | `key`, `value`, `profile?` | **Config** | Configuration values, handed to the symbol resolver for `${placeholders}` and settings lookups. Steno emits these automatically for recognized config files; rules emit them only for unusual sources. |
 
-More clue types arrive with the assemblers that need them, e.g. DI bindings with DI resolution ([Ingestion §5](./ingestion.md#5-symbol-and-di-resolution)).
+More clue types arrive with the assemblers that need them, e.g. DI bindings with DI resolution ([Ingestion §5](./resolvers.md)).
 
 **If no clue is found,** nothing is added: a router without a prefix simply contributes no prefix, which is correct. If the label itself can't be worked out (the router came from a call the symbol resolver couldn't follow), the fact is still recorded, marked lower-confidence, and listed in the coverage report.
 
@@ -228,7 +241,7 @@ emit:
 
 Most configuration needs **no rule beyond the framework's own**. A pack's config rule turns every key and value into a `property` clue (for Spring, `spring-config-properties` in `steno-pack-spring-boot` reads `application*.yml` / `.properties` and `bootstrap*`; profile files sort before the base file, so the base file's value wins), so a code rule like `@KafkaListener(topics = "${app.kafka.topics.orders}")` gets the real topic name from the symbol resolver, which reads the `property` clues. Config rules are for when **the config alone states a fact**: a declared topic, a datasource URL (a `DataStore`), a downstream base URL.
 
-**Secret values are never read (Proposed; built 2026-10-07).** The engine skips any config key that looks like a secret (`password`, `secret`, `token`, `credential`, `private-key`, `api-key`, …) for every config rule, so secrets never reach facts, the facts JSON, or the property map (DESIGN_DOC §18).
+**Secret values are never read (Proposed; built 2026-10-07).** The engine skips any config key that looks like a secret (`password`, `secret`, `token`, `credential`, `private-key`, `api-key`, …) for every config rule, so secrets never reach facts, the facts JSON, or the property map ([Security](../security.md)).
 
 ## 6. Packs and layout (Decided)
 
@@ -236,7 +249,7 @@ Rules are published as **versioned packs**, grouped by **ecosystem** (the langua
 
 ```
 rule-packs/
-├─ java/                        (built 2026-10-07; see ingestion.md, "Java packs")
+├─ java/                        (built 2026-10-07; see §10)
 │  ├─ steno-pack-spring-boot/   config properties, @Scheduled
 │  ├─ steno-pack-spring-web/    controllers, RestTemplate / RestClient / WebClient, @HttpExchange
 │  ├─ steno-pack-spring-cloud-openfeign/
@@ -296,7 +309,7 @@ systems:
 
 - **A host match** names the system and keys it by service, so `api.github.com` and `raw.githubusercontent.com` are one `GitHub` node.
 - **Only hosts count.** An API path (`/rest/api/content`) only resembles a vendor's API, and an internal service can use the same one, so paths never name a service.
-- **No match:** the node is the host (`localhost:11434`). With no host at all, see [Knowledge Graph §4, Stubs](./knowledge-graph.md#stubs).
+- **No match:** the node is the host (`localhost:11434`). With no host at all, see [Knowledge Graph §4, Stubs](../graph-reference.md#stubs).
 
 An organization adds its internal services' hosts the same way, in an org pack.
 
@@ -328,7 +341,7 @@ The person who adds a rule owns it, whether they write the YAML by hand or use a
 - **By hand:** read this doc, write the rule and its tests, run `steno rules test`.
 - **With the `rule-pack-author` skill** (`.claude/skills/rule-pack-author/`): describe what you want recognized ("topics declared under `app.kafka.topics` in `application.yml` are Kafka topics"). The skill finds real examples in the code, maps them to existing node and edge types, writes the rule and its tests, checks how often the pattern matches, and **proposes** any new node, edge, or clue type instead of inventing one silently. Schema changes are design decisions.
 
-This is different from Steno *generating* rules on its own from the coverage report (templates, LLM drafting), which stays deferred ([Ingestion §4](./ingestion.md#turning-a-coverage-item-into-a-rule-deferred-future-enhancement)).
+This is different from Steno *generating* rules on its own from the coverage report (templates, LLM drafting), which stays deferred ([Ingestion §4](./coverage-report.md#4-turning-a-coverage-item-into-a-rule-deferred)).
 
 ## 9. Rules, assemblers, and plugins
 
@@ -338,3 +351,71 @@ This is different from Steno *generating* rules on its own from the coverage rep
 | **Assemblers** | Combining clues the same way for many frameworks: prefix chains, SDK clients, entity tables | Steno core code |
 | **Symbol resolver** | What names, types, and values are: imports, constants and f-strings, config placeholders, DI | Steno core code, one per language |
 | **Plugins** | Anything beyond both, such as an internal messaging framework with unusual routing. Rare. | Code, shipped with an org pack |
+
+## 10. Pack catalog
+
+**What exists today** (about 60 rules across 23 packs, every rule with test cases):
+
+| Ecosystem | Packs |
+|---|---|
+| `python/` (9 packs) | `steno-pack-fastapi`, `-sqlalchemy`, `-llama-index`, `-llama-index-chroma`, `-chromadb`, `-pydantic-settings`, `-httpx`, `-requests`, `-python-stdlib` |
+| `java/` (13 packs, built 2026-10-07) | See the table below |
+| `http/` | `steno-pack-saas-http`: HTTP signatures for well-known services |
+| `org/` | Empty: organization packs go here |
+
+**Java packs:**
+
+| Pack | Rules |
+|---|---|
+| `steno-pack-spring-boot` | every `application*.yml` / `.properties` key as a `property` clue; `@Scheduled` cron, fixed-rate, fixed-delay → `Schedule` + entry point |
+| `steno-pack-spring-web` | class-level `@RequestMapping` prefix; `@Get/Post/Put/Patch/DeleteMapping` with and without a path; `@RequestMapping(method = …)`; endpoints declared on an API interface start their flow in its one implementation; `RestTemplate` (`getForObject` … `delete`, `exchange` with `HttpMethod`); `RestClient` / `WebClient` (`.post().uri(…)`); `@HttpExchange` interfaces |
+| `steno-pack-spring-cloud-openfeign` | `@FeignClient(url = …)` methods (base URL from config), `@FeignClient("service")` (the service name is the host), plain Feign `@RequestLine` |
+| `steno-pack-jpa` | `@Entity` + `@Table(name, schema)`; `@Entity` alone (snake_case table, Spring Boot's default); `@Entity(name = …)` |
+| `steno-pack-spring-data` | repository reads (`find*`, `get*`, `exists*`, `count*`, …), saves, deletes, and custom updates, on the table of the entity the repository manages; MongoDB `@Document`; Spring Data JDBC / R2DBC `@Table` |
+| `steno-pack-spring-kafka`, `steno-pack-kafka-clients` | `@KafkaListener` (topics from `${…}` and arrays), class-level listeners with `@KafkaHandler`, `@SendTo`, `KafkaTemplate.send`, `new ProducerRecord<>(topic, …)`, `consumer.subscribe(…)` |
+| `steno-pack-spring-jms`, `steno-pack-spring-amqp` | `@JmsListener`, `JmsTemplate.convertAndSend`, `@RabbitListener`, `RabbitTemplate.convertAndSend(queue, msg)` |
+| `steno-pack-okhttp`, `steno-pack-apache-httpclient`, `steno-pack-java-stdlib` | `Request.Builder` chains, `new HttpPost(…)`, `java.net.http` requests; `CompletableFuture.runAsync(this::m)` / executors mark the call async |
+| `steno-pack-grpc-java` | methods of a `*Grpc.*ImplBase` subclass → `GrpcMethod` + entry point |
+
+On budgeting-app (205 Java files): 54 flows (53 endpoints and one schedule), all 15 entities mapped to tables, 94.6% of I/O calls explained, Plaid and the suggestion engine named from config, about 5 seconds.
+
+**Not covered yet (Open):** Spring application events (`publishEvent` → `@EventListener`, which needs a rule to name a value's *type*); SQL in `JdbcTemplate` and `@Query(nativeQuery = true)` (table names need SQL parsing); RabbitMQ exchanges and routing keys; Kafka Streams and Spring Cloud Stream bindings; functional `RouterFunction` routes; `server.servlet.context-path`; gRPC client stubs; DI choices by `@Qualifier` / `@Primary` / `@Profile`; `spring.datasource.url` → `DataStore`; a physical naming strategy applied to explicit `@Table` names.
+
+**Rough size for a Spring and Kafka stack: ~40–60 rules**, written once per framework, not per repository. **Rule count grows with distinct frameworks, not with repositories:** 300 Spring services need the same rules as 3. Each in-house framework adds a handful, and every organization onboarded adds to the shared library.
+
+| Area | ~Rules |
+|---|---|
+| Endpoints (mappings, class-level prefixes) | 6 |
+| HTTP clients (RestTemplate, WebClient, Feign, generated clients) | 6 |
+| Kafka (listeners, `send`, config keys) | 5 |
+| gRPC | 3 |
+| Scheduling | 3 |
+| Data (JPA, `@Document`, repositories, `@Query`, JdbcTemplate, MyBatis) | 8 |
+| DI (beans, `@Primary`, `@Qualifier`, `@Profile`) | 6 |
+| Build (modules, dependencies, boot plugin) | 4 |
+| Config (topics, URLs, datasources, schedules) | 5 |
+
+### Internal frameworks (Decided)
+
+Organizations often have their own messaging, which may not wrap Kafka at all. It's covered by the general communication model (D61, [Joins](./joins.md)): an org-defined `Interface` label, a **sender rule** (`Messenger#post(channel, …)` → `PRODUCES`, key = argument 0), and a **receiver rule** (`@OnMessage("x")` → entry point). Matching keys connect the applications.
+
+Finding one before anyone writes its rules is the coverage report's job: receivers show up as **unreachable handler clusters** or **unknown triggers**, senders as **frequent unexplained external calls**. If the framework's own repository is ingested, its coverage shows the I/O it eventually does (sockets, HTTP, JMS, a table used as a queue), which confirms it's communication; the channel key is a concept only the framework defines, so a rule is still needed.
+
+**Default for internal libraries (Proposed):** a boundary rule (one rule fixes every repository and stays stable as the library changes). Following flows into the library's own code is Artifacts A2 (later).
+
+## 11. File rules and witness types (Decided; to build in POC stage B)
+
+Rules over files that describe the system (manifests, deploy definitions, ACL files, gateway routes, CronJobs, migrations) use the same config-rule mechanism (§5), with one addition: every pack states the **witness type** of what it reads, and its emits become **claims** for a facet rather than plain facts. See [Witnesses and facets](../../concepts/witnesses-and-facets.md).
+
+```yaml
+# pack.yaml for an org pack reading the XLD repository (illustrative)
+name: acme-xld
+source: org
+witness: PLATFORM            # CODE | PLATFORM | DECLARED
+facets: [Messaging, Components]
+```
+
+- **The witness type is declared, never guessed.** The test is what consumes the file: the running app (CODE), infrastructure (PLATFORM), or nothing (DECLARED).
+- **Generated sources** (an OpenAPI spec built from controllers) are marked `generated: true` and don't count as an independent witness.
+- **Name sources** fill slots in the name ladder ([Identity](../../concepts/identity.md#2-finding-the-canonical-name-the-name-ladder)): a pack can emit a `component_name` claim with its slot (deploy name, manifest ID, build artifact name, runtime self-name).
+- The exact emit syntax for claims is part of the reconcile design (**Open**, before stage B).

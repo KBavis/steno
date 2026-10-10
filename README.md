@@ -2,7 +2,7 @@
 
 Steno is an **organization-wide context engine for AI agents**. It ingests an organization's repositories into a layered, continuously updated **knowledge graph** (Organization → Space → Application) and exposes it over **MCP**, so agents like Claude Code and Copilot can understand how everything fits together instead of seeing only the repository they're working in.
 
-> **Status:** Phase 1 build (ingesting one application). Start with the [Design Doc](docs/DESIGN_DOC.md).
+> **Status:** proof of concept, stage A (see the [roadmap](docs/plan/roadmap.md)). Start with the [docs](docs/README.md).
 
 ## Why
 
@@ -10,12 +10,12 @@ Today's coding agents are strong inside one repository and blind beyond it. Most
 
 ## How it works
 
-- **Built bottom-up, searched top-down.** Each application is ingested in depth: endpoints, outbound calls, transports, flows, entities, data store access, and code structure. Space and organization views are **rollups** of those facts. Queries enter at the right layer and drill down.
-- **Flows are the core unit.** A flow is a unit of work started by a trigger (an endpoint, a consumed topic, a schedule). It's an ordered tree of steps, linked to other applications' flows across interfaces.
-- **Deterministic first.** Declarative rules produce the facts. [Jev](docs/jev.md) makes typed, calibrated decisions where rules can't. An LLM only writes summary cards.
-- **Company-agnostic.** Connectors reach sources (Bitbucket, GitHub, GitLab, …). Rule packs cover frameworks, and organizations add their own. Applications don't have to opt in to anything.
-- **Idempotent and incremental.** A one-time initial ingestion, then updates on every merge to main, driven by the commit range since the last ingested commit.
-- **Fast for agents.** Precomputed summary cards, Jev routing, parallel search across spaces, and batch tools keep agent round trips to a minimum.
+- **Built bottom-up, searched top-down.** Each application is ingested in depth: endpoints, outbound calls, transports, flows, entities, data store access, and code structure. Space and organization views are **rollups** of those facts.
+- **Flows are the core unit.** A flow is a unit of work started by a trigger (an endpoint, a consumed topic, a schedule): an ordered tree of steps, linked to other applications' flows across interfaces.
+- **Deterministic first.** Declarative rules produce the facts. Decisions rules can't make use stand-ins now ([Jev](docs/plan/later/jev.md) later). An LLM only writes summary cards.
+- **Accurate, or says what it couldn't see.** Every answer is cited; independent sources (code, deploy config, manifests) are compared; gaps are never silent.
+- **Company-agnostic.** Steno asks a fixed set of questions about every organization; rule packs and providers say where each organization keeps the answers. Nothing is required of an organization's repositories.
+- **Idempotent and current.** Nightly, every repository whose main branch moved is re-analyzed and only changes are written.
 
 ## Development
 
@@ -45,19 +45,18 @@ Connect an agent: `claude mcp add --transport http steno http://localhost:8000/m
 
 ## Relationship to Contextualized
 
-[Contextualized](https://github.com/KBavis/contextualized) gives agents context scoped to a single Project: what that Project changed, and why. Steno supplies the wider view: how those changes fit into the rest of the organization. Steno works on its own. Contextualized will later attribute Steno's deltas to the Projects that caused them.
+[Contextualized](https://github.com/KBavis/contextualized) gives agents context scoped to a single Project: what that Project changed, and why. Steno supplies the wider view: how those changes fit into the rest of the organization. Steno works on its own. Contextualized will later attribute Steno's deltas to the Projects that caused them; see [Projects](docs/vision/projects.md).
 
 ## Documentation
 
-| Doc | Covers |
+Start at **[docs/README.md](docs/README.md)**. Each section has a hub page that summarizes it and links deeper:
+
+| Section | Covers |
 |---|---|
-| [Design Doc](docs/DESIGN_DOC.md) | The overview: architecture, technology choices, roadmap, decision log, open questions |
-| [Knowledge Graph](docs/knowledge-graph.md) | Neo4j labels, relationships, ownership, flows, data stores |
-| [Ingestion](docs/ingestion.md) | Connectors, parse and extract, rule packs, symbol resolution, idempotency, incremental updates, Postgres schema |
-| [Rules and Rule Packs](docs/rule-packs.md) | The rule format: patterns, emits, clues, tests, and rule packs |
-| [Retrieval & MCP](docs/retrieval-and-mcp.md) | Routing, summary cards, MCP tools, latency |
-| [Jev](docs/jev.md) | Every decision Jev makes, and its confidence thresholds |
-| [Use Cases](docs/use-cases.md) | What Steno enables: agentic development, planning, testing, operations |
+| [Vision](docs/vision/README.md) | The Context Layer, Steno as its architecture pillar, projects past/ongoing/future, use cases |
+| [Concepts](docs/concepts/README.md) | The graph, witnesses and facets, identity, trust |
+| [How it works](docs/how-it-works/README.md) | Architecture, the ingestion pipeline, rules and resolvers, the graph schema, MCP, storage, security |
+| [Plan](docs/plan/README.md) | Roadmap (POC, v1, v2), onboarding, decisions and open questions |
 
 ---
 

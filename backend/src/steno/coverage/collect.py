@@ -1,4 +1,6 @@
-"""The coverage report's signals: what no rule explained (docs/ingestion.md §4, Coverage report).
+"""The coverage report's signals: what no rule explained.
+
+See docs/how-it-works/ingestion/coverage-report.md.
 
 Each signal is a place a fact could hide. Everything here is deterministic and read from the
 run that just happened: the engine's facts and dropped matches, the symbol resolver's view of
@@ -63,7 +65,7 @@ class Item:
 @dataclass
 class Report:
     items: list[Item]
-    # Completeness numbers for the repository (DESIGN_DOC D62)
+    # Completeness numbers for the repository (D62)
     metrics: dict[str, Any]
 
 

@@ -1,4 +1,4 @@
-"""Postgres schema: what Steno is told and what it did (docs/ingestion.md §8).
+"""Postgres schema: what Steno is told and what it did (docs/how-it-works/storage.md).
 
 One Steno deployment per organization (D34), so no table carries an organization id.
 Neo4j must stay rebuildable from these tables plus git (D36).
@@ -129,7 +129,7 @@ class StageStatus(StrEnum):
 
 
 class CoverageKind(StrEnum):
-    """The coverage report's signals (docs/ingestion.md §4)."""
+    """The coverage report's signals (docs/how-it-works/ingestion/coverage-report.md)."""
 
     EXTERNAL_CALL = "external_call"  # a call leaving first-party code that no rule explains
     LIBRARY = "library"  # a declared or imported library no rule pack covers

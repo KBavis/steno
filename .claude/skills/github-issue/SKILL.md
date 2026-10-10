@@ -1,6 +1,6 @@
 ---
 name: github-issue
-description: Create well-formed GitHub issues for Steno from a plain-language request, such as "make an issue for the clone stage" or "break the rule engine into issues". Grounds each issue in the design docs and code, checks for duplicates, assigns type, area, priority, and effort labels and a phase milestone, writes a structured body with acceptance criteria, links dependencies and sub-issues natively, and shows a draft for approval before creating anything. Use whenever someone asks to file, draft, or plan issues, a bug report, or an epic.
+description: Create well-formed GitHub issues for Steno from a plain-language request, such as "make an issue for the clone stage" or "break the rule engine into issues". Grounds each issue in the design docs and code, checks for duplicates, assigns type, area, priority, and effort labels and a roadmap milestone, writes a structured body with acceptance criteria, links dependencies and sub-issues natively, and shows a draft for approval before creating anything. Use whenever someone asks to file, draft, or plan issues, a bug report, or an epic.
 ---
 
 # GitHub issue
@@ -14,12 +14,12 @@ You turn a request into one or more GitHub issues on the Steno repository that s
    ```sh
    .claude/skills/github-issue/scripts/setup_labels.sh
    ```
-   It creates every label below plus the phase milestones, and is safe to re-run.
+   It creates every label below plus the roadmap milestones, and is safe to re-run.
 
 ## 1. Understand and ground the request
 
 - Work out **what** should change and **why**. Decide whether it's **one issue or several**. Anything larger than `effort:l` becomes an **epic** with sub-issues.
-- **Read before writing.** Check `docs/DESIGN_DOC.md` (decision log §20, open questions §21) and the relevant sub-doc and code, so the issue cites real decisions (`D40`), doc sections, and files (`backend/src/steno/ingestion/pipeline.py`).
+- **Read before writing.** Check `docs/plan/decisions.md` (decision log and open questions), `docs/plan/roadmap.md`, and the relevant page under `docs/` and code, so the issue cites real decisions (`D40`), doc sections, and files (`backend/src/steno/ingestion/pipeline.py`).
 - **Design status matters.** If the work depends on something marked **Proposed** or **Open**, or would change a **Decided** item, label it `needs-decision` and add a *Decision needed* section. Design choices belong to the repository owner; an issue never decides them.
 - **Check for duplicates:** `gh issue list --state all --search "<keywords>"`. If a match exists, show it and ask whether to update it, link to it, or create a new one anyway.
 
@@ -54,7 +54,7 @@ Pick exactly one **type**, one or two **areas**, one **priority**, and one **eff
 | Priority | Meaning |
 |---|---|
 | `priority:p0` | Urgent: blocks current work or breaks the main path |
-| `priority:p1` | Needed for the current phase's exit criteria (DESIGN_DOC §16) |
+| `priority:p1` | Needed for the current POC stage (docs/plan/roadmap.md) |
 | `priority:p2` | Should do soon; improves the current phase |
 | `priority:p3` | Nice to have; later |
 
@@ -66,7 +66,7 @@ Pick exactly one **type**, one or two **areas**, one **priority**, and one **eff
 | `effort:l` | Three to five days |
 | `effort:xl` | More than a week. **Don't file it; split it into an epic.** |
 
-**Milestones** are the roadmap phases: `Phase 1: Application`, `Phase 2: Space`, `Phase 3: Organization`, `Incremental updates`, `Later`.
+**Milestones** are the roadmap stages (`docs/plan/roadmap.md`): `POC A: Foundations`, `POC B: Stub organization`, `POC C: Multi-service`, `POC D: Our organization`, `v1`, `v2`.
 
 **State labels:** `needs-decision` (see §1) and `blocked` (waiting on something *outside* the repo; for other issues, use dependency links instead).
 
@@ -83,7 +83,7 @@ Pick exactly one **type**, one or two **areas**, one **priority**, and one **eff
 One or two sentences: what changes, for whom.
 
 ## Why
-The problem or goal. Link the design: [DESIGN_DOC D40](docs/DESIGN_DOC.md), [rule-packs §4](docs/rule-packs.md#4-clues-decided).
+The problem or goal. Link the design: [D40](docs/plan/decisions.md), [rules §4](docs/how-it-works/ingestion/rules-and-packs.md#4-clues-decided).
 
 ## Scope
 - [ ] Concrete task
@@ -169,9 +169,9 @@ Present each issue as:
 ```
 Title:      Implement the clone stage for dry runs
 Labels:     type:feature, area:ingestion, priority:p1, effort:m
-Milestone:  Phase 1: Application
+Milestone:  POC A: Foundations
 Links:      blocked by #12 · sub-issue of #20
-Why p1/m:   needed for the Phase 1 dry run; one new stage plus tests
+Why p1/m:   needed for POC stage A; one new stage plus tests
 <body>
 ```
 
@@ -183,7 +183,7 @@ For several issues, show them all, plus the dependency order. Create nothing unt
    ```sh
    gh issue create --title "<title>" --body-file <file> \
      --label "type:feature,area:ingestion,priority:p1,effort:m" \
-     --milestone "Phase 1: Application"
+     --milestone "POC A: Foundations"
    ```
    Note the number in the URL it prints. For an epic, create the epic first, then its sub-issues.
 2. Link with GitHub's native relationships:

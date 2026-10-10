@@ -1,4 +1,6 @@
-"""The `Decision` interface (docs/jev.md §8): typed, calibrated decisions, backend-agnostic.
+"""The `Decision` interface: typed, calibrated decisions, backend-agnostic.
+
+See docs/plan/later/jev.md §8.
 
 Jev is the intended backend. Until it's available, stand-in backends (heuristics,
 search + rank fusion, an LLM with structured output) implement the same interface,
@@ -44,7 +46,10 @@ class Answer:
 
 
 class Band(StrEnum):
-    """Confidence bands (docs/jev.md §5). Starting points, to be tuned on logged decisions."""
+    """Confidence bands (docs/plan/later/jev.md §5).
+
+    Starting points, to be tuned on logged decisions.
+    """
 
     ACT = "act"  # > 0.9
     ACT_LOW_CONFIDENCE = "act_low_confidence"  # 0.5 – 0.9
@@ -73,7 +78,10 @@ class DecisionBackend(Protocol):
 
 
 class DisabledBackend:
-    """Every decision can be switched off (docs/jev.md §3a). Answers are always ambiguous."""
+    """Every decision can be switched off (docs/plan/later/jev.md §3a).
+
+    Answers are always ambiguous.
+    """
 
     name = "disabled"
 

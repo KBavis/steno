@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create (or update) Steno's issue labels and phase milestones in the current GitHub repo.
+# Create (or update) Steno's issue labels and roadmap milestones in the current GitHub repo.
 # Safe to run again: labels are upserted with --force, existing milestones are left alone.
 #   .claude/skills/github-issue/scripts/setup_labels.sh
 set -euo pipefail
@@ -48,9 +48,9 @@ label "effort:xl" 2da44e "More than a week: split it"
 label "needs-decision" 7057ff "Depends on a Proposed or Open design item; the owner must decide first"
 label "blocked"        000000 "Waiting on another issue or something outside the repo"
 
-# milestones: the roadmap phases (DESIGN_DOC §16)
+# milestones: the roadmap stages (docs/plan/roadmap.md)
 existing=$(gh api "repos/{owner}/{repo}/milestones?state=all&per_page=100" --jq '.[].title')
-for m in "Phase 1: Application" "Phase 2: Space" "Phase 3: Organization" "Incremental updates" "Later"; do
+for m in "POC A: Foundations" "POC B: Stub organization" "POC C: Multi-service" "POC D: Our organization" "v1" "v2"; do
   if grep -qxF "$m" <<<"$existing"; then
     echo "milestone $m (exists)"
   else

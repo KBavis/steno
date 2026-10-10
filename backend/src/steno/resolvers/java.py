@@ -1,4 +1,4 @@
-"""Steno's Java symbol resolver (D69, docs/ingestion.md §5.1c).
+"""Steno's Java symbol resolver (D69, docs/how-it-works/ingestion/resolvers.md §5.2).
 
 Java's symbol table lives in the JVM helper (`resolver-jvm/`, JavaParser's symbol solver plus
 Steno's own lookups). Asking it one question at a time would cost a round trip each, so the

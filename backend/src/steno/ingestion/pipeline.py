@@ -1,4 +1,4 @@
-"""The ingestion pipeline for one repository (docs/ingestion.md §2).
+"""The ingestion pipeline for one repository (docs/how-it-works/ingestion/README.md §2).
 
 Each stage is timed and recorded in `ingestion_stage`; together those rows are the
 dry-run report (time per stage, graph size, projected LLM cost). Stages that aren't
@@ -206,9 +206,9 @@ def write(ctx: JobContext) -> dict[str, Any]:
 
 
 def coverage(ctx: JobContext) -> dict[str, Any]:
-    """What no rule explained (docs/ingestion.md §4, Coverage report): one `coverage_item` per
-    gap, keyed by kind and target. Triage carries over from this repository's previous run:
-    an item someone ignored stays ignored (D62)."""
+    """What no rule explained (docs/how-it-works/ingestion/coverage-report.md):
+    one `coverage_item` per gap, keyed by kind and target. Triage carries over from this
+    repository's previous run: an item someone ignored stays ignored (D62)."""
     engine: Engine = ctx.state["engine"]
     report = collect_coverage(
         engine.out,

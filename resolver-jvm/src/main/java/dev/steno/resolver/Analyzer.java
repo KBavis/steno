@@ -98,7 +98,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Resolves a repository's Java code in one pass (D69, docs/ingestion.md §5.1c) and returns
+ * Resolves a repository's Java code in one pass (D69, docs/how-it-works/ingestion/resolvers.md §5.2) and returns
  * everything the engine could ask: every function and type, every call site (the method it
  * calls, or why that can't be told), and the symbol, type, class, and value of every expression a
  * rule may capture, keyed by file and position.
@@ -496,7 +496,7 @@ final class Analyzer {
             if (call.fn() != null) {
                 counts[0]++;
                 // An interface method with one implementation runs that one (DI picks the only
-                // bean); with several, each is a candidate (docs/ingestion.md §5.1a, step 4)
+                // bean); with several, each is a candidate (docs/how-it-works/ingestion/resolvers.md §5.1, step 4)
                 List<String> impls = implementations(call.fn());
                 m.put("callee", impls.size() == 1 ? impls.get(0) : call.fn().symbol());
                 if (impls.size() > 1) {

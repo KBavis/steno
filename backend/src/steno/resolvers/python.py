@@ -1,4 +1,4 @@
-"""Steno's own Python symbol resolver (D51, docs/ingestion.md §5.1b).
+"""Steno's own Python symbol resolver (D51, docs/how-it-works/ingestion/resolvers.md §4).
 
 It answers three questions about names in a repository's Python code:
 - What does this name refer to?   `symbol_of`  (job_router → app.api.routers.job.router)

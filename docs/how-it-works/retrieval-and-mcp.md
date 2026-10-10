@@ -1,8 +1,34 @@
 # Retrieval and MCP
 
-How agents get context out of Steno quickly: routing, summary cards, parallel fan-out, the MCP tools, and latency goals.
+How agents get context out of Steno quickly and accurately: the MCP tools, search, summary cards, citations, code access, and latency goals. Part of [How it works](./README.md). Status markers: **Decided** · **Proposed** · **Open**.
 
-Part of the [Design Doc](./DESIGN_DOC.md). Status markers: **Decided** · **Proposed** · **Open**.
+> **In one minute**
+> - **Round trips dominate latency**, so tools are shaped to answer typical questions in ≤ 3 calls: precomputed cards, server-side fan-out, batch tools, token budgets.
+> - **Built (POC):** `search` (full-text over names, plus flows whose traces contain a matching function), `get_node`, `get_flow` (outlines), `view_flow_code`, `find_dependents`. Every call is logged.
+> - **Every result carries citations** and lists the scopes searched. Impact answers will carry a **completeness block** (what Steno couldn't see).
+> - **No file contents are stored:** code is read from the git host at the ingested commit; code search goes through the git host's search API.
+> - **Later:** LLM-written flow cards and vector search (after the cost dry run), and Jev as a navigator for routing and verification (`v2`). The routing design below describes that end state.
+
+```mermaid
+flowchart LR
+    AG["Agent"] -- "search('how is a client created?')" --> S["search"]
+    S --> FT["full-text: names, paths, topics"] & TR["traces: matching functions"] & VC["vector over flow cards (later)"]
+    FT & TR & VC --> RK["rank (Jev Q4/Q3 later)"]
+    RK --> R["cards + citations + next-step hints"]
+    R --> AG
+    AG -- "get_flow / view_flow_code /<br/>find_dependents" --> T["one call each,<br/>cited, token-budgeted"]
+```
+
+**What's POC and what's later:**
+
+| Piece | Scope |
+|---|---|
+| MCP tools listed as built in §5 | `POC` (built) |
+| Completeness block on impact answers (D89) | `POC` stage A |
+| `find_paths`, `analyze_change`, `get_interface`, `get_changes`, `find_symbols`, `glossary` | `POC` stages B–D / `v1`, as needed |
+| LLM cards, embeddings, vector search | After the cost dry run (stage D) |
+| Jev routing, verification, navigation (Q0–Q4, N1–N5) | `v2`; stand-ins (global search, ranking by score) until then |
+| MCP authentication and scoping by role | `v1` |
 
 ---
 
@@ -91,14 +117,14 @@ This is structural retrieval, which embeddings alone can't do. Combined with Jev
 
 | Node | Card contents | Written by |
 |---|---|---|
-| **Flow** | Trigger, purpose, narrative steps, what it touches, what it leads to, business context (later), source. See the [flow card](./knowledge-graph.md#flow-levels-and-the-flow-card-decided). | Deterministic signature + **LLM purpose and narrative for every flow** at initial ingestion |
+| **Flow** | Trigger, purpose, narrative steps, what it touches, what it leads to, business context (later), source. See the [flow card](./graph-reference.md#flow-levels-and-the-flow-card-decided). | Deterministic signature + **LLM purpose and narrative for every flow** at initial ingestion |
 | **Application, Space, Organization** | Purpose, key flows and interfaces, ins and outs | LLM (few nodes, high value, and routing depends on them) |
 | **Interface, Entity, Table, Module** | Facts and neighbors | Deterministic template |
 
 - **Why every flow gets an LLM purpose:** declared summaries are often missing or vague, and without a real purpose semantic search has nothing meaningful to match.
 - **Keeping it affordable at scale:** a small model by default, the Batch API, and **prompt caching** (flows in one app share a cached prefix: the app card, entities, conventions).
 - **On re-ingestion:** deterministic parts are rebuilt for free. **Jev I5** decides from the old purpose and narrative plus the fact diff whether they're still accurate; the LLM regenerates them only if not.
-- **Cards are written for two readers:** embeddings and Jev (short, precise, bounded in size), and agents (sources and next steps). Their bounded size keeps **Jev's input bounded** for huge flows (see [Jev §4](./jev.md#4-what-jev-sees-state-design)).
+- **Cards are written for two readers:** embeddings and Jev (short, precise, bounded in size), and agents (sources and next steps). Their bounded size keeps **Jev's input bounded** for huge flows (see [Jev §4](../plan/later/jev.md#4-what-jev-sees-state-design)).
 
 ### How embeddings are stored and searched (Decided)
 
@@ -146,11 +172,13 @@ Code usually **isn't local** to the agent. Steno **stores no file contents**. Ev
 - An in-memory cache in the MCP server absorbs repeated reads.
 - The cost: git credentials live in the MCP server, and there's some latency and rate-limit risk. Revisit only if measurements show a problem.
 
+**Code search (Decided, D90).** The graph usually tells an agent *where* to look, and the code tools read it, so broad searching should be rare. When the graph has no lead, a `search_code` tool goes through the **git host's own search API** (Bitbucket, GitHub, GitLab), not an index Steno builds, which would mean storing file contents. Where Steno has a gap, its answer points to the exact unresolved call site (D71), and the agent reads that one spot. Not built yet.
+
 ## 5. MCP tools (Decided)
 
 Transport: **MCP over Streamable HTTP**. Every tool accepts `max_tokens`. Every result carries **confidence**, **citations** (below), and hints for the next call.
 
-**Built (2026-10-07):** `search` (full-text over names, plus flows whose traces contain a matching function), `get_node`, `get_flow`, `view_flow_code` (reads from the git host at the ingested commit; GitHub, GitLab, Bitbucket), and `find_dependents` (`via`: `http`, `messaging`, `data`), in `backend/src/steno/mcp/`. A result over its `max_tokens` loses items from its longest lists and says so in `truncated`. Every call is logged in `tool_call`. Confidence levels (P8) aren't built yet.
+**Built (2026-10-07):** `search` (full-text over names, plus flows whose traces contain a matching function), `get_node`, `get_flow`, `view_flow_code` (reads from the git host at the ingested commit; GitHub, GitLab, Bitbucket), and `find_dependents` (`via`: `http`, `messaging`, `data`), in `backend/src/steno/mcp/`. A result over its `max_tokens` loses items from its longest lists and says so in `truncated`. Every call is logged in `tool_call`. Confidence levels aren't built yet (Open).
 
 ### Citations (Decided: part of V1)
 
@@ -259,3 +287,13 @@ This reuses the ingestion machinery, so there's no separate analysis engine. It 
 | Typical question answered in | ≤ 3 tool calls |
 
 To be validated against real usage. Every tool call is logged in `tool_call` (grouped by session), so round trips per question and latencies are measured, not guessed.
+
+## 7. LLM use and cost
+
+- **An LLM only writes text:** flow purposes and narratives, application, space, and organization cards, glossary definitions on request. Nothing else. Steno runs no LLM at query time. (Decided)
+- **Every flow gets an LLM-written purpose and narrative** at initial ingestion, on top of its deterministic signature (D24). Applications, spaces, and the organization get LLM cards. Interfaces, entities, and tables get deterministic cards. Functions get none.
+- **Levers for scale:** a small model by default, the Batch API (50% cheaper), and prompt caching (flows in one application share a cached prefix). On re-ingestion, a decision (Jev I5 later, a stand-in now) checks whether a flow's purpose is still accurate before anything is regenerated.
+- **Output is cached by the hash of its inputs** (`llm_output`), so unchanged inputs are never paid for twice, and Neo4j can be rebuilt without re-spending.
+- **Measured before any spend** (D26): the dry run reports time per stage, graph size, and the projected cost per strategy; whether LLM cards are worth it at organization scale is decided from those numbers. Model: **Open**, chosen after the dry run.
+- **Access through LiteLLM** (D52): each purpose maps to a provider and model in configuration, so organizations choose their own; a Claude Code (headless) provider for local development.
+- Every call is logged (`llm_call`), so cost per application is measured, not guessed.

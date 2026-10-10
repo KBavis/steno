@@ -1,8 +1,10 @@
 # Jev: Decisions
 
-How Steno uses [Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) (TypeSafe's "System One" decision model) to make typed, calibrated decisions during ingestion and retrieval.
+How Steno would use [Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) (TypeSafe's "System One" decision model) to make typed, calibrated decisions during ingestion and retrieval. Part of [Later](./README.md).
 
-Part of the [Design Doc](./DESIGN_DOC.md). Status: **Decided** to use Jev. The individual decisions below are **Decided** unless marked deferred.
+> **Status: parked for `v2` (D94).** Jev isn't available to the project yet, so the POC uses stand-ins: deterministic defaults (link every candidate, marked `ambiguous`), global search with ranking by score, and naming-based heuristics (the coverage report's "looks like I/O"). The design below is kept so nothing built now blocks it; the `Decision` interface in `backend/src/steno/decisions/` keeps Jev replaceable. Individual decisions below were **Decided** as the design for when Jev arrives, unless marked deferred.
+>
+> **In one minute:** Jev answers typed questions (yes/no, a choice among up to 255 options, a score) with calibrated probabilities in 70–500 ms. Steno would use it wherever a rule can't decide: which implementation DI injects, whether a function is an entry point, which spaces a question is about, whether a candidate flow does what was asked. It never sees raw code, only bounded digests, and it never decides alone.
 
 ---
 
@@ -40,7 +42,7 @@ That's what makes Steno's routing and verification affordable on every query, an
 
 ## 3a. Jev never decides alone
 
-**Semantic and keyword search propose; Jev verifies and ranks.** A global search runs in parallel with Jev routing, routing is soft when confidences are close (at least 2 branches kept), Jev only prunes when highly confident, and **every Jev decision can be switched off**, falling back to ranking by embedding score. See [Retrieval §2](./retrieval-and-mcp.md#2-search-top-down-over-data-built-bottom-up).
+**Semantic and keyword search propose; Jev verifies and ranks.** A global search runs in parallel with Jev routing, routing is soft when confidences are close (at least 2 branches kept), Jev only prunes when highly confident, and **every Jev decision can be switched off**, falling back to ranking by embedding score. See [Retrieval §2](../../how-it-works/retrieval-and-mcp.md#2-search-top-down-over-data-built-bottom-up).
 
 ## 4. What Jev sees: state design
 
@@ -72,11 +74,11 @@ Starting point, to be tuned against logged decisions:
 | **0.5 – 0.9** | Act, and mark the result low-confidence |
 | **< 0.5** | Don't decide: mark it `ambiguous`, return several options, or ask a human |
 
-Every decision stores its confidence **on the resulting fact or result** and is logged in `jev_decision` (see [Ingestion §8](./ingestion.md#8-relational-database-postgres)), linked to its ingestion stage or to the query's request.
+Every decision stores its confidence **on the resulting fact or result** and is logged in `jev_decision` (see [Ingestion §8](../../how-it-works/storage.md)), linked to its ingestion stage or to the query's request.
 
 ## 6. Decisions at query time
 
-These run inside the `search` tool (see [Retrieval](./retrieval-and-mcp.md#2-search-top-down-over-data-built-bottom-up)).
+These run inside the `search` tool (see [Retrieval](../../how-it-works/retrieval-and-mcp.md#2-search-top-down-over-data-built-bottom-up)).
 
 | # | Decision | Type | State | Result |
 |---|---|---|---|---|
@@ -118,7 +120,7 @@ Routing layer by layer (Q1, then Q2) keeps every Choice under the 255-option lim
 | **I10** | **Is this a business flow or technical plumbing?** | Noul | Flow digest | Every flow | Health checks, actuator, and admin endpoints are marked `technical` and ranked down in search |
 | *I6* | *Which space does this repository belong to?* | | | | **Not planned:** admins define spaces |
 | *I7* | *Which node does this glossary term refer to?* | | | | **Later:** the glossary is human-declared in V1 |
-| **I8** | Does this unexplained call look like I/O or an entry point? | Noul | Call site digest | A call site matched no rule | Whether it goes on the **coverage report** (see [Ingestion §4](./ingestion.md#4-rules-and-rule-packs)) |
+| **I8** | Does this unexplained call look like I/O or an entry point? | Noul | Call site digest | A call site matched no rule | Whether it goes on the **coverage report** (see [Ingestion §4](../../how-it-works/ingestion/coverage-report.md)) |
 
 **Not a Jev decision:** "did this PR change structure?" Re-running the rules and comparing facts answers it exactly.
 
@@ -128,5 +130,5 @@ Routing layer by layer (Q1, then Q2) keeps every Choice under the 255-option lim
 |---|---|
 | New vendor, claims not yet proven | Every decision is logged. Calibration is measured on a labeled set before thresholds are trusted. |
 | Weak with large or irrelevant state | Digests only, bounded by construction (§4) |
-| Our org's data policy on sending code-derived state to a third-party API | Confirm before Phase 1. Digests contain names and summaries, rarely code. Check Cloudflare / LiteLLM availability. |
+| Our org's data policy on sending code-derived state to a third-party API | Confirm before adopting Jev. Digests contain names and summaries, rarely code. Check Cloudflare / LiteLLM availability. |
 | Vendor lock-in | A small `Decision` interface in Steno, so an LLM with structured output can replace Jev for any single decision |

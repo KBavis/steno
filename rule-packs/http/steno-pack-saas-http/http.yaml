@@ -1,4 +1,4 @@
-# Services recognized by the hosts they're called at (docs/rule-packs.md, HTTP signatures).
+# Services recognized by the hosts they're called at (docs/how-it-works/ingestion/rules-and-packs.md, HTTP signatures).
 # A host is proof of where a call goes, so a match names the system. API paths aren't used:
 # a path only resembles a vendor's API, and an internal service can use the same one.
 systems:

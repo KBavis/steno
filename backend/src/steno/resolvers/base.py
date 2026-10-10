@@ -1,4 +1,6 @@
-"""What every symbol resolver answers, whatever the language (D70, docs/ingestion.md §5.1c).
+"""What every symbol resolver answers, whatever the language (D70).
+
+See docs/how-it-works/ingestion/resolvers.md §1 and §5.2.
 
 The engine, the assemblers, the graph builder, and the coverage report ask these questions and
 never look inside a language's syntax. Each resolver has its own expressions (Python: `ast`

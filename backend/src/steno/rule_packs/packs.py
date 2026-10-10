@@ -1,7 +1,7 @@
 """Load rule packs from `rule-packs/` and decide which ones apply to a repository.
 
-The format is defined in docs/rule-packs.md §6; a pack is enabled when any of its
-`enabled_when` conditions holds (D49).
+The format is defined in docs/how-it-works/ingestion/rules-and-packs.md §6; a pack is enabled
+when any of its `enabled_when` conditions holds (D49).
 """
 
 import re
@@ -33,8 +33,10 @@ class Rule:
 
 @dataclass
 class HttpSystem:
-    """A service recognized by the hosts it's called at (docs/rule-packs.md, HTTP signatures):
-    `api.github.com`, with `*` wildcards allowed."""
+    """A service recognized by the hosts it's called at: `api.github.com`, with `*` wildcards.
+
+    See docs/how-it-works/ingestion/rules-and-packs.md, HTTP signatures.
+    """
 
     name: str
     hosts: list[str] = field(default_factory=list)

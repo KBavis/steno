@@ -1,0 +1,145 @@
+# Decisions
+
+Every numbered design decision, and the questions still open. Part of [Plan](./README.md).
+
+> **In one minute**
+> - **Decided** items are agreed: build on them. **Proposed** items need confirmation before relying on them. **Open** items aren't decided.
+> - D1–D74 date from the original design (October 2026). **D75–D97** come from the architecture-pillar review (2026-10-07 to 10-10): the Context Layer, witnesses and facets, application identity, kinds, onboarding, and the POC → v1 → v2 scope.
+> - Where a later decision changes an earlier one, the earlier row says so ("revised by", "refined by", "deferred by").
+> - A design choice belongs to the project owner. A new decision gets the next number and a row here, and the pages it affects are updated.
+
+## Decision log
+
+| # | Decision | Status |
+|---|---|---|
+| D1 | Three layers: Organization → Space → Application. Data stores and topics belong to Spaces. | Decided |
+| D2 | Build bottom-up, search top-down. Higher layers are rollups. | Decided |
+| D3 | Interfaces are nodes. Edges between apps come from shared interface nodes. | Decided |
+| D4 | Phase order: Application → Space → Organization | Decided |
+| D5 | Phase 1 is static only | Decided |
+| D6 | Neo4j for the graph, Postgres for app state | Decided (Neo4j leaning) |
+| D7 | Flows: triggers instead of Jobs, no Subflows, ordered steps, flows linked across interfaces and never nested | Decided |
+| D8 | *(Revised by D60: no Function nodes.)* One Neo4j database holding two kinds of nodes, both persisted: **architecture nodes** (where routing and search run) and **code nodes** (every first-party reachable function, `INVOKES`). Code nodes can be partitioned per space at very large scale. Significance is a tag. | Decided |
+| D9 | One repository → many Applications, detected via Service/Library modules | Decided |
+| D10 | *(Revised by D59: nightly, full re-analysis.)* Incremental updates by commit range on merge to main. PRs are used for attribution. | Superseded |
+| D11 | Steno owns re-ingestion. Contextualized adds attribution and the why. | Decided |
+| D12 | Jev for all decisions rules can't make, at ingestion and query time | Decided; **deferred to `v2` by D94** (stand-ins until then) |
+| D13 | Steno's own symbol resolution (JavaParser + dependency JARs), with cloning into temporary workspaces. SCIP not planned. JARs come later: refined by D69. | Decided |
+| D14 | Routing: classify with Jev, then search one scope or fan out in parallel | Decided; `v2` with Jev (D94) |
+| D15 | Data store schemas in V2. V1 records entity → table mappings and table-level access. | Decided |
+| D16 | Labels for abstraction, no `IS_A` edges | Decided |
+| D17 | No stored file contents: code tools read from the git host at the ingested commit | Decided |
+| D18 | `fact_change` keeps the before/after of every changed fact (architecture nodes in full; *revised by D60:* trace changes per flow instead of per Function node) | Decided |
+| D19 | MCP tool set ([list](../how-it-works/retrieval-and-mcp.md#5-mcp-tools-decided)) | Decided |
+| D20 | Edge names: `INVOKES` (code → code), `CALLS` (network), `STARTS` (what kicks off a flow), `LEADS_TO` (flow → flow, derived) | Decided |
+| D21 | Jev is the navigator at query time: Q0 intent, Q1/Q2 routing, **Q4 candidate verification**, Q3 ranking, using bounded digests | Decided; `v2` with Jev (D94) |
+| D22 | Find flows with cards (vector), keyword, and glossary, plus a global search in parallel with routing. Entity anchors are deferred. | Decided |
+| D23 | Embeddings live in Neo4j's vector index; no separate vector DB | Decided |
+| D24 | Every flow gets an LLM purpose and narrative at initial ingestion; Jev I5 gates regeneration | Decided |
+| D25 | Rule packs, auto-enabled from dependencies, plus a coverage report after every ingestion. Phase 1 rules are hand-written; templates and LLM-drafted rules are deferred. | Decided |
+| D26 | Measure first: Phase 1 opens with a no-LLM dry run and a cost/time projection | Decided |
+| D27 | Spaces are defined by admins; no automatic space proposals | Decided |
+| D28 | Glossary is human-declared in V1. Deriving it from docs and product knowledge comes with the Contextualized integration. | Decided |
+| D29 | Citations in every MCP result (V1) | Decided |
+| D30 | A connector is a source system + scope. Repositories: explicit include list in Phase 1, discovery later. | Decided; revised by D77 |
+| D31 | *(L2/L3 revised by D60.)* Flow levels: L0 headline, L1 signature (deterministic) + narrative (LLM), L2 `Step` nodes (`FIRST_STEP` / `NEXT` / `SUBSTEP`, each `RUNS` a function), L3 code nodes. One rendered flow card per flow. | Decided |
+| D32 | Business context comes from Contextualized, attached to exactly what each Project changed (`Project -CHANGED-> element`) | Decided (later) |
+| D33 | Postgres holds what Steno is told and did; Neo4j holds what it knows. Declared spaces and glossary live in Postgres and are projected into Neo4j. | Decided |
+| D34 | One Steno deployment per organization | Decided |
+| D35 | The work queue is `ingestion_job` in Postgres (`SKIP LOCKED`), no broker | Decided |
+| D36 | Neo4j is rebuildable from Postgres + git without re-spending on the LLM (`llm_output` cache). Nothing is stored only in Neo4j. | Decided |
+| D37 | The organization is declared in Postgres as a single `organization` row (name, description), entered during onboarding and projected into Neo4j | Decided |
+| D38 | First-run onboarding: Organization → Spaces → Connectors → Repositories | Decided |
+| D39 | A connector's scope is access only. Repository selection and placement are separate; at org scale, placement rules (connector + host grouping + optional name pattern → space) place repositories, an explicit assignment wins, and unmatched repositories go to an unassigned queue. Rules are built with discovery. | Decided |
+| D40 | Rule format: an ast-grep `match` plus a Steno `emit` of nodes, edges, clues, and entry points; `where` conditions on resolved types. Rules never reference each other: clues are combined by the symbol they're about, in the assemble pass. Clue types are a fixed set, each with a built-in assembler (prefix chain, config first). See [Rules and Rule Packs](../how-it-works/ingestion/rules-and-packs.md). | Decided |
+| D41 | Every rule ships with test cases (input code + expected facts), run by `steno rules test` | Decided |
+| D42 | A person owns every rule and may write it by hand or with the `rule-pack-author` skill. Steno generating rules on its own stays deferred (refines D25). | Decided |
+| D43 | Rule packs are grouped by ecosystem: `rule-packs/java/`, `python/`, `org/` | Decided |
+| D44 | Phase 1 ingests Contextualized first, then one application in our org | Decided |
+| D45 | Rules can refer to a function that's referenced but not called (`{Function: {symbol}}`), so background tasks and callbacks become async `INVOKES` edges; a rule's edge merges into the call graph's edge for the same call site | Decided |
+| D46 | Rules can target "the table this entity maps to" (`{table_of: …}`), so ORM queries become `READS_FROM` / `WRITES_TO` on tables; the emit is dropped when the value isn't a mapped entity | Decided |
+| D47 | A `client` clue type: method calls on SDK client objects (LLM APIs, vector stores) become `CALLS` to an `ExternalSystem` or reads and writes on a `DataStore`; base-class receivers resolve like DI (candidates, `ambiguous` when several) | Decided |
+| D48 | `Vector` is a `DataStore` category (Chroma, pgvector, Pinecone, …) | Decided |
+| D49 | A rule pack is enabled by a declared dependency, an import of the library, or `always` (standard library packs) | Decided |
+| D50 | A rule may reference a node by only some of its identity properties (`{DataStore: {vendor: chroma}}`): it resolves to the app's single match, `ambiguous` if several, a stub if none | Decided |
+| D51 | Python symbol resolution is Steno's own small resolver on Python's `ast` module (source roots, imports and aliases including function-local ones, type annotations, simple assignments, `self` attributes, method lookup through base classes), like Java's own resolver (D13). Pyright or Jedi only if the coverage report shows real gaps. | Decided |
+| D52 | LLM access through LiteLLM; each purpose maps to a provider and model in configuration; a Claude Code (headless) provider for local development. Jev is a later enhancement; stand-ins make decisions until then. | Decided |
+| D53 | UI: semantic zoom through the containment tree (org → space → application → flow → code) with a details panel; full-window, one continuous camera zoom between levels; each level shows only its container's direct children and how they communicate; views built once in the backend and shared with MCP `get_node`; React Flow + ELK for structured views | Decided |
+| D54 | First MCP tools: `get_node`, `get_flow`, `find_dependents`, `search` (full-text first), `view_flow_code`; every call logged in `tool_call` | Decided |
+| D55 | POC staging: finish Contextualized → a stub organization we control → spring-petclinic-microservices → our org's application | Decided; refined by D94 |
+| D56 | Terminology: "resolver" means only the per-language **symbol resolver** (what a name, type, or value is). The per-clue-type code that combines clues into complete facts is an **assembler**, run in the **assemble** stage (after extract, before flows, which need completed facts). The former "Resolver" component is split: config placeholders and DI → symbol resolver; identity, stubs, internal vs. vendor hosts → graph builder. | Decided |
+| D57 | Stages: **parse** (read the code once: file list, symbol table, syntax trees; no rules) is split from **extract** (the **rule engine** runs rule packs and emits facts, facts with blanks, and clues). Full order: clone → deps → parse → extract → assemble → flows → write → cards. "Extractor" is no longer a component name: the units are **rules** in **rule packs**. | Decided |
+| D58 | *(Bound copies become trace entries under D60.)* Calls through base classes: the resolver carries the class a method was called on into inherited code, so `self.m()` finds the subclass's `m`. An inherited method that calls something its subclass overrides gets one `Function` node per subclass it runs as (`fn:{repo}:{symbol}@{subclass}`, `bound_to`), so flows follow the real implementation in order. A call to an abstract method whose implementation is chosen at runtime links to every implementation, marked `candidate`. See [Knowledge Graph §3](../how-it-works/graph-reference.md). | Decided |
+| D59 | **Nightly ingestion.** Each night, every repository whose default branch moved past `last_ingested_sha` is re-analyzed in full at the new head. Facts and traces are compared by stable ID and only changes are written. Commits in the range are mapped to PRs for attribution. No merge-triggered or per-file incremental runs. Replaces D10. | Decided |
+| D60 | **No `Function` nodes or `INVOKES` edges are stored.** The call graph exists only in memory during a run. Each flow stores its **trace** (L3): every function it runs, in order (symbol, file, lines, depth, call-site flags, effects, tags). `Step` nodes (L2) carry their function's symbol and lines instead of `RUNS`, and effects hang off Steps. Repository, Module, and File stay as code nodes. Cards are written from the run's in-memory analysis, not from stored functions. Revises D8, D18, D31, D58. | Decided |
+| D61 | **Communication is modeled generally:** a sender (a call that puts something somewhere), a receiver (an entry point the framework runs), and a shared key (channel, queue, subject, URL, table) that joins them. An org's own messaging framework, whether or not it wraps Kafka, gets an org-defined `Interface` label plus one sender rule and one receiver rule; apps connect through matching keys. Extends D3. | Decided |
+| D62 | **The coverage report is aggregated across the organization** (one item per target, ranked by total occurrences across repositories) and every item carries a triage state (unexplained / ignored / explained) that persists across runs, so the report converges instead of staying noisy. Refines D25. | Decided |
+| D63 | **Traces live in Neo4j, on the `Flow` node:** `trace` (the ordered entries as a JSON string, since Neo4j properties can't nest) plus `trace_files` and `trace_symbols` (string lists for lookups). Not Postgres (D33: Neo4j holds what Steno knows; the UI and MCP read one database), and not a node per entry. A trace lists **every first-party function the flow calls**, helpers included, once per call site; a `utility` function's own callees aren't expanded. | Decided |
+| D64 | **Outbound HTTP calls are never merged into one unknown target.** The symbol resolver keeps a URL's constant parts as a template (runtime parts become placeholders), following parameters through their callers and `self.x` set in any method. The target is the host when it's constant, named by an **HTTP signature** when it's a known service's own host (an `http.yaml` in a rule pack, hosts only; core pack `rule-packs/http/steno-pack-saas-http`). API paths never name a service: they only resemble one. Otherwise the call goes to a stub per calling class, named after the class and its file, keeping its URL template, and is listed as an unmet join. | Decided |
+| D65 | **Coverage report, first version.** A `coverage` stage after `write` stores six signals: unknown hosts, unexplained I/O calls (named like I/O, with no rule at the call or from the library's pack in the same function), libraries with no pack, unreachable code with effects, matches Steno couldn't check, and unparsed files. Triage carries over per repository; the org-wide report and triage are in the Admin API and the UI's Coverage page. Cross-app inconsistencies and unread config come later. Stage order: clone → deps → parse → extract → assemble → flows → write → coverage → cards. | Decided |
+| D66 | **`client` clues may declare `extends`:** the library base classes the client type inherits (the whole chain). Library code isn't read, so a call on a receiver typed only as a library base (`FunctionCallingLLM`) links to every client the app builds that extends it, marked `candidate` (and `ambiguous` when several), as D47 describes. | Decided |
+| D67 | **The coverage report is read by scope:** organization → space → application, like the graph. Items record the applications they occur in; each scope rolls up its applications' numbers, lists its children worst first, and ranks items by reach (applications, then spaces, then occurrences). | Decided |
+| D68 | **`get_flow` returns an outline:** as many levels as fit in about 25 steps (or `levels`), deeper branches folded into the step above with how many steps are inside and what they touch; `under` opens a branch. Citations cover what's shown. Same folding as the UI (Visualize). | Decided |
+| D69 | **Java resolution starts from source and the JDK; dependency JARs come later.** The JVM helper reads every module of a repository once and writes call targets, types, and constant values keyed by file and position; the Java resolver looks them up. Its JAR list starts empty, so adding JARs is configuration. Refines D13. | Decided |
+| D70 | **One symbol resolver per language, behind one interface.** The engine picks a resolver by file language, so a repository with several languages runs several resolvers. The config property map belongs to the engine and is shared by all of them. | Decided |
+| D71 | **Gaps are visible, never silent.** Every resolver reports the calls it can't follow, with the reason (and the library when it's a library type). The calling function's trace entry lists them under `unresolved` when they may matter (named like a first-party function or like I/O); the flow carries `incomplete` and `unresolved_calls`, and `get_flow` shows the stops; the coverage report counts **unresolved library types** per library. Every language. | Decided |
+| D72 | **The Java resolver supplies Lombok-generated members** (`@Getter`, `@Setter`, `@Data`, `@Value`, `@Builder`, the constructor annotations) itself, since JavaParser doesn't run annotation processors. | Decided |
+| D73 | **Declarative and generated HTTP clients.** Clients whose source is in the repository (Feign, `@HttpExchange`) get `CALLS` on the interface method itself, so callers' flows step into the call. Clients whose source isn't (generated OpenAPI clients, internal SDKs) use the `client` clue extended with `calls` (method → `{method, path}`) and `base`. | Decided |
+| D74 | **Inferred entry points.** Inside an application, a function that nothing in the repository calls and no rule starts, but that does real work (an effect at or below it), starts a flow of its own: named "Background work · Class.method", `trigger_kind: inferred`, `inferred: true`, confidence 0.5, no `STARTS` edge. It's also a coverage item (**unknown triggers**) until a rule names its trigger. Not inferred: code outside every application (scripts, tooling), code in another language than its module, methods the language calls itself (`__enter__`, `toString`), and an uncalled method of a class the known flows already use (dead code; it stays under unreachable code). | Decided |
+| D75 | **Steno is the architecture pillar of the Context Layer** ([vision](../vision/context-layer.md)). Only providers (code, files about the system, other systems' data, admins) write to Steno; SDLC phases write to the project pillars and link by ID. Steno is not a system of record, never asks an organization to change its repositories, and leaves constraints, standards, SLAs, test conventions, and plans to other pillars, attached to its scopes by ID. | Decided |
+| D76 | **Witness types are kinds of claim, decided by what consumes the information:** CODE (the running app: source, its own config, its build), PLATFORM (infrastructure applies it: deploy definitions, topics and ACLs, schedulers, gateways, artifact repositories, from a repository or an API), DECLARED (only describes: manifests, catalogs, CODEOWNERS, hand-written specs), ADMIN (entered in Steno), OBSERVED (runtime, `v2`). Where it's stored (connector), how it's read (rule or adapter), and what kind of claim it is (witness) are separate questions. Each provider states its witness type; generated sources (a spec built from code) aren't independent. ([witnesses and facets](../concepts/witnesses-and-facets.md)) | Decided |
+| D77 | **Anything stored in a repository comes through the git connector.** New connectors are only for systems reached through an API (`v1`): an adapter takes snapshots, turns them into claims, and stores them with an as-of time. Revises D30. | Decided |
+| D78 | **One system read two ways is one witness.** The XLD repository and the XLD server are both PLATFORM: merged, never two votes; differences are drift, reported separately. The POC reads the XLD repository through git. | Decided |
+| D79 | **Facets:** Behavior, Structure, Components, Artifacts, Interfaces, Messaging, Routing, Data, Schedules; later Ownership, Environments, feature flags and access policy. Every graph node and edge type is fed by at least one facet, and a facet is added only when the graph models what it feeds. Frameworks aren't a facet (they teach the CODE witness); constraints and standards aren't facets. | Decided |
+| D80 | **Evidence vs. authority facets.** Evidence facets compare witnesses and give each fact an agreement state (confirmed / code only / declared only); a disagreement means "look here" (a missed rule, a stale declaration, or a name mismatch). Authority facets (names, placement, ownership) resolve by a precedence ladder an organization can reorder; losers become aliases. Admin overrides are stored with who, when, and why, cited as ADMIN, and still compared with code. | Decided |
+| D81 | **Application identity has four parts:** a permanent **Steno ID** (assigned on first sight, kept in an identity registry in Postgres), a **canonical name** (the name it's deployed as; exact, unique, used for matching), a **display name**, and **aliases** (every name a source states, plus past names). Every child ID is built on the Steno ID. Revises today's name-based `app:{name}` IDs. ([identity](../concepts/identity.md)) | Decided |
+| D82 | **The name ladder:** ADMIN → PLATFORM deploy name → DECLARED manifest ID → CODE build artifact name → CODE runtime self-name → path-derived (provisional). Packs fill the slots; organizations can reorder them and declare naming patterns, which make derived names exact. Matching: canonical name or exact alias, then declared mappings, then normalized matching only if enabled (marked inferred), else the unmatched-names list. No silent fuzzy matching. Conflicts are flagged, never merged. | Decided |
+| D83 | **Identify step and lifecycle.** Only for repositories re-ingested that night: match each deployable by canonical name **or** repository + module path; reuse the Steno ID (record name or location changes; old names become aliases); no match → new ID; a registered application not seen in a successful run of its repository → removed (a tombstone), restored with the same ID if it reappears. No fingerprints or heuristics; a rename and move in one change gets a new ID and is listed as "removed X, added Y". Endpoints and flows keep natural keys (not seen → removed). | Decided |
+| D84 | **Manual renames:** an admin can link a removed application to a new one after the fact (the new one takes over the Steno ID) or declare a rename ahead of time (the next run maps it). Application IDs must stay stable: other pillars depend on them. | Decided |
+| D85 | **Application kinds are labels, not types:** `:Service` (HTTP/gRPC), `:Consumer` (message-triggered), `:Job` (runs to completion: CODE hints, confirmed by PLATFORM such as a CronJob or scheduler entry), `:Frontend` (`v2`). Derived from the triggers of the application's flows; not exclusive; an in-code `@Scheduled` method is a trigger, not a kind. No trigger found → kind unknown and a coverage item, never a default. | Decided |
+| D86 | **Artifacts in two parts.** A1: the dependency link, joining a consumer's build-file dependency to the producing repository's module by coordinate (the D61 shared-key pattern), in POC stage B. A2: flows continuing into library code, designed later (stage D or `v1`). | Decided |
+| D87 | **Pipeline additions:** extract runs file rules next to code rules, each claim tagged with its witness type; an **identify** step after structure detection; a **reconcile** step that stores non-CODE claims in a Postgres claim store and recomputes only the subjects a run touched. The reconcile technical design is Open and comes before stage B. | Decided (direction) |
+| D88 | **Facets arrive when a POC target needs them and the result can be checked:** identity foundations and witness types in stage A; Artifacts A1, Schedules (CronJob), Data ownership, and Messaging agreement in the stub organization (B); Routing and Components names in petclinic (C); `component_manifest.yaml`, the XLD repository, and Artifacts A2 in our organization (D); API-reached systems and catalogs in `v1`. | Decided |
+| D89 | **Gaps are reported, not only hidden from facts:** unresolved calls, unjoined sends (the join rate), orphan receivers, disagreements, unmatched names, unknown triggers, and stale providers are completeness signals. Impact and dependents answers say what they couldn't see (the exact format of the completeness block is Proposed). | Decided |
+| D90 | **Code search goes through the git host's search API**, not an index Steno builds. | Decided |
+| D91 | **Config repositories:** their facts attach to what they describe, with the repository as the cited source; the repository sits at the narrowest scope covering everything it describes, or the organization when nothing narrower does. | Decided |
+| D92 | **Frontend support is a later phase (`v2`).** Two hooks are kept now: UI routes are an entry-point type, and Routing marks public endpoints so endpoints only a UI calls don't look unused. | Decided |
+| D93 | **Onboarding flow** ([onboarding](./onboarding.md)): organization and connectors → repositories and spaces → discovery scan → AI suggestions (`v1`, a person approves every rule) → setup sheet → pilot ingestion → guided coverage and agreement review → readiness check → full organization. The UI's main job is onboarding and coverage review; visualization is a later enhancement; accurate MCP answers are the bar. | Decided |
+| D94 | **Scope is POC → v1 → v2.** The POC is stages 0 and A–D ([roadmap](./roadmap.md)), replacing the old Phase 1–3 plan. Jev (routing, verification, ingestion decisions) and runtime evidence are `v2`, with stand-ins until then. Refines D55. | Decided |
+| D95 | **Evaluation:** every POC stage is measured with a question set (expected answers written first; correctness, tool calls, honesty about gaps) and the same questions answered by an agent without Steno. | Decided |
+| D96 | **Catalogs (Backstage, Cortex) are providers, not competitors.** No pivot: catalogs answer who owns a service and whether it meets standards; Steno answers what it does and what a change affects. Where an organization has one, it's a DECLARED provider for Components, Structure, and later Ownership (`v1`). Steno doesn't build catalog features (ownership UIs, scorecards, on-call). | Decided |
+| D97 | **Projects across time** ([projects](../vision/projects.md)): ongoing and future projects record planned touches as Steno IDs (including planned IDs for things not built yet), enabling conflict detection between in-flight projects, protection of planned work, ordering bodies of work, and planned-vs-actual checks. | Proposed |
+
+## Open questions
+
+**Design work queued in the POC**
+- [ ] **Reconcile technical design** (before stage B): claim shape and emit syntax, how declared-only facts appear, where agreement states live, subject keys, removal propagation, ordering across one night's jobs. See [identify and reconcile §3](../how-it-works/ingestion/identify-and-reconcile.md#3-reconcile-open-technical-design-before-stage-b).
+- [ ] **Artifacts A2:** how a flow's trace continues into an ingested library in another repository, now that library functions aren't stored as nodes (for example, a per-library summary of each public function's effects, read by dependents' runs).
+- [ ] **Label collision:** `:Service` is both a Module role and an Application kind (D85). Rename one (for example, the Module role to `:Deployable`) before kinds are built.
+- [ ] The format for an organization's **setup sheet** (providers per facet, precedence, naming patterns): a file in the org pack, the UI, or both.
+- [ ] Which edge cases of witness classification need guidance (Helm values that set environment variables the app reads: PLATFORM by default).
+- [ ] The completeness block's exact format in MCP answers.
+- [ ] How confidence levels are assigned and shown, so an inferred or declared-only fact never looks deterministic.
+
+**Carried over**
+- [ ] The format for declaring glossary terms (a `glossary.yaml` per space, or the UI)
+- [ ] Which model writes flow purposes and narratives: decided from the dry run's numbers
+- [ ] The signals that mark a Service module in our microservices repository, and how `plugins/` modules are detected as libraries (partly answered by the Components facet: `component_manifest.yaml`)
+- [ ] The fan-in threshold for tagging a function `utility` (3 callers today)
+- [ ] Neo4j edition and licensing (Community vs. Enterprise, Graph Data Science)
+- [ ] Naming the service behind an unknown-host call (`Unknown host · JiraDataProvider`): an LLM or decision reading the calling code, or an admin's declaration
+- [ ] Java dependencies, in order (Proposed, [resolvers §5.2](../how-it-works/ingestion/resolvers.md#52-source-first-decided-built)): public JARs from Maven Central by coordinates without running builds; internal libraries linked to their source by coordinates (Artifacts); a private artifact repository connector last. How to read coordinates from Gradle files (version catalogs, BOMs) without running them.
+- [ ] A representative organization Java repository to measure against (Spring MVC vs. WebFlux, Lombok, internal client wrappers); `budgeting-app` until then
+- [ ] How resolution scales to the long tail of languages (own resolvers, LSP-backed, SCIP, or none; leaning tiered)
+
+**For a client deployment (`v1`)**
+- [ ] Deployment: where Steno runs (client cloud, on premises, air-gapped)
+- [ ] MCP authentication and access scoping by space or role
+- [ ] The organization's data policy for sending code-derived text to an LLM or decision model
+- [ ] Embeddings model
+- [ ] Cost budget for the initial ingestion of a large organization
+- [ ] Who builds the gold set and question set for a client, and how
+- [ ] Whether the Contextualized integration is `v1` or `v2`
+
+**`v2`**
+- [ ] Jev: calibration on our data

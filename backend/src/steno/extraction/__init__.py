@@ -1,4 +1,6 @@
-"""Extraction: the rule engine runs rule packs over a repository (docs/ingestion.md §4).
+"""Extraction: the rule engine runs rule packs over a repository.
+
+See docs/how-it-works/ingestion/rules-and-packs.md.
 
 - Code-pattern rules (ast-grep YAML) from the rule packs in /rule-packs
 - Config path rules (YAML / properties)

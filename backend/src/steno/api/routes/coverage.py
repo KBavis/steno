@@ -1,4 +1,6 @@
-"""The coverage report (docs/ingestion.md §4): what no rule explained, across the organization.
+"""The coverage report: what no rule explained, across the organization.
+
+See docs/how-it-works/ingestion/coverage-report.md.
 
 Read at any scope of the containment tree, like the graph: the organization, a space (its
 sub-spaces and applications), or one application. Each scope rolls up its applications'

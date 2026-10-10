@@ -1,6 +1,7 @@
 """What the rule engine produces: raw facts, before they're written to the graph.
 
-docs/rule-packs.md §3 defines the vocabulary; these are its in-memory form.
+docs/how-it-works/ingestion/rules-and-packs.md §3 defines the vocabulary; these are its
+in-memory form.
 """
 
 from dataclasses import dataclass, field
@@ -11,7 +12,7 @@ from steno.resolvers.base import UNRESOLVED
 
 UNRESOLVED_TEXT = "<unresolved>"
 
-# Identity properties per label (rule-packs.md §3); the most specific label wins
+# Identity properties per label (rules-and-packs.md §3); the most specific label wins
 IDENTITY = {
     "HttpEndpoint": ("method", "path"),
     "GrpcMethod": ("service", "method"),

@@ -1,7 +1,8 @@
 """`steno rules test`: run each rule's test cases and compare with expected.yaml.
 
-Conventions (docs/rule-packs.md §7): a case lists only the output of the rule it's filed
-under; every pack enabled for the case's input runs, so clues from other rules are available.
+Conventions (docs/how-it-works/ingestion/rules-and-packs.md §7): a case lists only the output
+of the rule it's filed under; every pack enabled for the case's input runs, so clues from
+other rules are available.
 A section the case omits isn't checked; a listed one (even `[]`) must match exactly.
 An expected item matches an actual one when every property it lists is equal (extra actual
 properties are fine), and each side must be fully matched.

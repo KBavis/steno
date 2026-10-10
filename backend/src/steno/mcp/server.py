@@ -1,6 +1,8 @@
-"""Steno's MCP server: tools for agents over Streamable HTTP (docs/retrieval-and-mcp.md §5).
+"""Steno's MCP server: tools for agents over Streamable HTTP.
 
-Stateless (DESIGN_DOC §6). The first tools (D54): `search`, `get_node`, `get_flow`,
+See docs/how-it-works/retrieval-and-mcp.md §5.
+
+Stateless (docs/how-it-works/README.md). The first tools (D54): `search`, `get_node`, `get_flow`,
 `find_dependents`, `view_flow_code`. Every result carries citations (D29), is cut to its
 `max_tokens`, and every call is logged in `tool_call` (tool, parameters, latency, result count).
 """

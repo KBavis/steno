@@ -1,4 +1,6 @@
-"""Send a graph plan to Neo4j, writing only what changed (D59; docs/ingestion.md §7).
+"""Send a graph plan to Neo4j, writing only what changed (D59).
+
+See docs/how-it-works/ingestion/README.md §5 and stages.md §7.
 
 Read what the graph holds for this repository, compare it with the plan by stable ID
 (`delta.py`), then: delete facts this repository no longer has, write facts that are new or

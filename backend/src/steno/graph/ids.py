@@ -1,4 +1,4 @@
-"""Stable node IDs built from natural keys (docs/knowledge-graph.md §3).
+"""Stable node IDs built from natural keys (docs/how-it-works/graph-reference.md §3).
 
 Re-ingesting finds the same nodes because the same facts always produce the same IDs,
 and a stub merges with the real node when its owner is ingested.

@@ -1,6 +1,6 @@
 """The ingestion worker: claims jobs from Postgres and runs them.
 
-Separate from the API/MCP process so heavy work never slows queries (DESIGN_DOC §6).
+Separate from the API/MCP process so heavy work never slows queries (docs/how-it-works/README.md).
 """
 
 import logging

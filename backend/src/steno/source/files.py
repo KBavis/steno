@@ -35,7 +35,7 @@ def source_files(root: Path, suffixes: tuple[str, ...] | None = None) -> Iterato
 
 
 def is_test_file(rel: Path) -> bool:
-    """Test code is excluded from flows (`:Test` modules, docs/knowledge-graph.md §3)."""
+    """Test code is excluded from flows (`:Test` modules; graph-reference.md §3)."""
     name = rel.name
     return (
         bool({"tests", "test"} & set(rel.parts[:-1]))

@@ -1,4 +1,4 @@
-"""The nightly run (D59; docs/ingestion.md §7, Nightly updates).
+"""The nightly run (D59; docs/how-it-works/ingestion/README.md §4).
 
 Once a night, queue a full run for every included repository whose default branch moved
 past `last_ingested_sha`. Repositories that didn't change are skipped. Workers check whether

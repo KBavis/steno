@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The JVM helper for Java symbol resolution (D69, docs/ingestion.md §5.1c).
+ * The JVM helper for Java symbol resolution (D69, docs/how-it-works/ingestion/resolvers.md §5.2).
  *
  * <pre>
  * steno-resolver --root REPO --files FILES.txt --out OUT.json [--jars JARS.txt]

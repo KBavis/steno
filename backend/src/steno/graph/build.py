@@ -1,6 +1,6 @@
 """Turn extracted facts into a graph plan: nodes and edges with stable IDs.
 
-docs/knowledge-graph.md. One containment tree:
+docs/how-it-works/graph-reference.md. One containment tree:
 
     Organization → Space → Application → Interface, Entity, Flow → Step    architecture nodes
                          → Repository → Module → File                       code nodes
@@ -36,7 +36,7 @@ from steno.graph.structure import Module, Structure
 from steno.resolvers.base import Function, Invocation, Resolvers, UnresolvedCall, looks_like_io
 from steno.rule_packs.packs import HttpSystem
 
-# Node types search will cover (they'll carry cards; knowledge-graph.md §3, Card properties)
+# Node types search will cover (they'll carry cards; graph-reference.md §3, Card properties)
 SEARCHABLE = {"Flow", "Application", "Space", "Organization", "Interface", "Entity", "Table"}
 # Shared nodes: several repositories can reference them, so a re-ingest never deletes them
 # outright. Messaging interfaces (topics, queues, org-defined channels) are marked `shared`.
@@ -407,7 +407,7 @@ class _Builder:
     def _channel(self, label: str, name: str, props: dict[str, Any], prov: dict[str, Any]) -> str:
         """A topic, queue, or org-defined channel (D61): keyed by its name, so the application
         that sends and the one that receives meet here. Owned by the space that first wrote it
-        (the producer's, by convention; knowledge-graph.md §3, Topic ownership)."""
+        (the producer's, by convention; graph-reference.md §3, Topic ownership)."""
         cid = self.plan.node(
             ids.channel_id(label, name),
             ["Interface", label, "Searchable"],

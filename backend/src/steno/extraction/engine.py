@@ -1,4 +1,6 @@
-"""The rule engine: run rule packs over a repository and produce facts (docs/ingestion.md §2).
+"""The rule engine: run rule packs over a repository and produce facts.
+
+See docs/how-it-works/ingestion/README.md §2.
 
 - parse:    list the files once, build the symbol resolver's symbol table and every syntax tree
 - extract:  run every rule on every file; each match emits facts, facts with blanks, and clues
@@ -40,7 +42,7 @@ from steno.source.files import is_test_file, source_files
 
 log = logging.getLogger(__name__)
 
-# How each clue field is read from a capture (rule-packs.md §4)
+# How each clue field is read from a capture (rules-and-packs.md §4)
 CLUE_FIELDS: dict[str, dict[str, str]] = {
     "prefix": {"owner": "symbol", "value": "value"},
     "mount": {"parent": "symbol", "child": "symbol", "prefix": "value"},
@@ -224,7 +226,7 @@ class Engine:
                 continue
             for key, value in entries.items():
                 if SECRET_KEY.search(key):
-                    continue  # secret values are never ingested (DESIGN_DOC §18)
+                    continue  # secret values are never ingested (docs/how-it-works/security.md)
                 m = pattern.match(key)
                 if m:
                     caps = {"KEY": Capture(key), "VALUE": Capture(value)} | {

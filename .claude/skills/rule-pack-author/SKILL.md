@@ -11,8 +11,8 @@ A rule is an ast-grep `match` (where the pattern is) plus a Steno `emit` (what i
 
 ## Read first, every time
 
-1. `docs/rule-packs.md`: the rule format, emits, anchors, identity properties, clue types, config rules, pack layout, tests. **This is the source of truth for syntax.**
-2. `docs/knowledge-graph.md` §3 (node types) and §4 (relationship types, with what each connects): the vocabulary you may emit.
+1. `docs/how-it-works/ingestion/rules-and-packs.md`: the rule format, emits, anchors, identity properties, clue types, config rules, pack layout, tests. **This is the source of truth for syntax.**
+2. `docs/how-it-works/graph-reference.md` §3 (node types) and §4 (relationship types, with what each connects): the vocabulary you may emit.
 3. The existing packs under `rule-packs/`, so you extend instead of duplicating.
 
 ## Workflow
@@ -46,8 +46,8 @@ Decide what to emit, using only types that exist in the docs:
 
 | Question | Emit |
 |---|---|
-| Is it a **thing** others can call, read, or depend on (endpoint, topic, table, entity, external system, schedule)? | `node`, with all **identity properties** from rule-packs.md §3 |
-| Is it a **connection** (exposes, calls, produces, consumes, reads, writes, maps to)? | `edge`. Check the from → to pair is allowed in knowledge-graph.md §4. |
+| Is it a **thing** others can call, read, or depend on (endpoint, topic, table, entity, external system, schedule)? | `node`, with all **identity properties** from rules-and-packs.md §3 |
+| Is it a **connection** (exposes, calls, produces, consumes, reads, writes, maps to)? | `edge`. Check the from → to pair is allowed in graph-reference.md §4. |
 | Is part of the fact **somewhere else** (a router's prefix, a mount point, a config value)? | `clue` of an existing clue type, labeled by the symbol it's about |
 | Does it **start work** (handles a request, consumes a message, runs on a schedule)? | `entry_point` with the trigger node and `@function` |
 | Does matching depend on a **type** the pattern can't see? | a `where:` condition |
@@ -64,7 +64,7 @@ Rules never create `Flow` or `Step` nodes, and never reference another rule.
 ### 4. Choose the pack
 
 - Find the existing pack for the framework in `rule-packs/<ecosystem>/`.
-- Otherwise create one: `rule-packs/<java|python|…>/steno-pack-<framework>/` for public frameworks (`source: core`), or `rule-packs/org/<org>-<name>/` for internal ones (`source: org`). Fill in `pack.yaml` (see rule-packs.md §6), including `enabled_when.dependencies` as they appear in the build file.
+- Otherwise create one: `rule-packs/<java|python|…>/steno-pack-<framework>/` for public frameworks (`source: core`), or `rule-packs/org/<org>-<name>/` for internal ones (`source: org`). Fill in `pack.yaml` (see rules-and-packs.md §6), including `enabled_when.dependencies` as they appear in the build file.
 
 ### 5. Write the rule
 
@@ -88,7 +88,7 @@ It prints every match with its captures (code rules through ast-grep, config rul
 
 Under `tests/<rule-id>/<case-name>/`:
 - `input/`: the **smallest** real snippet that shows the case, trimmed. Include every file the case needs; a rule that relies on clues needs the files that emit them (the router's `__init__.py` for an endpoint's prefix).
-- `expected.yaml`: the facts it must produce (format in rule-packs.md §7).
+- `expected.yaml`: the facts it must produce (format in rules-and-packs.md §7).
 - At least one **negative case** (`expected.yaml` with nothing in it) when the pattern could over-match.
 - **Never copy secrets**, tokens, internal hostnames, or personal data into test inputs. Replace them with placeholders.
 

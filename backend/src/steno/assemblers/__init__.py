@@ -1,1 +1,4 @@
-"""The assemblers, one per clue type: the assemble stage (docs/ingestion.md §2)."""
+"""The assemblers, one per clue type: the assemble stage.
+
+See docs/how-it-works/ingestion/stages.md §5.
+"""

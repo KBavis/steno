@@ -1,8 +1,12 @@
-# Knowledge Graph Model
+# Graph reference
 
-How Steno represents an organization's architecture in Neo4j: labels, properties, relationships, ownership, flows, and data stores.
+How Steno represents an organization's architecture in Neo4j: every label, property, and relationship, plus ownership, flows, and data stores. Part of [How it works](./README.md); the ideas are introduced in [Concepts: the graph](../concepts/graph.md). Status markers: **Decided** · **Proposed** · **Open**. This page is the source of truth for the node and edge vocabulary rules may emit (the `rule-pack-author` skill reads §3–4).
 
-Part of the [Design Doc](./DESIGN_DOC.md). Status markers: **Decided** · **Proposed** · **Open**.
+> **In one minute**
+> - Every node has three independent aspects: **labels** (what it is), **one `BELONGS_TO`** (where it lives), and **interaction edges** (what it does).
+> - Node types (§3), relationship types (§4), and the properties every fact carries are defined here; nothing else may be emitted.
+> - Flows store a **trace** (every function, in order) instead of Function nodes; significant functions become `Step` nodes.
+> - Planned changes from the 2026-10 review: applications get a **Steno ID** and **kind labels** ([Identity](../concepts/identity.md)); facts get **sources and agreement** ([Trust](../concepts/trust.md)).
 
 ---
 
@@ -101,7 +105,7 @@ Other points:
 | `Organization` | none (root) | `name`, `purpose` | |
 | `Space` | Organization or parent Space | `name`, `purpose` | Any way an org divides itself. Can nest to any depth. |
 | `Repository` | Space | `url`, `default_branch`, `last_ingested_sha` | What a connector points at. Can contain many applications. |
-| `Application` | Space | `name`, `purpose` | An **independently deployable unit**. `(:Application)-[:BUILT_FROM]->(:Module)` |
+| `Application` (+ kind labels `:Service`, `:Consumer`, `:Job`; `:Frontend` in `v2`) | Space | `name`, `purpose`; planned: `steno_id`, `canonical_name`, `display_name`, `aliases`, `state` | An **independently deployable unit**. `(:Application)-[:BUILT_FROM]->(:Module)`. Kind labels come from the triggers of its flows and aren't exclusive (D85). Identity: [Identity](../concepts/identity.md) (D81–D84). |
 | `Module` (+ role label) | Repository | `path`, `build_tool` | The ecosystem's build unit: a Maven/Gradle module, a Python package with its own `pyproject.toml`, an npm workspace, a Go module. **Not a namespace package**: packages are paths. See [Module roles](#module-roles). |
 | `File` | Module | `path`, `language`, `content_hash` | |
 | `Interface` + `HttpEndpoint` | exposing Application | `method`, `path` | |
@@ -116,10 +120,10 @@ Other points:
 | `Table` | Schema, or DataStore when there's no schema | `name`, `kind` (table / collection / index), `stub` | V1: stubs. V2: filled in. See [Data stores](#7-data-stores). |
 | `Column` | Table | `name`, `type`, `nullable`, `purpose` | V2 |
 | `Entity` | Application | `name`, `symbol`, `fields` [{name, type}] | Domain models and payloads in any language: JPA classes, SQLAlchemy / Pydantic models, protobuf / Avro messages, DTOs |
-| `ExternalSystem` | Organization | `host`, `name`, `called_from` (when the host is unknown) | Vendor and third-party APIs. Keyed by host, or by service name when an [HTTP signature](./rule-packs.md#http-signatures-decided-d64) recognizes the host. |
+| `ExternalSystem` | Organization | `host`, `name`, `called_from` (when the host is unknown) | Vendor and third-party APIs. Keyed by host, or by service name when an [HTTP signature](./ingestion/rules-and-packs.md#http-signatures-decided-d64) recognizes the host. |
 | `KafkaCluster` (and other brokers) | Organization | `name` | Infrastructure, attached with `HOSTED_ON` |
 
-Candidates for later: `Team`/owner, deployment `Environment`.
+Later (`v2`): `Team` (the Ownership facet), `Environment` (the Environments facet), `Project` (the [Contextualized integration](../vision/projects.md)). A node type is added only together with the facet that feeds it ([Witnesses and facets](../concepts/witnesses-and-facets.md)).
 
 ### Trace entries
 
@@ -149,7 +153,7 @@ A flow's **trace** (L3) is the ordered list of every first-party function it run
 | `doc` | First sentence of its doc comment | | "Creates Job, builds the applicable Tasks, and runs them." | Cards |
 | `lang` | Language-specific extras, only when needed | `{throws: ["IOException"]}` | `{is_generator: false}` | Kept out of the shared schema |
 
-**Not stored:** function bodies (the source is fetched from the git host at the ingested commit), local variables, statements, and functions no entry point reaches. A function with effects that no flow reaches becomes a [coverage item](./ingestion.md#coverage-report-decided) instead.
+**Not stored:** function bodies (the source is fetched from the git host at the ingested commit), local variables, statements, and functions no entry point reaches. A function with effects that no flow reaches becomes a [coverage item](./ingestion/coverage-report.md) instead.
 
 **A function shared by several flows** appears in each of their traces. "Which flows run `AuthService#identifyClient`?" or "which flows touch `ClientValidator.java`?" is a lookup across traces by `symbol` or `file`.
 
@@ -167,6 +171,10 @@ A flow's **trace** (L3) is the ordered list of every first-party function it run
 | `confidence` | 0–1. Deterministic rules produce 1.0. Jev-produced facts carry Jev's confidence. |
 | `ingestion_job` | ID of the job that last wrote the fact (used for idempotent replacement) |
 | `first_seen`, `last_seen`, `ingested_commit` | Cheap insurance toward version history later |
+| *(planned)* `sources` | The witnesses behind the fact: `[{witness: CODE, rule, file, line}, {witness: PLATFORM, provider: acme-xld, file, line}]` (D76, D87) |
+| *(planned)* `agreement` | `confirmed` / `code_only` / `declared_only`, for facts in evidence facets (D80) |
+
+**Application IDs are moving to Steno IDs** (D81). Today `app:{name}`, and the name (repository plus module folder) is built into every child ID: `endpoint:{app}:…`, `flow:{app}:…`. After POC stage A, child IDs are built on the application's permanent Steno ID instead, so renames and moves don't change them.
 
 Which Project introduced or changed a fact isn't a property. It's recorded later as `Project -CHANGED-> element` edges from Contextualized (see [Business context](#business-context-from-contextualized-later)).
 
@@ -281,7 +289,7 @@ Walk both ends of a call up the tree to their lowest common ancestor:
 
 When a call's target isn't ingested yet, it points at a **stub** node keyed by its natural key (URL + method, topic name, table name), with `stub: true`. When the owning application is ingested, the real node **merges** into the stub by stable ID. The same pattern is used for `Table` nodes in V1.
 
-**An HTTP call whose target can't be named is never merged with others (D64).** The symbol resolver keeps every constant part of a URL, with runtime parts as placeholders (`https://{domain}/rest/api/content/{page_id}`), following values through parameters and attributes. The target is the host when it's constant (named by an [HTTP signature](./rule-packs.md#http-signatures-decided-d64) when it's a known service's own host). When the host is runtime data, the call goes to a stub **per calling class**, named after the class and its file (`Unknown host · ConfluenceDataProvider (confluence.py)`, keyed `external:unresolved:{class}`); each call keeps its URL template (`{domain}/rest/api/content/{page_id}`), and it's listed as an unmet join for the coverage report. Steno doesn't guess the service from the path. Naming it is a later step (Open).
+**An HTTP call whose target can't be named is never merged with others (D64).** The symbol resolver keeps every constant part of a URL, with runtime parts as placeholders (`https://{domain}/rest/api/content/{page_id}`), following values through parameters and attributes. The target is the host when it's constant (named by an [HTTP signature](./ingestion/rules-and-packs.md#http-signatures-decided-d64) when it's a known service's own host). When the host is runtime data, the call goes to a stub **per calling class**, named after the class and its file (`Unknown host · ConfluenceDataProvider (confluence.py)`, keyed `external:unresolved:{class}`); each call keeps its URL template (`{domain}/rest/api/content/{page_id}`), and it's listed as an unmet join for the coverage report. Steno doesn't guess the service from the path. Naming it is a later step (Open).
 
 ---
 

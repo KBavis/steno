@@ -1,4 +1,4 @@
-"""Clone a repository into a temporary workspace (docs/ingestion.md §3, Cloning)."""
+"""Clone a repository into a temporary workspace (docs/how-it-works/ingestion/connectors.md §3)."""
 
 import logging
 import os

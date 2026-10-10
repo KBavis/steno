@@ -1,4 +1,6 @@
-"""The assemblers: fill in extracted facts' blanks from clues (ingestion.md §2, rule-packs.md §4).
+"""The assemblers: fill in extracted facts' blanks from clues.
+
+See docs/how-it-works/ingestion/stages.md §5 and rules-and-packs.md §4.
 
 Each clue type has exactly one assembler here:
 - prefix + mount → prefix chains (full endpoint paths)

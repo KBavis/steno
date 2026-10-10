@@ -1,4 +1,4 @@
-"""What Steno's MCP tools answer (docs/retrieval-and-mcp.md §5; first tools, D54).
+"""What Steno's MCP tools answer (docs/how-it-works/retrieval-and-mcp.md §5; first tools, D54).
 
 Each tool returns a compact answer for an agent: the facts, a `citations` list (D29: each
 claim with its file, lines, commit, and a link), `next` hints for the call after this one,
