@@ -59,6 +59,19 @@ POINTERS = ("start_line", "end_line", "call_line")
 Key = tuple[str, str | None]
 UNRESOLVED_SYSTEM = "unresolved"
 LANGUAGE_OF = {".py": "python", ".java": "java"}
+# What kind of thing starts a flow, by its trigger's label (the UI groups flows by it)
+TRIGGER_KIND = {
+    "HttpEndpoint": "http",
+    "Schedule": "schedule",
+    "KafkaTopic": "topic",
+    "Queue": "queue",
+    "GrpcMethod": "grpc",
+}
+SCHEDULE_NAME = {
+    "cron": "Cron job",
+    "fixed-rate": "Fixed-rate job",
+    "fixed-delay": "Fixed-delay job",
+}
 
 
 @dataclass(frozen=True)
@@ -299,6 +312,17 @@ class _Builder:
             nid = self._external(n.props.get("host"), n.props.get("name"), prov)
         elif "Interface" in n.labels and label not in APP_SCOPED and n.props.get("name"):
             nid = self._channel(label, str(n.props["name"]), props, prov)
+        elif label == "Schedule":
+            kind, expression = n.props.get("kind", "schedule"), n.props.get("expression", "")
+            nid = p.node(
+                f"schedule:{app_name}:{kind}:{expression}",
+                labels,
+                name=f"{kind} {expression}".strip(),
+                **props,
+                **prov,
+            )
+            if app:
+                p.edge("BELONGS_TO", nid, app, **prov)
         else:
             nid = p.node(f"{label.lower()}:{app_name}:{n.ref().props}", labels, **props, **prov)
         self.fact_ids[id(n)] = nid
@@ -616,16 +640,28 @@ class _Builder:
                 continue
             app = self._app_for(ep.origin.file)
             app_name = self.plan.nodes[app].props["name"] if app else self.ctx.repo
-            trigger_name = self.plan.nodes[trigger].props.get("name", trigger)
-            flow = ids.flow_id(app_name, trigger_name)
+            trigger_node = self.plan.nodes[trigger]
+            trigger_name = trigger_node.props.get("name", trigger)
+            trigger_kind = next(
+                (TRIGGER_KIND[lbl] for lbl in trigger_node.labels if lbl in TRIGGER_KIND), "channel"
+            )
+            # A schedule can start several jobs: each flow is named after the job it runs
+            name = (
+                f"{SCHEDULE_NAME.get(trigger_node.props.get('kind'), 'Scheduled job')} · "
+                f"{entry.container.rsplit('.', 1)[-1]}.{entry.name}"
+                if trigger_kind == "schedule"
+                else trigger_name
+            )
+            flow = ids.flow_id(app_name, name)
             trace = self._trace(flow, (entry_symbol, None))
             stops = sum(len(t.get("unresolved", [])) for t in trace)
             start, end = entry.span
             self.plan.node(
                 flow,
                 ["Flow", "Searchable"],
-                name=trigger_name,
+                name=name,
                 trigger=trigger_name,
+                trigger_kind=trigger_kind,
                 entry_symbol=entry_symbol,
                 entry_file=self._rel(entry),
                 entry_start_line=start,

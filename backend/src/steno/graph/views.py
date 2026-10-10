@@ -280,8 +280,7 @@ class GraphViews:
             id=app_id,
         ):
             fl = row["fl"]
-            method, _, path = (fl.get("name") or "").partition(" ")
-            resource = _resource(path)
+            method, path, resource = _flow_heading(fl)
             resources.add(resource)
             nodes.append(
                 _node(
@@ -520,7 +519,7 @@ class GraphViews:
             "reads": len({e["dst"] for e in edges if e["type"] == "READS_FROM"}),
             "calls": len({e["dst"] for e in edges if e["type"] == "CALLS"}),
         }
-        method, _, path = (fl.get("name") or "").partition(" ")
+        method, path, _ = _flow_heading(fl)
         head = _node(
             fl,
             (fl.get("entry_symbol") or "").rsplit(".", 1)[-1] or None,
@@ -861,6 +860,28 @@ def _place_target(
 
 def _trace(raw: Any) -> list[dict[str, Any]]:
     return json.loads(raw) if isinstance(raw, str) else []
+
+
+HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
+# Flows that an HTTP request doesn't start: a short tag, and the group they're listed under
+NOT_HTTP = {
+    "schedule": ("SCHEDULED", "Scheduled jobs"),
+    "topic": ("TOPIC", "Topics"),
+    "queue": ("QUEUE", "Queues"),
+    "grpc": ("GRPC", "gRPC"),
+    "channel": ("CHANNEL", "Channels"),
+}
+
+
+def _flow_heading(fl: Any) -> tuple[str, str, str]:
+    """How a flow is listed: (tag, title, group). `POST /api/jobs/{id}` → POST, its path, the
+    router it belongs to; a cron job → SCHEDULED, its name, Scheduled jobs."""
+    kind = fl.get("trigger_kind")
+    method, _, path = (fl.get("name") or "").partition(" ")
+    if kind in NOT_HTTP and not (kind == "channel" and method in HTTP_METHODS):
+        tag, group = NOT_HTTP[kind]
+        return tag, fl.get("name") or "", group
+    return method, path, _resource(path)
 
 
 def _resource(path: str) -> str:

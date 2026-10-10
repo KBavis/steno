@@ -46,7 +46,7 @@ export function EntityNode({ id, data, selected }: NodeProps<Node<EntityData>>) 
   const Icon = style.icon
   const dimmed = useDimmed(id)
   const isFlow = node.kind === 'flow' || node.kind === 'endpoint'
-  const [method, ...rest] = isFlow ? node.label.split(' ') : ['']
+  const [method, ...rest] = isFlow ? heading(node) : ['']
   return (
     <div
       className={[
@@ -168,7 +168,7 @@ export function GhostNode({ id, data, selected }: NodeProps<Node<EntityData>>) {
 export function FlowRowNode({ id, data, selected }: NodeProps<Node<EntityData>>) {
   const { node } = data
   const dimmed = useDimmed(id)
-  const [method, ...rest] = node.label.split(' ')
+  const [method, ...rest] = heading(node)
   const e = node.effects ?? {}
   return (
     <div className={['row', 'row-flow', selected ? 'is-selected' : '', dimmed ? 'is-dimmed' : ''].join(' ')}>
@@ -218,6 +218,12 @@ const BADGE_ICONS = { writes: PenLine, reads: BookOpen, calls: ArrowUpRight }
 const KIND_OF_EFFECT: Record<string, 'writes' | 'reads' | 'calls'> = { WRITES_TO: 'writes', READS_FROM: 'reads', CALLS: 'calls' }
 
 /** Flow view: what the flow is — its trigger, its handler, and where its data goes */
+/** A flow's tag and title: `POST` and its path, or `SCHEDULED` and the job's name */
+function heading(node: EntityData['node']): string[] {
+  if (node.method && node.path !== undefined && node.path !== null) return [node.method, node.path]
+  return node.label.split(' ')
+}
+
 export function FlowHeadNode({ data }: NodeProps<Node<EntityData>>) {
   const { node } = data
   const e = node.effects ?? {}
