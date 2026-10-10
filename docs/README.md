@@ -4,7 +4,7 @@
 
 > **In one minute**
 > - Agents are strong inside one repository and blind beyond it. Most of what matters for a change (who consumes this topic, which flows cross this service, what breaks downstream) lives outside it.
-> - Steno is the **architecture pillar** of a larger **Context Layer** that every phase of an agent-first SDLC pulls from: planning, implementation, testing, release.
+> - Steno answers **what is**, for the people and agents who plan, implement, review, test, and operate software. Five lead use cases set the bar: PR review with context, breaking-change checks, "grill me" planning, delta-driven testing, and stack trace to flow.
 > - It builds a **knowledge graph** bottom-up: applications first, then spaces, then the organization. Rules read the code deterministically; nothing is guessed silently.
 > - **Accuracy is the bar.** An answer is either correct, or it says exactly what it couldn't see.
 > - **Status:** proof of concept. Python and Java ingest end to end; MCP tools are live. See [Plan](./plan/README.md).
@@ -34,22 +34,18 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    PL[Planning] --> IM[Implementation] --> TE[Testing] --> RE[Release] --> MO[Monitoring]
-    subgraph CL["Context Layer"]
-      A["<b>Org architecture</b><br/>Steno"]
-      P["Past · ongoing · future projects<br/>Contextualized"]
-      SC["Standards · constraints"]
-    end
-    CL -. context .-> PL & IM & TE & RE
+    WF["Workflows and agents<br/>planning · review · testing · on call"] -- MCP --> ST["<b>Steno</b><br/>what is"]
+    CX["Project history<br/>(Contextualized)"] -. "links by Steno ID" .-> ST
+    OT["Standards, constraints"] -. "attach to Steno scopes" .-> ST
 ```
 
-Steno answers **what is**: the architecture as it runs today, derived from code. Projects (**what changed and why, what's coming**) and standards and constraints (**what should be**) are other pillars, linked to Steno by stable IDs. See [Vision](./vision/README.md).
+Steno answers **what is**: the architecture as it runs today, derived from code. Project history (*what changed and why*), standards and constraints (*what should be*), and the workflows built on top are separate systems that link to Steno by stable IDs. How they combine into an agent-first SDLC is designed in a separate project. See [Where Steno fits](./purpose/where-steno-fits.md).
 
 ## Read on
 
 | Section | Read it for | Start at |
 |---|---|---|
-| **Vision** | Why Steno exists, the Context Layer, how projects (past, ongoing, future) connect, use cases | [vision/README.md](./vision/README.md) |
+| **Purpose** | What Steno is for, the lead use cases in detail, where it fits, and what it offers systems built on it | [purpose/README.md](./purpose/README.md) |
 | **Concepts** | The ideas, without implementation: the graph, witnesses and facets, identity, what "accurate" means | [concepts/README.md](./concepts/README.md) |
 | **How it works** | The implementation: the ingestion pipeline stage by stage, rules and resolvers, the graph schema, MCP, storage | [how-it-works/README.md](./how-it-works/README.md) |
 | **Plan** | Where we are and where we're going: onboarding, the POC and its exit criteria, v1 and v2, every decision and open question | [plan/README.md](./plan/README.md) |

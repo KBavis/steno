@@ -1,18 +1,18 @@
 # Steno
 
-An organization-wide context engine for AI agents. It ingests repositories into a layered knowledge graph (Organization → Space → Application) and exposes it over MCP. It's the architecture pillar of a larger Context Layer for an agent-first SDLC.
+An organization-wide context engine for AI agents. It ingests repositories into a layered knowledge graph (Organization → Space → Application) and exposes it over MCP. It answers "what is" about an organization's software; the larger context layer and agent-first SDLC it will feed are designed in a separate project (D98).
 
 ## Start here
 
-- **`docs/` is the source of truth. Start at `docs/README.md`.** It has four sections, each with a hub page (`README.md`) that summarizes it and links deeper: `docs/vision/` (why, the Context Layer, projects), `docs/concepts/` (the graph, witnesses and facets, identity, trust), `docs/how-it-works/` (architecture, ingestion stage by stage, rules, resolvers, graph schema, MCP, storage, security), `docs/plan/` (roadmap, onboarding, decisions).
-- Every design point is marked **Decided**, **Proposed**, or **Open**, and scoped `POC`, `v1`, or `v2`. The decision log is `docs/plan/decisions.md` (D1–D97 and open questions). Follow Decided items; raise Proposed or Open items with the user before relying on them. Design choices belong to the user.
+- **`docs/` is the source of truth. Start at `docs/README.md`.** It has four sections, each with a hub page (`README.md`) that summarizes it and links deeper: `docs/purpose/` (what Steno is for, lead use cases, where it fits, integration contract), `docs/concepts/` (the graph, witnesses and facets, identity, trust), `docs/how-it-works/` (architecture, ingestion stage by stage, rules, resolvers, graph schema, MCP, storage, security), `docs/plan/` (roadmap, onboarding, decisions).
+- Every design point is marked **Decided**, **Proposed**, or **Open**, and scoped `POC`, `v1`, or `v2`. The decision log is `docs/plan/decisions.md` (D1–D98 and open questions). Follow Decided items; raise Proposed or Open items with the user before relying on them. Design choices belong to the user.
 - Reference pages: the node and edge vocabulary is `docs/how-it-works/graph-reference.md` (§3–4); the rule format is `docs/how-it-works/ingestion/rules-and-packs.md`; the Postgres tables are `docs/how-it-works/storage.md`.
 - `docs/next-steps.md` is a local, gitignored working list; never link it from tracked files. `docs/my_docs/` is the user's personal notes (gitignored).
 - Docs are Markdown only, layered: a short "In one minute" summary and a diagram at the top of each page, detail in linked sub-pages.
 
 ## Current stage
 
-**Proof of concept, stage A** (`docs/plan/roadmap.md`): application identity (Steno IDs, the name ladder), application kinds, witness types on facts, a completeness block in MCP answers, the reconcile design, and a scored question set compared against an agent without Steno. Then B (a stub organization exercising every facet), C (spring-petclinic-microservices), D (our organization). Accuracy of MCP answers is the bar. Jev and runtime evidence are `v2`; decisions use stand-ins.
+**Proof of concept, stage A** (`docs/plan/roadmap.md`): application identity (Steno IDs, the name ladder), application kinds, witness types on facts, a completeness block in MCP answers, the reconcile design, and a scored question set compared against an agent without Steno. Then B (a stub organization exercising every facet), C (spring-petclinic-microservices), D (our organization). Accuracy of MCP answers is the bar, and a feature belongs in Steno only if a use case in `docs/purpose/use-cases.md` needs it. Jev and runtime evidence are `v2`; decisions use stand-ins.
 
 ## Repository layout
 

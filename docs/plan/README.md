@@ -23,7 +23,7 @@ flowchart LR
 |---|---|
 | [Roadmap](./roadmap.md) | The POC stages with scope and exit criteria, how accuracy is measured, v1, v2, and risks |
 | [Onboarding](./onboarding.md) | The nine-step flow every organization goes through, and what the UI is for |
-| [Decisions](./decisions.md) | Every numbered decision (D1–D97) and the open questions |
+| [Decisions](./decisions.md) | Every numbered decision (D1–D98) and the open questions |
 | [Later](./later/README.md) | Parked designs: Jev, runtime evidence, frontends, data schemas, the UI's long-term vision |
 
 ## Stage A, in order
@@ -33,4 +33,4 @@ flowchart LR
 3. **Witness type and sources on every fact** (CODE today) ([Witnesses and facets](../concepts/witnesses-and-facets.md)).
 4. **Completeness block** on impact and dependents answers ([Trust](../concepts/trust.md#5-what-an-agent-sees)).
 5. **Reconcile technical design**, ready before stage B ([Identify and reconcile](../how-it-works/ingestion/identify-and-reconcile.md)).
-6. **Question set** for budgeting-app and Contextualized, scored, with the comparison without Steno ([Roadmap §4](./roadmap.md#4-evaluation)).
+6. **Question set** drawn from the [lead use cases](../purpose/use-cases.md#lead-use-cases-in-detail), for budgeting-app and Contextualized, scored, with the comparison without Steno ([Roadmap §4](./roadmap.md#4-evaluation)).

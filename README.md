@@ -45,7 +45,7 @@ Connect an agent: `claude mcp add --transport http steno http://localhost:8000/m
 
 ## Relationship to Contextualized
 
-[Contextualized](https://github.com/KBavis/contextualized) gives agents context scoped to a single Project: what that Project changed, and why. Steno supplies the wider view: how those changes fit into the rest of the organization. Steno works on its own. Contextualized will later attribute Steno's deltas to the Projects that caused them; see [Projects](docs/vision/projects.md).
+[Contextualized](https://github.com/KBavis/contextualized) gives agents context scoped to a single Project: what that Project changed, and why. Steno supplies the wider view: how those changes fit into the rest of the organization. Steno works on its own. Contextualized will later attribute Steno's deltas to the Projects that caused them; see [Projects](docs/purpose/integration.md).
 
 ## Documentation
 
@@ -53,7 +53,7 @@ Start at **[docs/README.md](docs/README.md)**. Each section has a hub page that 
 
 | Section | Covers |
 |---|---|
-| [Vision](docs/vision/README.md) | The Context Layer, Steno as its architecture pillar, projects past/ongoing/future, use cases |
+| [Purpose](docs/purpose/README.md) | What Steno is for, the lead use cases, where it fits, what it offers other systems |
 | [Concepts](docs/concepts/README.md) | The graph, witnesses and facets, identity, trust |
 | [How it works](docs/how-it-works/README.md) | Architecture, the ingestion pipeline, rules and resolvers, the graph schema, MCP, storage, security |
 | [Plan](docs/plan/README.md) | Roadmap (POC, v1, v2), onboarding, decisions and open questions |

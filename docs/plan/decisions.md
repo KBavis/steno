@@ -4,7 +4,7 @@ Every numbered design decision, and the questions still open. Part of [Plan](./R
 
 > **In one minute**
 > - **Decided** items are agreed: build on them. **Proposed** items need confirmation before relying on them. **Open** items aren't decided.
-> - D1–D74 date from the original design (October 2026). **D75–D97** come from the architecture-pillar review (2026-10-07 to 10-10): the Context Layer, witnesses and facets, application identity, kinds, onboarding, and the POC → v1 → v2 scope.
+> - D1–D74 date from the original design (October 2026). **D75–D98** come from the architecture review (2026-10-07 to 10-10): Steno's boundaries, witnesses and facets, application identity, kinds, onboarding, and the POC → v1 → v2 scope.
 > - Where a later decision changes an earlier one, the earlier row says so ("revised by", "refined by", "deferred by").
 > - A design choice belongs to the project owner. A new decision gets the next number and a row here, and the pages it affects are updated.
 
@@ -39,7 +39,7 @@ Every numbered design decision, and the questions still open. Part of [Plan](./R
 | D25 | Rule packs, auto-enabled from dependencies, plus a coverage report after every ingestion. Phase 1 rules are hand-written; templates and LLM-drafted rules are deferred. | Decided |
 | D26 | Measure first: Phase 1 opens with a no-LLM dry run and a cost/time projection | Decided |
 | D27 | Spaces are defined by admins; no automatic space proposals | Decided |
-| D28 | Glossary is human-declared in V1. Deriving it from docs and product knowledge comes with the Contextualized integration. | Decided |
+| D28 | Glossary is human-declared for now. Deriving it from docs and product knowledge comes with the Contextualized integration. | Decided |
 | D29 | Citations in every MCP result (V1) | Decided |
 | D30 | A connector is a source system + scope. Repositories: explicit include list in Phase 1, discovery later. | Decided; revised by D77 |
 | D31 | *(L2/L3 revised by D60.)* Flow levels: L0 headline, L1 signature (deterministic) + narrative (LLM), L2 `Step` nodes (`FIRST_STEP` / `NEXT` / `SUBSTEP`, each `RUNS` a function), L3 code nodes. One rendered flow card per flow. | Decided |
@@ -86,7 +86,7 @@ Every numbered design decision, and the questions still open. Part of [Plan](./R
 | D72 | **The Java resolver supplies Lombok-generated members** (`@Getter`, `@Setter`, `@Data`, `@Value`, `@Builder`, the constructor annotations) itself, since JavaParser doesn't run annotation processors. | Decided |
 | D73 | **Declarative and generated HTTP clients.** Clients whose source is in the repository (Feign, `@HttpExchange`) get `CALLS` on the interface method itself, so callers' flows step into the call. Clients whose source isn't (generated OpenAPI clients, internal SDKs) use the `client` clue extended with `calls` (method → `{method, path}`) and `base`. | Decided |
 | D74 | **Inferred entry points.** Inside an application, a function that nothing in the repository calls and no rule starts, but that does real work (an effect at or below it), starts a flow of its own: named "Background work · Class.method", `trigger_kind: inferred`, `inferred: true`, confidence 0.5, no `STARTS` edge. It's also a coverage item (**unknown triggers**) until a rule names its trigger. Not inferred: code outside every application (scripts, tooling), code in another language than its module, methods the language calls itself (`__enter__`, `toString`), and an uncalled method of a class the known flows already use (dead code; it stays under unreachable code). | Decided |
-| D75 | **Steno is the architecture pillar of the Context Layer** ([vision](../vision/context-layer.md)). Only providers (code, files about the system, other systems' data, admins) write to Steno; SDLC phases write to the project pillars and link by ID. Steno is not a system of record, never asks an organization to change its repositories, and leaves constraints, standards, SLAs, test conventions, and plans to other pillars, attached to its scopes by ID. | Decided |
+| D75 | **Steno is the architecture piece of a larger context layer** ([where Steno fits](../purpose/where-steno-fits.md)); narrowed by D98 to Steno's own boundaries. Only providers (code, files about the system, other systems' data, admins) write to Steno; SDLC phases write to the project pillars and link by ID. Steno is not a system of record, never asks an organization to change its repositories, and leaves constraints, standards, SLAs, test conventions, and plans to other pillars, attached to its scopes by ID. | Decided |
 | D76 | **Witness types are kinds of claim, decided by what consumes the information:** CODE (the running app: source, its own config, its build), PLATFORM (infrastructure applies it: deploy definitions, topics and ACLs, schedulers, gateways, artifact repositories, from a repository or an API), DECLARED (only describes: manifests, catalogs, CODEOWNERS, hand-written specs), ADMIN (entered in Steno), OBSERVED (runtime, `v2`). Where it's stored (connector), how it's read (rule or adapter), and what kind of claim it is (witness) are separate questions. Each provider states its witness type; generated sources (a spec built from code) aren't independent. ([witnesses and facets](../concepts/witnesses-and-facets.md)) | Decided |
 | D77 | **Anything stored in a repository comes through the git connector.** New connectors are only for systems reached through an API (`v1`): an adapter takes snapshots, turns them into claims, and stores them with an as-of time. Revises D30. | Decided |
 | D78 | **One system read two ways is one witness.** The XLD repository and the XLD server are both PLATFORM: merged, never two votes; differences are drift, reported separately. The POC reads the XLD repository through git. | Decided |
@@ -108,7 +108,8 @@ Every numbered design decision, and the questions still open. Part of [Plan](./R
 | D94 | **Scope is POC → v1 → v2.** The POC is stages 0 and A–D ([roadmap](./roadmap.md)), replacing the old Phase 1–3 plan. Jev (routing, verification, ingestion decisions) and runtime evidence are `v2`, with stand-ins until then. Refines D55. | Decided |
 | D95 | **Evaluation:** every POC stage is measured with a question set (expected answers written first; correctness, tool calls, honesty about gaps) and the same questions answered by an agent without Steno. | Decided |
 | D96 | **Catalogs (Backstage, Cortex) are providers, not competitors.** No pivot: catalogs answer who owns a service and whether it meets standards; Steno answers what it does and what a change affects. Where an organization has one, it's a DECLARED provider for Components, Structure, and later Ownership (`v1`). Steno doesn't build catalog features (ownership UIs, scorecards, on-call). | Decided |
-| D97 | **Projects across time** ([projects](../vision/projects.md)): ongoing and future projects record planned touches as Steno IDs (including planned IDs for things not built yet), enabling conflict detection between in-flight projects, protection of planned work, ordering bodies of work, and planned-vs-actual checks. | Proposed |
+| D97 | **Projects across time** ([projects](../purpose/integration.md)): ongoing and future projects record planned touches as Steno IDs (including planned IDs for things not built yet), enabling conflict detection between in-flight projects, protection of planned work, ordering bodies of work, and planned-vs-actual checks. | **Moved out of Steno by D98** (to the separate context-layer project) |
+| D98 | **Steno's scope is driven by its use cases; the larger vision lives elsewhere.** The context layer and agent-first SDLC (how Steno, Contextualized, standards, and constraints combine, and the SDLC workflows on top) are designed in a separate project. Steno's docs cover its purpose, lead use cases, concepts, implementation, and plan, plus the contract it offers other systems ([integration](../purpose/integration.md)): stable and planned IDs, scopes, change history, attribution hooks, MCP. A feature belongs in Steno only if a use case needs it. Narrows D75; moves D97 out. | Decided |
 
 ## Open questions
 
@@ -140,7 +141,7 @@ Every numbered design decision, and the questions still open. Part of [Plan](./R
 - [ ] Embeddings model
 - [ ] Cost budget for the initial ingestion of a large organization
 - [ ] Who builds the gold set and question set for a client, and how
-- [ ] Whether the Contextualized integration is `v1` or `v2`
+- [ ] Whether the Contextualized integration (attribution) is `v1` or `v2`
 
 **`v2`**
 - [ ] Jev: calibration on our data

@@ -96,7 +96,7 @@ A **facet** is one fixed question with a fixed answer shape, defined once by Ste
 
 **Frameworks aren't a facet.** An organization's in-house frameworks don't describe the architecture; they're how the CODE witness learns to read the organization. An internal messaging library is taught with a sender rule, a receiver rule, and its shared key (D61), in an org rule pack.
 
-**Constraints and standards aren't facets.** Facets describe what *is*; constraints describe what *should be*. They belong to other pillars of the [Context Layer](../vision/context-layer.md), attached to Steno's scopes by ID.
+**Constraints and standards aren't facets.** Facets describe what *is*; constraints describe what *should be*. They live in other systems, which attach them to Steno's scopes by ID ([Where Steno fits](../purpose/where-steno-fits.md)).
 
 ## 4. Which witness answers which facet
 

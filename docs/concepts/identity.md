@@ -7,7 +7,7 @@ How every application gets one permanent identity and the name the organization 
 > - Each application has four parts: a permanent **Steno ID**, a **canonical name** (the name it's deployed as, used for matching), a **display name**, and **aliases** (every other name a source states).
 > - The canonical name is found with a **name ladder**: admin, then the deploy name, then the manifest, then the build artifact name, then the runtime self-name, then the folder (provisional).
 > - Each nightly run matches deployables by **canonical name or location**. Unmatched → new ID. Not seen → removed (and restored if it comes back). Admins can declare renames.
-> - Everything under an application (endpoints, flows) is built on its Steno ID, so other pillars can depend on it.
+> - Everything under an application (endpoints, flows) is built on its Steno ID, so other systems can depend on it.
 >
 > Status: **Decided** (2026-10-10). Scope: `POC` stage A. Not built yet: today application IDs come from folder names (see §8).
 

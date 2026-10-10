@@ -67,7 +67,7 @@ For our organization's application and its neighbors:
 
 | Measure | How |
 |---|---|
-| **Question set** | 10–15 questions per target, expected answers written first: find a flow ("what happens when a budget is created?"), dependents ("what reads or writes `transactions`?"), triggers ("how do I start flow X?"), scheduled work, where logic lives. Scored on correctness, tool calls (from `tool_call`), and whether gaps were stated. |
+| **Question set** | 10–15 questions per target, **drawn from the [lead use cases](../purpose/use-cases.md#lead-use-cases-in-detail)**, expected answers written first: find a flow ("what happens when a budget is created?"), dependents ("what reads or writes `transactions`?"), triggers ("how do I start flow X?"), scheduled work, where logic lives. Scored on correctness, tool calls (from `tool_call`), and whether gaps were stated. |
 | **Comparison without Steno** | The same questions to Claude Code with the repositories checked out and no Steno. Expect a small gap on one application and a large one across services. |
 | **Gold set** | Hand-labeled endpoints, topics, outbound calls, data access, and 10–20 key flows for one application. Precision and recall per fact type; flow step accuracy. |
 | **Known graph** | The stub organization's correct graph, written by us |
@@ -89,11 +89,11 @@ For our organization's application and its neighbors:
 
 ## 6. v2 and later
 
-See [Later](./later/README.md): Jev, runtime evidence (OBSERVED), frontends, data store schemas (Data V2), Ownership and Environments facets, the Contextualized integration and project-aware planning, entity-anchor retrieval, rule generation from templates, visualization enhancements.
+See [Later](./later/README.md): Jev, runtime evidence (OBSERVED), frontends, data store schemas (Data V2), Ownership and Environments facets, the Contextualized integration (attribution), entity-anchor retrieval, rule generation from templates, visualization enhancements.
 
 ## 7. Not planned
 
-- **Building the tools that use the context** (test generators, CI bots, incident copilots): agents and workflows build those on top ([use cases](../vision/use-cases.md#scope-boundary)).
+- **Building the tools that use the context** (test generators, CI bots, incident copilots): agents and workflows build those on top ([use cases](../purpose/use-cases.md#scope-boundary)).
 - **Version history and time travel** beyond the change log (`fact_change`) and tombstones.
 - **Replacing a catalog or CMDB** (D96).
 - **Requiring anything of an organization's repositories** (D75).

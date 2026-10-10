@@ -1,6 +1,6 @@
 # Trust
 
-What "accurate" means for Steno, and how it's achieved and measured. In an agent-first SDLC, a confidently wrong answer is the worst outcome: an impact analysis that leaves out a consumer leads straight to a broken release.
+What "accurate" means for Steno, and how it's achieved and measured. When agents act on Steno's answers, a confidently wrong answer is the worst outcome: an impact analysis that leaves out a consumer leads straight to a broken release.
 
 > **In one minute**
 > - **Deterministic first:** rules produce facts; nothing is guessed silently; an LLM only writes text.
@@ -88,7 +88,7 @@ find_dependents(payment.settled, downstream)
 
 | Measure | What it checks | Status |
 |---|---|---|
-| **Question set** | 10–15 questions per target with expected answers, written before asking: find a flow, dependents, how to trigger, scheduled work, where code lives. Scored on correctness, tool calls (≤ 3), and honesty about gaps. | `POC` stage A |
+| **Question set** | 10–15 questions per target, drawn from the [lead use cases](../purpose/use-cases.md#lead-use-cases-in-detail), with expected answers written before asking: find a flow, dependents, how to trigger, scheduled work, where code lives. Scored on correctness, tool calls (≤ 3), and honesty about gaps. | `POC` stage A |
 | **Comparison without Steno** | The same questions answered by an agent with the repositories checked out and no Steno | `POC` stage A, then each stage |
 | **Gold set** | Hand-labeled endpoints, topics, outbound calls, data access, and key flows for one application; precision and recall per fact type | `POC` |
 | **Known-graph check** | The stub organization is written by us, so its correct graph is known exactly | `POC` stage B |

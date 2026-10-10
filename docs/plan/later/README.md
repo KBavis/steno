@@ -5,7 +5,7 @@ Designs that are parked until the POC and v1 prove out. Each is kept so the work
 > **In one minute**
 > - **Jev** (a fast, calibrated decision model) for routing, verification, and ingestion decisions: designed in detail, `v2`. Stand-ins until then.
 > - **Runtime evidence** (OBSERVED): traces and logs as a witness, mostly to check the static graph. `v2`.
-> - **Frontends, data store schemas, ownership, environments, project-aware planning:** `v2`, each with a hook kept now.
+> - **Frontends, data store schemas, ownership, environments:** `v2`, each with a hook kept now. Project-aware planning moved to the separate context-layer project (D98).
 
 | Item | What it adds | Hook kept now | Scope |
 |---|---|---|---|
@@ -15,7 +15,7 @@ Designs that are parked until the POC and v1 prove out. Each is kept so the work
 | **Data V2** | Columns, constraints, relationships, purpose; a read-only database catalog; migrations replayed into a temporary database | `Table` stubs, `:Migrations` modules | `v2` |
 | **Ownership** | `Team` nodes from CODEOWNERS, manifests, catalogs, HR directories | Manifest team fields can be read as aliases now | `v2` |
 | **Environments** | What's deployed where, on which servers, with what resources; matching a production stack trace to the commit that produced it | Deploy names are already PLATFORM name sources | `v2` |
-| **Project-aware planning** | Conflicts between in-flight projects, protecting planned work, ordering bodies of work, planned vs. actual ([projects](../../vision/projects.md)) | Stable and planned IDs (stage A); `fact_change` | `v1`/`v2` |
+| **Project-aware planning** | Moved out of Steno (D98) to the separate context-layer project. Steno provides what it needs: [integration](../../purpose/integration.md). | Stable and planned IDs (stage A); `fact_change` | Elsewhere |
 | **Entity anchors** | Retrieval from a question's nouns and verbs to flows that perform that operation on those entities | `USES_ENTITY`, `MAPS_TO` | `v2` |
 | **Rule generation from templates** | Coverage items turned into rules by filling in a form | The coverage report and its triage | `v2` ([coverage report §4](../../how-it-works/ingestion/coverage-report.md#4-turning-a-coverage-item-into-a-rule-deferred)) |
 

@@ -133,4 +133,4 @@ An in-code `@Scheduled` method is a trigger, not an application kind. An applica
 | `Team` (ownership), `Environment` (what's deployed where, on what) | `v2` |
 | Columns, constraints, and purpose for tables (data store schemas) | `v2` |
 | Frontend applications and UI routes | `v2` |
-| `Project` nodes linked by `CHANGED` edges | With the [Contextualized integration](../vision/projects.md) |
+| `Project` nodes linked by `CHANGED` edges | With the [Contextualized integration](../purpose/integration.md) |

@@ -125,7 +125,7 @@ Other points:
 | `ExternalSystem` | Organization | `host`, `name`, `called_from` (when the host is unknown) | Vendor and third-party APIs. Keyed by host, or by service name when an [HTTP signature](./ingestion/rules-and-packs.md#http-signatures-decided-d64) recognizes the host. |
 | `KafkaCluster` (and other brokers) | Organization | `name` | Infrastructure, attached with `HOSTED_ON`. Not built: topics are keyed by name alone today. |
 
-Later (`v2`): `Team` (the Ownership facet), `Environment` (the Environments facet), `Project` (the [Contextualized integration](../vision/projects.md)). A node type is added only together with the facet that feeds it ([Witnesses and facets](../concepts/witnesses-and-facets.md)).
+Later (`v2`): `Team` (the Ownership facet), `Environment` (the Environments facet), `Project` (the [Contextualized integration](../purpose/integration.md)). A node type is added only together with the facet that feeds it ([Witnesses and facets](../concepts/witnesses-and-facets.md)).
 
 ### Trace entries
 
