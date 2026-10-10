@@ -241,16 +241,20 @@ def coverage(ctx: JobContext) -> dict[str, Any]:
 
 
 def _application_of(ctx: JobContext) -> Any:
-    """The application a file belongs to: its service module's, else the repository itself
-    (library code, scripts)."""
+    """The application a file belongs to: its service module's. Code outside every service
+    (scripts, shared libraries, tooling) belongs to the repository's application when it has
+    exactly one, and to none otherwise: it's still in the repository's items, but it isn't an
+    application of its own."""
     structure = ctx.state["structure"]
     repo = ctx.repository.name
+    services = [m for m in structure.modules if "Service" in m.roles]
+    only = str(structure.application_name(repo, services[0])) if len(services) == 1 else ""
 
     def app_of(file: str | None) -> str:
         module = structure.module_of(file) if file else None
         if module is not None and "Service" in module.roles:
             return str(structure.application_name(repo, module))
-        return repo
+        return only
 
     return app_of
 

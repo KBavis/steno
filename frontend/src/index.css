@@ -1128,6 +1128,23 @@ textarea {
   font-weight: 550;
 }
 
+.coverage-caret {
+  color: var(--text-2);
+  transition: transform 0.15s;
+}
+
+.coverage-subrow td {
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+}
+
+.coverage-subrow td:first-child {
+  padding-left: 48px;
+}
+
+.coverage-subrow .coverage-row-name {
+  font-weight: 450;
+}
+
 .coverage-pct {
   display: inline-flex;
   align-items: center;

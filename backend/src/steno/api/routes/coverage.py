@@ -55,6 +55,8 @@ def report(session: SessionDep, scope: str = "org") -> dict[str, Any]:
         metrics = stage.metrics or {}
         per_app = metrics.get("applications") or {repo.name: metrics}
         for name, numbers in per_app.items():
+            if name == repo.name and len(per_app) > 1:
+                continue  # code outside every application (runs before this was split out)
             apps[name] = {
                 "name": name,
                 "space": repo.space_id,
@@ -66,6 +68,7 @@ def report(session: SessionDep, scope: str = "org") -> dict[str, Any]:
             }
 
     kind, _, key = scope.partition(":")
+    wanted: int | None = None
     if kind == "org":
         in_scope = set(apps)
     elif kind == "space":
@@ -80,7 +83,14 @@ def report(session: SessionDep, scope: str = "org") -> dict[str, Any]:
     else:
         raise HTTPException(422, "scope is org, space:<id>, or app:<name>")
 
-    items = _items(session, latest, repos, apps, spaces, in_scope)
+    def repo_in_scope(repo: Repository) -> bool:
+        if kind == "org":
+            return True
+        if kind == "space":
+            return _within(repo.space_id, wanted, spaces)
+        return False
+
+    items = _items(session, latest, repos, apps, spaces, in_scope, repo_in_scope)
     open_by_app: dict[str, int] = defaultdict(int)
     for it in items:
         if it["status"] == "unexplained":
@@ -103,10 +113,26 @@ def report(session: SessionDep, scope: str = "org") -> dict[str, Any]:
         }
 
     children = _children(kind, key, apps, spaces, in_scope)
-    rows = [{**c, **rollup(c.pop("apps"))} for c in children if c["apps"]]
-    rows.sort(
-        key=lambda r: (r["io_explained_pct"] is None, r["io_explained_pct"] or 0, -r["open_items"])
-    )
+
+    def worst(r: dict[str, Any]) -> tuple[bool, float, int]:
+        return (r["io_explained_pct"] is None, r["io_explained_pct"] or 0, -r["open_items"])
+
+    rows = []
+    for c in children:
+        names = c.pop("apps")
+        if not names:
+            continue
+        row = {**c, **rollup(names)}
+        if c["kind"] == "space":  # its applications, for the row's dropdown
+            row["application_rows"] = sorted(
+                (
+                    {"scope": f"app:{n}", "kind": "application", "label": n, **rollup({n})}
+                    for n in names
+                ),
+                key=worst,
+            )
+        rows.append(row)
+    rows.sort(key=worst)
     return {
         "scope": scope,
         "breadcrumbs": _breadcrumbs(kind, key, apps, spaces),
@@ -136,6 +162,7 @@ def _items(
     apps: dict[str, dict[str, Any]],
     spaces: dict[int, Space],
     in_scope: set[str],
+    repo_in_scope: Any,
 ) -> list[dict[str, Any]]:
     """Items in the scope, grouped by what they're about across repositories, ranked by reach:
     applications, then spaces, then occurrences."""
@@ -144,9 +171,12 @@ def _items(
     statuses: dict[tuple[str, str], list[str]] = defaultdict(list)
     for it in session.scalars(select(CoverageItem).where(CoverageItem.job_id.in_(jobs))):
         repo = repos[jobs[it.job_id]]
-        where = it.applications or {repo.name: it.occurrences}
+        where = {a: n for a, n in (it.applications or {}).items() if a in apps}
         here = {a: n for a, n in where.items() if a in in_scope}
-        if not here:
+        # Code outside every application (scripts, tooling): listed at the organization and
+        # in its repository's spaces, under no application
+        outside = not where and repo_in_scope(repo)
+        if not here and not outside:
             continue
         key = (it.kind.value, it.target_symbol)
         g = grouped.setdefault(
@@ -161,7 +191,7 @@ def _items(
                 "samples": [],
             },
         )
-        g["occurrences"] += sum(here.values())
+        g["occurrences"] += sum(here.values()) if here else it.occurrences
         for a, n in sorted(here.items()):
             space = apps[a]["space"]
             g["applications"].append(

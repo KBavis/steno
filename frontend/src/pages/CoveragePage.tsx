@@ -1,5 +1,5 @@
 import { AppWindow, ArrowUpRight, ChevronRight, Layers, ScanSearch } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { api, type CoverageItem, type CoverageRow, type CoverageSignal, type CoverageStatus } from '../api/client'
 import { EmptyState, ErrorAlert, PageHeader } from '../components/ui'
 import { usePoll } from '../hooks/usePoll'
@@ -18,6 +18,10 @@ const SIGNALS: Record<CoverageSignal, { label: string; help: string }> = {
   library: {
     label: 'Uncovered libraries',
     help: 'I/O libraries the code imports that no rule pack covers. A pack (or an org rule) for it would explain its calls.',
+  },
+  unresolved_type: {
+    label: 'Missing library types',
+    help: "Calls where a flow stopped because a value's type comes from a library Steno can't see (no dependency JARs yet), one item per library. The biggest ones say which JARs would help most.",
   },
   unreachable_effect: {
     label: 'Unreachable code',
@@ -68,6 +72,14 @@ export function CoveragePage() {
   const [busy, setBusy] = useState<string>()
   const [actionError, setActionError] = useState<string>()
   const [sort, setSort] = useState<{ key: SortKey; asc: boolean }>({ key: 'io_explained_pct', asc: true })
+  const [unfolded, setUnfolded] = useState<Set<string>>(new Set())
+  const toggleRow = (scope: string) =>
+    setUnfolded((cur) => {
+      const next = new Set(cur)
+      if (next.has(scope)) next.delete(scope)
+      else next.add(scope)
+      return next
+    })
 
   const items = useMemo(() => data?.items ?? [], [data])
   const matchesStatus = useCallback(
@@ -153,7 +165,7 @@ export function CoveragePage() {
             <>
               <div className="section-title">
                 <h2>{scope === 'org' ? 'Spaces' : 'In this space'}</h2>
-                <span className="muted small">worst first · click a row to drill in</span>
+                <span className="muted small">worst first · click a space to see its applications</span>
               </div>
               <div className="card coverage-table-wrap">
                 <table className="coverage-table">
@@ -167,20 +179,48 @@ export function CoveragePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((r) => (
-                      <tr key={r.scope} className="clickable" onClick={() => goScope(r.scope)}>
-                        <td>
-                          <span className="coverage-row-name">
-                            {r.kind === 'space' ? <Layers size={14} /> : <AppWindow size={14} />}
-                            {r.label}
-                          </span>
-                        </td>
-                        <td><Pct value={r.io_explained_pct} /></td>
-                        <td><Pct value={r.reachable_pct} /></td>
-                        <td className="num">{r.open_items}</td>
-                        <td className="num">{r.applications}</td>
-                      </tr>
-                    ))}
+                    {rows.map((r) => {
+                      const apps = r.application_rows ?? []
+                      const isOpen = unfolded.has(r.scope)
+                      return (
+                        <Fragment key={r.scope}>
+                          <tr
+                            className="clickable"
+                            aria-expanded={r.kind === 'space' ? isOpen : undefined}
+                            onClick={() => (r.kind === 'space' && apps.length ? toggleRow(r.scope) : goScope(r.scope))}
+                          >
+                            <td>
+                              <span className="coverage-row-name">
+                                {r.kind === 'space' ? (
+                                  <ChevronRight size={14} className="coverage-caret" style={{ transform: isOpen ? 'rotate(90deg)' : undefined }} />
+                                ) : null}
+                                {r.kind === 'space' ? <Layers size={14} /> : <AppWindow size={14} />}
+                                {r.label}
+                              </span>
+                            </td>
+                            <td><Pct value={r.io_explained_pct} /></td>
+                            <td><Pct value={r.reachable_pct} /></td>
+                            <td className="num">{r.open_items}</td>
+                            <td className="num">{r.applications}</td>
+                          </tr>
+                          {isOpen &&
+                            apps.map((a) => (
+                              <tr key={a.scope} className="clickable coverage-subrow" onClick={() => goScope(a.scope)}>
+                                <td>
+                                  <span className="coverage-row-name">
+                                    <AppWindow size={14} />
+                                    {a.label}
+                                  </span>
+                                </td>
+                                <td><Pct value={a.io_explained_pct} /></td>
+                                <td><Pct value={a.reachable_pct} /></td>
+                                <td className="num">{a.open_items}</td>
+                                <td className="num muted">—</td>
+                              </tr>
+                            ))}
+                        </Fragment>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -222,9 +262,12 @@ export function CoveragePage() {
                 {shown.map((i) => {
                   const key = `${i.kind}|${i.target}`
                   const expanded = open === key
+                  const places = `${i.occurrences} ${i.occurrences === 1 ? 'place' : 'places'}`
                   const reach = isApp
-                    ? `${i.occurrences} ${i.occurrences === 1 ? 'place' : 'places'}`
-                    : `${i.applications.length} ${i.applications.length === 1 ? 'application' : 'applications'} · ${i.spaces} ${i.spaces === 1 ? 'space' : 'spaces'} · ${i.occurrences} ${i.occurrences === 1 ? 'place' : 'places'}`
+                    ? places
+                    : i.applications.length === 0
+                      ? `outside any application (scripts, tooling) · ${places}`
+                      : `${i.applications.length} ${i.applications.length === 1 ? 'application' : 'applications'} · ${i.spaces} ${i.spaces === 1 ? 'space' : 'spaces'} · ${i.occurrences} ${i.occurrences === 1 ? 'place' : 'places'}`
                   return (
                     <li key={key}>
                       <div className={`list-row clickable ${expanded ? 'selected' : ''}`} onClick={() => setOpen(expanded ? undefined : key)}>

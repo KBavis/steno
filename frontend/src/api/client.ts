@@ -84,7 +84,7 @@ export interface JobDetail extends Job {
 // ---------------------------------------------------------------- coverage
 
 export type CoverageStatus = 'unexplained' | 'ignored' | 'explained'
-export type CoverageSignal = 'unknown_host' | 'external_call' | 'library' | 'unreachable_effect' | 'dropped_match' | 'unparsed'
+export type CoverageSignal = 'unknown_host' | 'external_call' | 'library' | 'unreachable_effect' | 'dropped_match' | 'unparsed' | 'unresolved_type'
 
 export interface CoverageSample {
   file?: string | null
@@ -122,6 +122,8 @@ export interface CoverageRow extends CoverageNumbers {
   scope: string
   kind: 'space' | 'application'
   label: string
+  /** A space's applications, worst first, for its dropdown */
+  application_rows?: CoverageRow[]
 }
 export interface CoverageReport {
   scope: string
