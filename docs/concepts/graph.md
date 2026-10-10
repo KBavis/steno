@@ -4,7 +4,8 @@ How Steno models an organization: three layers to zoom through, two kinds of nod
 
 > **In one minute**
 > - **Three layers:** Organization → Space → Application. Applications are ingested; spaces and the organization are rolled up from them.
-> - **Two kinds of nodes in one graph:** architecture nodes (what the software *does*: applications, interfaces, flows, tables) and code nodes (how it's *built*: repositories, modules, files). Search covers only architecture nodes.
+> - **Two kinds of nodes in one graph:** architecture nodes (what the software *does*: applications, interfaces, flows, steps, tables, data stores, external systems) and code nodes (how it's *built*: repositories, modules, files). Functions are neither: each flow stores the ordered list of functions it runs (its trace).
+> - **Search** covers the architecture nodes that carry cards (flows, applications, spaces, the organization, interfaces, entities, tables) plus function names inside traces, which lead back to their flow. Code nodes aren't searched; any node can still be opened by name with `get_node`.
 > - **Interfaces are nodes.** Two applications are connected when one sends to an interface the other receives on: a topic, an endpoint, a table. No one declares the connection; it falls out of shared keys.
 > - **A flow** is a trigger plus everything its entry function reaches, as ordered steps, with a trace of every function it runs.
 >
@@ -52,9 +53,11 @@ Organization
 
 | | Architecture nodes | Code nodes |
 |---|---|---|
-| Kinds | Organization, Space, Application, Interface, Flow, Step, Entity, DataStore, Table, ExternalSystem | Repository, Module, File |
-| Answers | What exists, what it does, what it touches | Exactly what code runs at each step |
-| Searched | Always (routing, cards, search run only here) | Only after narrowing to one flow |
+| Kinds | Organization, Space, Application, Interface, Schedule, Flow, Step, Entity, DataStore, Table, ExternalSystem | Repository, Module, File |
+| Answers | What exists, what it does, what it touches | Where the code lives and how it's organized |
+| Searched | Flows, applications, spaces, the organization, interfaces, entities, and tables (the nodes with cards). Not steps, schedules, data stores, or external systems. | Never directly |
+
+**What search covers, exactly.** Search looks at the names (and, later, cards) of the searchable architecture nodes, **plus function names inside every flow's trace**: searching `create_job` returns the flows that run it. Code nodes aren't searched, and nor are steps, schedules, data stores, or external systems, though any node can be opened by name or ID with `get_node`. Whether data stores and external systems should be searchable is an open question ([decisions](../plan/decisions.md#open-questions)).
 
 **Functions are not nodes (D60).** The call graph is built in memory during each run and discarded. What survives is each flow's **trace**: the ordered list of functions it runs, with file and lines. A refactor that changes no behavior writes no graph nodes.
 
@@ -111,6 +114,8 @@ A flow is described at four levels:
 ## 5. Application kinds
 
 An application is still one node type, with **labels for its kinds**, worked out from the triggers of its flows (Decided). Labels aren't exclusive: a typical Spring service has endpoints, listeners, and a scheduled method.
+
+Decided (D85); not built yet (POC stage A).
 
 | Label | Means | Known from |
 |---|---|---|

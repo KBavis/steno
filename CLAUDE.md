@@ -32,7 +32,7 @@ Run from the repo root (see `Makefile`): `make up`, `make migrate`, `make graph-
 
 ## Key decisions to keep in mind
 
-- **One Neo4j graph** with **architecture nodes** (what the software does: applications, interfaces, flows, steps, tables) and **code nodes** (how it's built: repository, module, file), joined by `BUILT_FROM`. Functions aren't nodes: each flow stores its trace (D60). Search only covers architecture nodes.
+- **One Neo4j graph** with **architecture nodes** (what the software does: applications, interfaces, flows, steps, tables) and **code nodes** (how it's built: repository, module, file), joined by `BUILT_FROM`. Functions aren't nodes: each flow stores its trace (D60). Search covers the searchable architecture nodes (flows, applications, spaces, organization, interfaces, entities, tables) plus function names in traces; never code nodes.
 - **Postgres** holds what Steno is told and what it did (connectors, jobs, change history, logs; planned: the identity registry and claim store). Neo4j must stay rebuildable from Postgres + git.
 - **Deterministic first:** rules produce facts; decisions rules can't make use stand-ins (Jev in `v2`); an LLM only writes text (flow purposes and narratives, cards).
 - **Witnesses and facets:** code is one witness among CODE, PLATFORM, DECLARED, ADMIN (OBSERVED in `v2`). Steno answers a fixed set of facets; providers per organization supply them; independent witnesses are compared (D76–D80).

@@ -61,7 +61,7 @@ For our organization's application and its neighbors:
 3. **Join rate and agreement** are measured and meet their targets.
 4. **Re-ingestion leaves no duplicates or dead flows**, and re-ingesting the same commit writes nothing.
 5. **Clearly better than an agent without Steno** on questions that span services.
-6. For the application itself (from the original Phase 1 criteria): ≥ 90% of endpoints, topics, and outbound calls found against a hand-labeled gold set; flows match the gold set for the top entry points.
+6. For the application itself (carried over from the original single-application criteria): ≥ 90% of endpoints, topics, and outbound calls found against a hand-labeled gold set; flows match the gold set for the top entry points.
 
 ## 4. Evaluation
 
@@ -85,7 +85,7 @@ For our organization's application and its neighbors:
 - **MCP authentication** and scoping by space or role; deployment model for client environments
 - **Commits mapped to PRs** (`job_commit`); `get_changes`, `analyze_change`
 - **Artifacts A2**, if not finished in the POC
-- Org-scale rollups and confirmation by space owners (the old Phase 2–3 goals)
+- Org-scale rollups and confirmation by space owners (the original space and organization goals)
 
 ## 6. v2 and later
 

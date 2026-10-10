@@ -18,7 +18,7 @@ How Steno represents an organization's architecture in Neo4j: every label, prope
 | **Interfaces are nodes.** Endpoints, topics, and data stores are nodes of their own. Apps connect to them, and edges between apps appear automatically when two apps reference the same interface node. | Decided |
 | **Every node has exactly one owner in the tree.** A node's layer is where it sits, not a property of its type. | Decided |
 | **Abstraction uses labels, not `IS_A` edges.** Neo4j is a property graph: a node can have several labels. | Decided |
-| **Every fact records where it came from** (repo, symbol, ingested commit), what produced it (rule, Jev decision), and its **confidence**. | Decided |
+| **Every fact records where it came from** (repository, file, line, ingested commit), what produced it (a rule or a pipeline step; later, a decision), and its **confidence**. | Decided |
 | **Every fact can be traced to its origin Project** through `Project -CHANGED-> element` edges, added once Contextualized supplies project deltas. | Decided |
 
 ### Three independent aspects of every node
@@ -77,20 +77,22 @@ Organization                              ← layer 1
 
 After a refactor, only the code pointers (a step's `symbol` and lines, the flow's trace, `BUILT_FROM`) change. Flows and steps stay the same.
 
-**What the split controls**, and nothing more: (1) search, cards, and routing only cover architecture nodes; (2) change history logs architecture nodes in full and trace changes per flow.
+**What the split controls**, and nothing more: (1) search, cards, and routing never cover code nodes; (2) change history logs architecture nodes in full and trace changes per flow.
+
+**Search is narrower than "all architecture nodes".** It covers the `:Searchable` nodes (Flow, Application, Space, Organization, Interface, Entity, Table: the ones that get cards) by name, plus **function names in every flow's trace**, which return the flow. Steps, schedules, data stores, external systems, and Kafka clusters aren't searchable, though `get_node` opens any node by name or ID. See [Retrieval §5](./retrieval-and-mcp.md#5-mcp-tools-decided).
 
 | | Architecture nodes | Code nodes |
 |---|---|---|
 | **Kinds** | Organization, Space, Application, Interface, Flow, Step, Entity, DataStore, Table, ExternalSystem, … | Repository, Module, File (functions live in flow traces) |
 | **Answers** | What exists, what it does, what it touches, flows step by step | Exactly what code runs at each step |
-| **Queried** | Always: routing, cards, and search run **only** on these | Only after narrowing to one app or flow, through its steps and trace |
+| **Queried** | Search covers the searchable ones (flows, applications, spaces, organization, interfaces, entities, tables); every query starts here | Only after narrowing to one app or flow, through its steps and trace |
 | **Effects** | On the Step that performs them (`Step -WRITES_TO-> Table`), rolled up onto Flows | Listed on the trace entry of the function that performs them |
 | **Change history** | Every change logged | Trace changes logged per flow (functions added, removed, moved) |
 
 **Bridges** between the two kinds: `Application -BUILT_FROM-> Module`, plus the symbol and file pointers on steps and trace entries.
 
 **Why make the distinction at all?**
-- **Speed.** Search never wanders into code; it's enforced with labels and edge types.
+- **Speed.** Search never wanders into code nodes; it's enforced with the `:Searchable` label. (It does read function names stored in flow traces, which point back to flows.)
 - **Meaningful change tracking.** Architecture nodes change rarely and meaningfully; code changes on every edit. Keeping functions out of the graph means a refactor that changes no behavior writes no graph nodes (see [Depth and storage](#depth-and-storage-decided-traces-not-function-nodes)).
 
 Other points:
@@ -113,15 +115,15 @@ Other points:
 | `Interface` + `KafkaTopic` / `Queue` | **a Space**, never an Application | `name` | See [Topic ownership](#topic-ownership) |
 | `Interface` + org-defined label | a Space, like topics | `name` (the shared key) | An org's own communication channel, e.g. `:PxChannel`. See [Communication of any kind](#communication-of-any-kind-decided). |
 | `Schedule` | Application | `kind` (cron / fixed-rate / fixed-delay), `expression` | A trigger that isn't an interface |
-| `Flow` | Application | `name`, `entry_symbol`, `entry_file`, `entry_lines`, `trace`, `trace_files`, `trace_symbols` (see [Trace entries](#trace-entries)), `primary_entity`, `operation`, `technical` (from Jev I9 / I10) | See [Flows](#6-flows) |
+| `Flow` | Application | `name`, `entry_symbol`, `entry_file`, `entry_lines`, `trace`, `trace_files`, `trace_symbols` (see [Trace entries](#trace-entries)), `trigger_kind`, `inferred`, `incomplete`, `unresolved_calls`; later `primary_entity`, `operation`, `technical` (decisions I9, I10; `v2`) | See [Flows](#6-flows) |
 | `Step` | Flow | `path` (e.g. `1.1.3`), `label` (LLM phrasing), `branch_raw`, `branch` (LLM phrasing), `effects` | One significant step of a flow (L2). Also carries its function's `symbol`, `file`, and `lines` at the ingested commit; its effects are edges from the Step. |
 | `DataStore` + `Relational` / `Document` / `KeyValue` / `Search` / `Graph` / `Vector` | Space | `vendor` (Postgres, Oracle, Mongo, Redis, …), `version`, `host`, `database` | The **category is a label**, because it changes the model (relational stores have schemas and tables; document and vector stores have collections). The **vendor is a property**, because it's an open-ended list that doesn't change the model. |
-| `Schema` | DataStore | `name` | V1: only when the code names one |
-| `Table` | Schema, or DataStore when there's no schema | `name`, `kind` (table / collection / index), `stub` | V1: stubs. V2: filled in. See [Data stores](#7-data-stores). |
-| `Column` | Table | `name`, `type`, `nullable`, `purpose` | V2 |
+| `Schema` | DataStore | `name` | Not built: a property of the table today; a node in Data V2 (`v2`) |
+| `Table` | Schema, or DataStore when there's no schema | `name`, `kind` (table / collection / index), `stub` | Today: stubs, under a placeholder data store per repository ("{repo} relational store (not identified yet)") until the store is identified. Data V2 (`v2`) fills them in. See [Data stores](#7-data-stores). |
+| `Column` | Table | `name`, `type`, `nullable`, `purpose` | Data V2 (`v2`) |
 | `Entity` | Application | `name`, `symbol`, `fields` [{name, type}] | Domain models and payloads in any language: JPA classes, SQLAlchemy / Pydantic models, protobuf / Avro messages, DTOs |
 | `ExternalSystem` | Organization | `host`, `name`, `called_from` (when the host is unknown) | Vendor and third-party APIs. Keyed by host, or by service name when an [HTTP signature](./ingestion/rules-and-packs.md#http-signatures-decided-d64) recognizes the host. |
-| `KafkaCluster` (and other brokers) | Organization | `name` | Infrastructure, attached with `HOSTED_ON` |
+| `KafkaCluster` (and other brokers) | Organization | `name` | Infrastructure, attached with `HOSTED_ON`. Not built: topics are keyed by name alone today. |
 
 Later (`v2`): `Team` (the Ownership facet), `Environment` (the Environments facet), `Project` (the [Contextualized integration](../vision/projects.md)). A node type is added only together with the facet that feeds it ([Witnesses and facets](../concepts/witnesses-and-facets.md)).
 
@@ -165,22 +167,38 @@ A flow's **trace** (L3) is the ordered list of every first-party function it run
 
 | Property | Purpose |
 |---|---|
-| `id` | **Stable ID derived from natural keys**, e.g. `endpoint:{app}:{METHOD}:{path}`, `topic:{cluster}:{name}`, `flow:{app}:{trigger}`, `table:{datastore}:{schema}:{name}` |
-| `source` | `{repo, symbol, commit}`: where the fact came from |
-| `extracted_by` | Rule ID and version, or Jev decision ID |
-| `confidence` | 0–1. Deterministic rules produce 1.0. Jev-produced facts carry Jev's confidence. |
-| `ingestion_job` | ID of the job that last wrote the fact (used for idempotent replacement) |
-| `first_seen`, `last_seen`, `ingested_commit` | Cheap insurance toward version history later |
+| `id` | **Stable ID derived from natural keys** (see the examples below) |
+| `repo` | The repository that wrote it (what the next run of that repository compares against) |
+| `ingestion_job` | The job that last changed it: the link to Postgres and `fact_change` |
+| `commit` | The ingested commit it describes; code tools read files at this commit |
+| `extracted_by` | The rule (`sqlalchemy-session-add`) or pipeline step (`call-graph`, `flow-rollup`, `structure`, `inferred-entry`) that produced it; later, a decision |
+| `source_file`, `source_line` | Where it was found: citations |
+| `confidence` | 0–1. Rules and pipeline steps produce 1.0; inferred flows (D74) are 0.5; decisions (stand-ins now, Jev in `v2`) carry their own. Levels by how a fact was found are Open. |
+| `first_seen`, `last_seen` | When it first and last appeared |
 | *(planned)* `sources` | The witnesses behind the fact: `[{witness: CODE, rule, file, line}, {witness: PLATFORM, provider: acme-xld, file, line}]` (D76, D87) |
 | *(planned)* `agreement` | `confirmed` / `code_only` / `declared_only`, for facts in evidence facets (D80) |
 
-**Application IDs are moving to Steno IDs** (D81). Today `app:{name}`, and the name (repository plus module folder) is built into every child ID: `endpoint:{app}:…`, `flow:{app}:…`. After POC stage A, child IDs are built on the application's permanent Steno ID instead, so renames and moves don't change them.
+**ID examples (today):**
+
+| Node | ID |
+|---|---|
+| Organization, Space | `org:1`, `space:3` (Postgres row IDs) |
+| Application | `app:{name}`, the name being the repository plus the module folder; moving to a Steno ID (D81) |
+| HttpEndpoint | `endpoint:{app}:{METHOD}:{path}` |
+| Topic, queue, org channel | `{label}:{name}`, e.g. `kafkatopic:user.created` (keyed by name alone, so sender and receiver meet; D61) |
+| Flow | `flow:{app}:{trigger}` |
+| Step | `step:{flow}:{symbol}[@bound_to][#n]` |
+| Entity | `entity:{app}:{symbol}` |
+| Table | `table:{datastore}:{schema}:{name}` |
+| Module, File | `module:{repo}:{path}`, `file:{repo}:{path}` |
+
+**Application IDs are moving to Steno IDs** (D81). Today the application's name (repository plus module folder) is built into every child ID. After POC stage A, child IDs are built on the application's permanent Steno ID instead, so renames and moves don't change them.
 
 Which Project introduced or changed a fact isn't a property. It's recorded later as `Project -CHANGED-> element` edges from Contextualized (see [Business context](#business-context-from-contextualized-later)).
 
 ### Card properties (searchable nodes only)
 
-Cards exist **only** on node types that search covers: **Flow, Application, Space, Organization, Interface, Entity, Table**. Steps, traces, modules, files, and edges have no card. These nodes also carry the `:Searchable` label, so one vector index and one full-text index cover them all.
+**Not built yet:** the cards stage is skipped, so no node has a card today and search matches names only. Cards will exist **only** on node types that search covers: **Flow, Application, Space, Organization, Interface, Entity, Table**. Steps, traces, modules, files, and edges have no card. These nodes also carry the `:Searchable` label, so one vector index and one full-text index cover them all.
 
 | Property | Purpose |
 |---|---|
@@ -198,7 +216,7 @@ A role is an **optional label**. A module with no role is still an ordinary `Mod
 | `:Service` | Produces a deployable: Spring Boot main class / boot packaging plugin, its own Dockerfile, its own deployment descriptor | Gets an `Application` |
 | `:Library` | Other modules depend on it; produces no deployable | Stored once, shared by the services that depend on it |
 | `:Contract` | Holds `.proto`, OpenAPI, or Avro definitions | Rules read it for `Interface` definitions |
-| `:Migrations` | Flyway / Liquibase scripts | Recognized in V1, parsed in V2 |
+| `:Migrations` | Flyway / Liquibase scripts | Recognized now; read for table ownership in POC stage B (Data facet); parsed for columns in Data V2 |
 | `:Test` | Test sources, integration-test modules | Excluded from flows |
 | `:Build` | Parent POM, BOM, aggregator, code generators, Helm / Terraform | Structure only |
 
@@ -222,6 +240,8 @@ A topic is shared infrastructure, so no Application owns it. It `BELONGS_TO` exa
 1. The **Space that declares it**, e.g. in deployment or infrastructure definitions of topics and ACLs.
 2. The **producer's Space**, by convention.
 3. The **Organization**, if neither is known.
+
+*Today:* the space of the first repository whose run wrote the topic (producer or consumer), else the organization. The declared-space rule arrives with the Messaging facet's PLATFORM provider (POC stage B).
 
 `(:KafkaTopic)-[:HOSTED_ON]->(:KafkaCluster)` is **not** an ownership edge.
 
@@ -262,6 +282,8 @@ Every relationship is either **extracted** (read directly from code or config by
 | `MAPS_TO` | Entity → Table | | **ORM mapping**: the `User` class maps to the `users` table (`@Table(name="users")`) | Extracted |
 | `HOSTED_ON` | KafkaTopic → KafkaCluster | | Infrastructure placement | Extracted (config) |
 
+**Built today:** `BELONGS_TO`, `BUILT_FROM`, `EXPOSES`, `CALLS`, `PRODUCES`, `CONSUMES`, `READS_FROM`, `WRITES_TO`, `STARTS`, `FIRST_STEP`, `NEXT`, `SUBSTEP`, `MAPS_TO`, and the rollups onto flows. **Not built:** `DEPENDS_ON` (Artifacts A1, POC stage B), `USES_ENTITY`, `HOSTED_ON`. **`LEADS_TO` isn't stored:** it's computed when read (a flow's rollup `CALLS` / `PRODUCES` to an interface that `STARTS` another flow), by `get_flow` and `find_dependents`; materializing it is an option if traversal gets slow.
+
 Extracted effects are found on a function during the run and attached to the **Step** for that function (every function with an effect is a significant step, so every effect has one). They're also listed on its trace entry.
 
 **How the verbs differ:** `CALLS` is code calling over the network. `STARTS` is what kicks off a flow. `LEADS_TO` is one flow causing another. Code calling code (`INVOKES`) exists only in the run's in-memory call graph, where rules can still add to it (an async background task, D45); it reaches the graph as the order of a flow's steps and trace.
@@ -287,7 +309,7 @@ Walk both ends of a call up the tree to their lowest common ancestor:
 
 ### Stubs
 
-When a call's target isn't ingested yet, it points at a **stub** node keyed by its natural key (URL + method, topic name, table name), with `stub: true`. When the owning application is ingested, the real node **merges** into the stub by stable ID. The same pattern is used for `Table` nodes in V1.
+When a call's target isn't ingested yet, it points at a **stub** node keyed by its natural key (URL + method, topic name, table name), with `stub: true`. When the owning application is ingested, the real node **merges** into the stub by stable ID. The same pattern is used for `Table` nodes until their data store is identified.
 
 **An HTTP call whose target can't be named is never merged with others (D64).** The symbol resolver keeps every constant part of a URL, with runtime parts as placeholders (`https://{domain}/rest/api/content/{page_id}`), following values through parameters and attributes. The target is the host when it's constant (named by an [HTTP signature](./ingestion/rules-and-packs.md#http-signatures-decided-d64) when it's a known service's own host). When the host is runtime data, the call goes to a stub **per calling class**, named after the class and its file (`Unknown host · ConfluenceDataProvider (confluence.py)`, keyed `external:unresolved:{class}`); each call keeps its URL template (`{domain}/rest/api/content/{page_id}`), and it's listed as an unmet join for the coverage report. Steno doesn't guess the service from the path. Naming it is a later step (Open).
 
@@ -300,9 +322,10 @@ When a call's target isn't ingested yet, it points at a **stub** node keyed by i
 MATCH (t:KafkaTopic {name: 'user.created'})-[:STARTS]->(:Flow)-[:BELONGS_TO]->(a:Application)
 RETURN DISTINCT a.name
 
-// Blast radius: every flow downstream of an endpoint (variable-length path)
-MATCH (e:HttpEndpoint {id: $id})-[:STARTS]->(f:Flow)-[:LEADS_TO*0..10]->(down:Flow)
-RETURN down
+// Blast radius: every flow downstream of an endpoint (flow → interface → flow, repeated)
+MATCH (e:HttpEndpoint {id: $id})-[:STARTS]->(f:Flow)
+MATCH (f)-[:CALLS|PRODUCES|STARTS*0..20]->(down:Flow)
+RETURN DISTINCT down
 
 // Communication across spaces (rollup)
 MATCH (s1:Space)<-[:BELONGS_TO*]-(:Flow)-[:CALLS]->(:Interface)<-[:EXPOSES]-(:Application)-[:BELONGS_TO*]->(s2:Space)
@@ -405,7 +428,7 @@ Its **rollup edges** (L1): `WRITES_TO` jobs, diff_tasks, embed_tasks, record_loc
 
 Its **`Step` nodes** (L2) chain with `NEXT` and nest with `SUBSTEP`. Each has its path (`1.1.3`), a label, its branch, its effects, and a citation: its function's symbol, file, and lines at the commit.
 
-**The rendered flow card** (one text, used for embeddings, for Jev digests, and for agents):
+**The rendered flow card** (not built yet; one text, used for embeddings, for decision-model digests later, and for agents):
 
 ```
 POST /jobs/projects/{project_id}/data-sources/{data_source_id}   · contextualized-backend · HTTP 202 + background
@@ -428,7 +451,7 @@ SOURCE   run_data_source_job  apps/backend/app/api/routers/job.py:43 @ ac93a3b
 - **At initial ingestion, every flow gets an LLM purpose and narrative** (Decided). Without them, semantic search has nothing meaningful to match, and declared summaries are often missing or vague.
 - **LLM input:** the L1 signature, the L2 skeleton with raw branch conditions, declared docs (route summaries, docstrings, Javadoc, OpenAPI), the code of the significant steps (bounded), and the downstream flows' L0 purposes.
 - **Keeping cost down at scale:** a small model by default, the Batch API, and **prompt caching**: flows in the same application share a cached prefix (the app's card, its entities, its conventions), so each flow pays only for its own facts. The dry run measures the real cost before any spend.
-- **On re-ingestion:** when a change touches functions in a flow's trace, the deterministic parts are rebuilt for free. A trace that changed only by renames or moved lines, with the same effects and calls, keeps its card. **Jev I5** is given the old purpose and narrative plus the fact diff and the changed step names, and decides whether they're still accurate. The LLM regenerates them only if not.
+- **On re-ingestion:** when a change touches functions in a flow's trace, the deterministic parts are rebuilt for free. A trace that changed only by renames or moved lines, with the same effects and calls, keeps its card. A decision (Jev I5 in `v2`; a stand-in until then) is given the old purpose and narrative plus the fact diff and the changed step names, and decides whether they're still accurate. The LLM regenerates them only if not.
 
 #### Business context from Contextualized (later)
 
@@ -515,9 +538,9 @@ Steps and trace entries point to **symbols** (`com.x.RefundService#process`) at 
 
 ## 7. Data stores
 
-**Deferring schema introspection doesn't mean ignoring data.** V1 creates the nodes V2 fills in.
+**Deferring schema introspection doesn't mean ignoring data.** What's built now creates the nodes Data V2 (`v2`) fills in.
 
-| | V1 (from application code) | V2 (schema itself) |
+| | Now (from application code) | Data V2, `v2` (the schema itself) |
 |---|---|---|
 | **Entity → table** | JPA `@Entity`/`@Table`, Mongo `@Document` → `MAPS_TO`. **Plus org plugins** for internal mechanisms that define tables and relationships. | |
 | **Reads/writes** | Table-level where stated statically: Spring Data repos, `@Query`, MyBatis SQL | |
@@ -525,13 +548,13 @@ Steps and trace entries point to **symbols** (`com.x.RefundService#process`) at 
 | **Migrations** | Modules recognized (`:Migrations`) | Parsed |
 | **Sources** | Code | 1. Live catalog (read-only DataStore connector), 2. **Migrations replayed into a temporary database** (e.g. Testcontainers), then reading its catalog, 3. ORM entities |
 
-V1 already answers "which applications touch the `users` table?" and "which entities map to it?". The names stay agnostic: a Mongo collection is a `Table` with `kind: collection`.
+It already answers "which applications touch the `users` table?" and "which entities map to it?". The names stay agnostic: a Mongo collection is a `Table` with `kind: collection`.
 
 **The `DataStore → Schema → Table → Column` arrows are the ownership chain (`BELONGS_TO`).** What exists in each version:
 
-| Node | V1 | V2 |
+| Node | Now | Data V2 (`v2`) |
 |---|---|---|
-| `DataStore` | Yes, identified from datasource config (host, database, vendor) | Yes |
-| `Schema` | Only when the code names one (e.g. `@Table(schema="payroll")`) | Yes |
-| `Table` | Stubs from entities, repositories, SQL, and org plugins | Filled in |
+| `DataStore` | Client and vector stores yes; relational stores are a placeholder per repository until identified from datasource config (host, database, vendor) | Yes |
+| `Schema` | A table property when the code names one (e.g. `@Table(schema="payroll")`) | Yes, as a node |
+| `Table` | Stubs from entities, repositories, SQL, and org plugins; ownership from migrations in POC stage B | Filled in |
 | `Column` | No | Yes |

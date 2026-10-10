@@ -42,7 +42,7 @@ flowchart LR
 | **Browser UI** | Onboarding (organization → spaces → connectors → repositories), the Jobs list, the Coverage page, the Visualize tab | Built | `frontend/src/pages/` |
 | **Admin API** | Connectors, repositories, spaces, jobs, coverage triage. `POST /api/jobs` only inserts a queued row. | Built | `backend/src/steno/api/` |
 | **MCP server** | Agent tools; stateless; every call logged | Built: `search`, `get_node`, `get_flow`, `view_flow_code`, `find_dependents` | `backend/src/steno/mcp/` |
-| **Graph views** | Neo4j turned into one layer at a time; the same views back the UI and `get_node` | Built | `graph/views.py` |
+| **Graph views** | Neo4j turned into one layer at a time for the UI; MCP's `search` uses the same search view, while the other MCP tools query the graph directly (sharing views is D53's intent) | Built | `graph/views.py`, `mcp/tools.py` |
 | **Worker** | Claims the oldest queued job, runs the stages, marks it succeeded or failed. More processes, more parallel jobs. | Built | `ingestion/worker.py`, `queue.py`, `pipeline.py` |
 | **Rule engine + symbol resolvers** | Runs rule packs over the clone; Python and Java resolvers answer what names and types mean | Built | `extraction/`, `resolvers/`, `assemblers/` |
 | **Graph builder + writer** | Stable IDs, structure, call graph, flows, traces, steps; writes only differences | Built | `graph/build.py`, `graph/writer.py`, `graph/ids.py` |

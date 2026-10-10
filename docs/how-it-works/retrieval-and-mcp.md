@@ -47,13 +47,15 @@ Rough costs:
 | Technique | How it cuts round trips | Status |
 |---|---|---|
 | **Precomputed summary cards** | The expensive understanding happens at ingestion. At query time it's a lookup. | Decided |
-| **Route to the right layer** | Jev sends a clear question straight to the space or application, skipping the top-down walk | Decided |
+| **Route to the right layer** | Jev sends a clear question straight to the space or application, skipping the top-down walk | Decided; `v2` |
 | **Server-side parallel fan-out** | Several spaces are searched in **one call** | Decided |
 | **Progressive disclosure** | Every result includes children and edge counts, so the next step is obvious | Decided |
 | **Batch tools** | A whole flow, its code, or a blast radius in one call | Decided |
-| **Token budgets** | Every tool takes `max_tokens`, and Jev Q3 trims the results by relevance | Decided |
+| **Token budgets** | Every tool takes `max_tokens` (built: longest lists are trimmed and marked `truncated`); later, Jev Q3 trims by relevance | Decided |
 
 ## 2. Search top-down, over data built bottom-up
+
+> **Status:** this section is the end-state design. Jev routing, verification, and ranking are `v2`; vector search over cards comes after the cost dry run (stage D). **Today `search` is full-text over the names of searchable nodes plus function names in traces** (§5).
 
 **Jev is the navigator.** Every navigation step that would normally cost an LLM call (which space, which app, which kind of question, is this the right flow) is a Jev decision instead: typed, calibrated, and done in milliseconds. That's the core of Steno's speed.
 
@@ -105,11 +107,11 @@ Then:
 
 It's one signal among four. Q0 decides when it applies (questions about domain objects), and it's not used otherwise.
 
-**Status: deferred.** Phase 1 uses routing plus cards (vector), keyword, and glossary. Entity anchors are a later optimization, once measurements show where plain retrieval falls short.
+**Status: deferred.** The POC uses keyword search; cards (vector) and glossary come later, routing with Jev in `v2`. Entity anchors are a later optimization, once measurements show where plain retrieval falls short.
 
 This is structural retrieval, which embeddings alone can't do. Combined with Jev making every choice and verification cheaply, it's the part of Steno that's genuinely new.
 
-**It gets measured:** a set of questions, each paired with the flows that correctly answer it. Track how often the right flows appear in the top k. It's part of Phase 1's exit criteria.
+**It gets measured:** a set of questions, each paired with the flows that correctly answer it. Track how often the right flows appear in the top k. It's part of the POC's evaluation (the question set).
 
 ### Summary cards (Decided)
 
@@ -138,7 +140,7 @@ This is structural retrieval, which embeddings alone can't do. Combined with Jev
 
 ### Cost and time: measure before generating (Decided)
 
-Phase 1 starts with a **dry run that writes no LLM cards**, to see the real numbers before spending:
+POC stage D starts with a **dry run that writes no LLM cards**, to see the real numbers before spending:
 
 1. **Deterministic ingestion only** for one application: clone, dependencies, parsing, resolution, flow derivation, graph write, signature-only flow cards.
 2. **Ingestion report:**
@@ -180,7 +182,7 @@ Transport: **MCP over Streamable HTTP**. Every tool accepts `max_tokens`. Every 
 
 **Built (2026-10-07):** `search` (full-text over names, plus flows whose traces contain a matching function), `get_node`, `get_flow`, `view_flow_code` (reads from the git host at the ingested commit; GitHub, GitLab, Bitbucket), and `find_dependents` (`via`: `http`, `messaging`, `data`), in `backend/src/steno/mcp/`. A result over its `max_tokens` loses items from its longest lists and says so in `truncated`. Every call is logged in `tool_call`. Confidence levels aren't built yet (Open).
 
-### Citations (Decided: part of V1)
+### Citations (Decided; built)
 
 Every fact already records its source (repo, symbol, commit) and every call site its line, so each result **cites where its claims come from**, with a clickable link:
 
@@ -201,9 +203,11 @@ Every fact already records its source (repo, symbol, commit) and every call site
 
 ### Search and navigation
 
+Built: `search`, `get_node`. Not built: `glossary`.
+
 | Tool | Purpose | Returns | Serves use cases |
 |---|---|---|---|
-| `search(question, scope?, max_tokens?)` | **The routed entry point.** Jev classifies the question, then Steno searches one scope or fans out across spaces in parallel. Passing `scope` skips routing. | Ranked cards, anchors, the routing decision and its confidence | All |
+| `search(query, scope?, limit?, max_tokens?)` | **Built:** full-text over the names of searchable nodes (flows, applications, spaces, organization, interfaces, entities, tables), plus function names in flow traces (a hit returns the flow). Steps, schedules, data stores, external systems, and code nodes aren't searched; open them with `get_node`. **End state:** the routed entry point. Jev classifies the question, then Steno searches one scope or fans out across spaces in parallel. Passing `scope` skips routing. | Ranked cards, anchors, the routing decision and its confidence | All |
 | `get_node(id \| name, include_children?)` | Progressive disclosure: a node's card plus **a view that depends on its layer** (below) | Card + layer view + next-step hints | Onboarding, planning |
 | `glossary(term, space?)` | Look up a term, nickname, or standard | Definition + where it's used | Onboarding |
 
@@ -221,6 +225,8 @@ These views are rollups computed from application-level facts. The future UI ren
 
 ### Flows and code
 
+Built: `get_flow`, `view_flow_code`. Not built: `view_file`, `list_directory`, `find_symbols`, `search_code`.
+
 | Tool | Purpose | Returns |
 |---|---|---|
 | `get_flow(flow_id \| trigger, expand: none\|sync\|all, detail: significant\|all, levels?, under?)` | The ordered step tree, stitched across services when expanded; `detail: all` returns the full trace. A large flow comes back as an **outline** (D68): as many levels as fit in about 25 steps (or `levels`), each deeper branch folded into the step above it with `inside` (how many steps) and `inside_does` (what they touch); `under: <path>` opens one branch | Ordered steps (or trace entries) with file and lines, interactions, sync/async markers, and the flows each cross-app step leads to |
@@ -231,6 +237,8 @@ These views are rollups computed from application-level facts. The future UI ren
 **Following a flow across spaces.** An agent doesn't need any repository checked out to follow behavior through the org. `get_flow(A)` returns A's steps and says that step 3 calls `POST /accounts`, which starts Flow B in another application and space. `view_flow_code(A, [2, 3])` shows the code for those steps, read from the git host. `get_flow(B)` continues on the other side. Interface nodes are the bridges, and each flow's trace tells the agent which few functions out of thousands to read. Steno only reads code; it never changes it.
 
 ### Dependencies and impact
+
+Built: `find_dependents` (`via`: `http`, `messaging`, `data`; `depth`; upstream or downstream). Not built: `find_paths`, `analyze_change`, `get_interface`.
 
 | Tool | Purpose | Returns |
 |---|---|---|
@@ -272,7 +280,7 @@ A raw diff is too narrow. It misses the PR's context, and the other PRs this cha
 
 This reuses the ingestion machinery, so there's no separate analysis engine. It takes seconds to a few minutes (a whole-repository analysis), which suits CI and PR review. In interactive use it may need to run asynchronously.
 
-### Changes over time (needs the delta store)
+### Changes over time (needs the delta store; not built)
 
 | Tool | Purpose | Returns |
 |---|---|---|

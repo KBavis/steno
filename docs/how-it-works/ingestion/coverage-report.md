@@ -59,7 +59,7 @@ The most frequent items are exactly the internal frameworks worth covering. Each
 1. **Adding a rule** to the org pack, or
 2. **Ingesting the library's repository**, so calls resolve into its code (how traces continue across repositories is Open).
 
-Until then, Jev I2/I3 cover them at low confidence.
+Until then, they stay visible as coverage items (later, a decision model could cover them at low confidence).
 
 **What it can't see.** Behavior that leaves no trace in the code (reflection, routing chosen entirely by runtime config) can only be marked unknown, not filled in. Runtime signals (deferred) are what close that gap.
 
@@ -85,7 +85,7 @@ It's read by scope like the coverage report. Many disagreements in one direction
 There's **no LLM scanning the repository.** It works like this:
 
 1. **Deterministic ingestion runs** with the enabled rule packs.
-2. **The coverage report is computed deterministically**, then filtered by Jev I8:
+2. **The coverage report is computed deterministically**, then filtered by a decision (a naming heuristic today; Jev I8 in `v2`):
    - call sites whose target is an external or unresolved method **and** that look like I/O (the target's package, method names like `send` / `publish` / `invoke` / `execute`, networking or messaging imports)
    - public methods with annotations no rule recognizes
 

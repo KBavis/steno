@@ -26,8 +26,8 @@ flowchart LR
 
 1. **Sources.** Git repositories today. Later, the systems an organization already keeps: deployment tools, Kafka permission files, artifact repositories, schedulers, catalogs.
 2. **Ingestion.** Declarative rules, bundled in rule packs, recognize code patterns ("this method is an HTTP endpoint", "this call publishes to a topic"). Per-language symbol resolvers work out what names and types mean. The result is facts with exact citations.
-3. **Combine.** Steno gives every application a stable identity and its real name, joins senders to receivers across services (a producer to its consumers, a caller to an endpoint), and compares independent sources ("witnesses") so disagreements show up.
-4. **Knowledge graph.** One Neo4j graph: architecture nodes (what the software does) and code nodes (how it's built). Each flow stores the ordered list of functions it runs.
+3. **Combine.** Steno joins senders to receivers across services (a producer to its consumers, a caller to an endpoint). Being built in the POC: a stable identity and the real name for every application, and comparison of independent sources ("witnesses") so disagreements show up.
+4. **Knowledge graph.** One Neo4j graph: architecture nodes (what the software does) and code nodes (how it's built). Each flow stores the ordered list of functions it runs. Search covers the main architecture nodes plus function names inside flows.
 5. **MCP.** Agents ask in a few calls. Results carry citations to file, line, and commit, and say what's incomplete.
 
 ## Where Steno fits

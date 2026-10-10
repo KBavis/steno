@@ -119,6 +119,7 @@ Every numbered design decision, and the questions still open. Part of [Plan](./R
 - [ ] The format for an organization's **setup sheet** (providers per facet, precedence, naming patterns): a file in the org pack, the UI, or both.
 - [ ] Which edge cases of witness classification need guidance (Helm values that set environment variables the app reads: PLATFORM by default).
 - [ ] The completeness block's exact format in MCP answers.
+- [ ] **What search covers:** today the `:Searchable` nodes (flows, applications, spaces, organization, interfaces, entities, tables) plus function names in traces. Should data stores, external systems ("who calls Plaid?"), and schedules be searchable too?
 - [ ] How confidence levels are assigned and shown, so an inferred or declared-only fact never looks deterministic.
 
 **Carried over**

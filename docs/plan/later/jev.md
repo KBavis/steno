@@ -119,7 +119,7 @@ Routing layer by layer (Q1, then Q2) keeps every Choice under the 255-option lim
 | *I9 (deferred)* | **What does this flow do, and to what?** | Choice (primary entity, from the app's entities) + Choice (operation: create / read / update / delete / process / sync / notify / report) | Flow digest | Every flow, at ingestion | Tags `primary_entity` and `operation` on the flow. At query time, Q2b + Q0 pick the same entity and operation, and the matching flows come from an index lookup. **This is what makes entity anchors reliable.** |
 | **I10** | **Is this a business flow or technical plumbing?** | Noul | Flow digest | Every flow | Health checks, actuator, and admin endpoints are marked `technical` and ranked down in search |
 | *I6* | *Which space does this repository belong to?* | | | | **Not planned:** admins define spaces |
-| *I7* | *Which node does this glossary term refer to?* | | | | **Later:** the glossary is human-declared in V1 |
+| *I7* | *Which node does this glossary term refer to?* | | | | **Later:** the glossary is human-declared for now |
 | **I8** | Does this unexplained call look like I/O or an entry point? | Noul | Call site digest | A call site matched no rule | Whether it goes on the **coverage report** (see [Ingestion §4](../../how-it-works/ingestion/coverage-report.md)) |
 
 **Not a Jev decision:** "did this PR change structure?" Re-running the rules and comparing facts answers it exactly.

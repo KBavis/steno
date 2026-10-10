@@ -36,9 +36,9 @@ flowchart LR
 | Libraries (planned, Artifacts A1) | A build file's dependency | The producing repository's build file | Coordinate → `Module:Library` |
 | Gateway routes (planned, Routing) | A call to a public path | The gateway's route table | Public path → internal service + path |
 
-**Topics and channels are keyed by name across applications.** A channel whose name can't be resolved is dropped (and listed in the coverage report) rather than merged with unrelated channels. Topics belong to a **space**, never an application: the space that declares them (a PLATFORM definition), else the producer's space, else the organization.
+**Topics and channels are keyed by name across applications** (`kafkatopic:{name}`). A channel whose name can't be resolved is dropped (and listed in the coverage report) rather than merged with unrelated channels. Topics belong to a **space**, never an application: the space that declares them (a PLATFORM definition, from stage B), else the producer's space, else the organization. *Today:* the space of the first repository whose run wrote the topic.
 
-**`LEADS_TO` is derived:** it exists exactly when a step in flow A `CALLS` or `PRODUCES` to an interface that `STARTS` flow B, marked sync or async. App-level and space-level "who talks to whom" are rollups of these.
+**`LEADS_TO` is derived, and computed when read** (not stored today): it holds exactly when a step in flow A `CALLS` or `PRODUCES` to an interface that `STARTS` flow B, marked sync or async. App-level and space-level "who talks to whom" are rollups of these.
 
 ## 2. Stubs
 

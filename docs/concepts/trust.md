@@ -38,7 +38,7 @@ Every MCP result cites where each claim comes from (Decided, D29):
 
 `searched` lists the scopes an answer came from, so the reader knows what wasn't looked at. Claims from other witnesses cite their source: an XLD file and line, or "ADMIN: J. Doe, 2026-10-09: host X is Billing".
 
-**Confidence (Open):** today every fact is 1.0. The plan is levels by how a fact was found (a literal match, an inferred type, a heuristic, an inferred trigger at 0.5), and agreement between witnesses. A low-confidence fact must never look as certain as a deterministic one.
+**Confidence (Open):** today every fact is 1.0 except inferred flows (0.5, D74). The plan is levels by how a fact was found (a literal match, an inferred type, a heuristic, an inferred trigger at 0.5), and agreement between witnesses. A low-confidence fact must never look as certain as a deterministic one.
 
 ## 3. Agreement between witnesses
 
