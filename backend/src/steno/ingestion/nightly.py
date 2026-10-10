@@ -25,7 +25,7 @@ from steno.db.models import (
     RepositorySelection,
     ScheduledRun,
 )
-from steno.ingestion.queue import enqueue
+from steno.ingestion.queue import RepositoryBusy, enqueue
 
 log = logging.getLogger(__name__)
 NAME = "nightly"
@@ -94,7 +94,11 @@ def run(session: Session) -> dict[str, Any]:
         if head is not None and head == repo.last_ingested_sha:
             unchanged.append(repo.name)
             continue
-        enqueue(session, repo.id, JobMode.FULL, JobTrigger.NIGHTLY)
+        try:
+            enqueue(session, repo.id, JobMode.FULL, JobTrigger.NIGHTLY)
+        except RepositoryBusy:  # queued by someone else meanwhile
+            busy.append(repo.name)
+            continue
         queued.append(repo.name)
     log.info(
         "nightly: queued %s, unchanged %s, busy %s, failed %s",

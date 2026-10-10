@@ -48,6 +48,7 @@ flowchart LR
 - **Neo4j can be rebuilt** from Postgres plus the repositories, **without re-spending on the LLM**, because every generated text is cached in `llm_output`. Nothing is stored only in Neo4j. (Decided)
 - **One Steno deployment per organization**, so no tables carry an `organization_id`. The organization itself is the single row in `organization`. (Decided)
 - **The work queue lives in Postgres:** workers claim `queued` jobs with `SELECT … FOR UPDATE SKIP LOCKED`, so no separate broker is needed. (Decided)
+- **One job per repository, a cap on jobs at once (Decided, D99).** A unique index allows one queued-or-running job per repository (two runs would race on its graph and change history). Claims are serialized with an advisory lock and stop at `STENO_MAX_PARALLEL_JOBS` running jobs across all workers; `steno worker` starts `STENO_WORKER_PROCESSES` processes. Measured per job: 70–500 MB for Python's side, about 500 MB for the JVM helper on a 200-file Java service (capped by `STENO_RESOLVER_JVM_MAX_HEAP`), plus the clone. A safe limit is about one job per 2 GB of RAM, and no more than the CPU cores.
 - **Identity and external claims live in Postgres (Decided, D81, D87).** Steno IDs can't be recreated from git, and claims from systems reached through an API aren't in git, so both must be in Postgres for Neo4j to stay rebuildable.
 
 ## 3. Tables

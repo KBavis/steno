@@ -40,15 +40,22 @@ def api(reload: bool = typer.Option(False, help="Reload on code changes (develop
 
 
 @app.command()
-def worker(once: bool = typer.Option(False, help="Run at most one job, then exit.")) -> None:
-    """Claim and run ingestion jobs from the Postgres queue."""
-    from steno.ingestion.worker import run_forever, run_once
+def worker(
+    once: bool = typer.Option(False, help="Run at most one job, then exit."),
+    processes: int = typer.Option(
+        None, help="Worker processes, each running one job at a time (STENO_WORKER_PROCESSES)."
+    ),
+) -> None:
+    """Claim and run ingestion jobs from the Postgres queue. Jobs running at once are capped
+    across all workers by STENO_MAX_PARALLEL_JOBS."""
+    from steno.ingestion.worker import run_forever, run_once, run_pool
 
     if once:
         if not run_once():
             typer.echo("queue empty")
     else:
-        run_forever()
+        n = processes or get_settings().worker_processes
+        run_pool(n) if n > 1 else run_forever()
 
 
 @db_app.command("upgrade")
@@ -83,13 +90,17 @@ def job_enqueue(
 
     from steno.db.models import Repository
     from steno.db.session import session_scope
-    from steno.ingestion.queue import enqueue
+    from steno.ingestion.queue import RepositoryBusy, enqueue
 
     with session_scope() as session:
         repository = session.scalar(select(Repository).where(Repository.name == repo))
         if repository is None:
             raise typer.BadParameter(f"unknown repository {repo!r}")
-        job = enqueue(session, repository.id, mode)
+        try:
+            job = enqueue(session, repository.id, mode)
+        except RepositoryBusy as busy:
+            typer.echo(f"{repo}: {busy}")
+            raise typer.Exit(1) from None
         typer.echo(f"queued job {job.id} ({mode}) for {repo}")
 
 

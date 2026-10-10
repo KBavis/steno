@@ -275,7 +275,7 @@ class GraphViews:
         for row in self._read(
             """
             MATCH (fl:Flow)-[:BELONGS_TO]->(:Application {id: $id})
-            RETURN fl, last(split(fl.entry_symbol, '.')) AS entry ORDER BY fl.name
+            RETURN fl, fl.entry_symbol AS entry ORDER BY fl.name
             """,
             id=app_id,
         ):
@@ -285,7 +285,7 @@ class GraphViews:
             nodes.append(
                 _node(
                     fl,
-                    row["entry"],
+                    short_symbol(row["entry"] or ""),
                     parent=f"group:{resource}",
                     method=method,
                     path=path,
@@ -522,7 +522,7 @@ class GraphViews:
         method, path, _ = _flow_heading(fl)
         head = _node(
             fl,
-            (fl.get("entry_symbol") or "").rsplit(".", 1)[-1] or None,
+            short_symbol(fl.get("entry_symbol") or "") or None,
             method=method,
             path=path,
             trigger=_node(trigger)["kind"] if trigger is not None else None,
@@ -710,7 +710,7 @@ class GraphViews:
                 {
                     "id": fl.get("id"),
                     "kind": "flow",
-                    "label": row["symbol"].rsplit(".", 1)[-1],
+                    "label": short_symbol(row["symbol"]),
                     "sub": f"in {fl.get('name')}",
                 }
             )
@@ -883,6 +883,15 @@ def _flow_heading(fl: Any) -> tuple[str, str, str]:
         tag, group = NOT_HTTP[kind]
         return tag, fl.get("name") or "", group
     return method, path, _resource(path)
+
+
+def short_symbol(symbol: str) -> str:
+    """A function's name as people read it: `com.x.UserService#find(java.lang.String)` →
+    `UserService.find`; `app.services.job.JobService.run` → `run`."""
+    if "#" in symbol:
+        owner, _, rest = symbol.partition("#")
+        return f"{owner.rsplit('.', 1)[-1]}.{rest.split('(', 1)[0]}"
+    return symbol.rsplit(".", 1)[-1]
 
 
 def _resource(path: str) -> str:

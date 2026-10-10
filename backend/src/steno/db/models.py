@@ -25,6 +25,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -260,7 +261,17 @@ class IngestionJob(Base):
     """Every ingestion job. Also the work queue: workers claim with SKIP LOCKED (D35)."""
 
     __tablename__ = "ingestion_job"
-    __table_args__ = (Index("ix_ingestion_job_queue", "status", "queued_at"),)
+    __table_args__ = (
+        Index("ix_ingestion_job_queue", "status", "queued_at"),
+        # One job at a time per repository: while one is queued or running, no other can be
+        # queued for it (two runs would race on its graph and its change history)
+        Index(
+            "uq_ingestion_job_active_repository",
+            "repository_id",
+            unique=True,
+            postgresql_where=text("status IN ('queued', 'running')"),
+        ),
+    )
 
     id: Mapped[int] = _pk()
     repository_id: Mapped[int] = mapped_column(ForeignKey("repository.id", ondelete="CASCADE"))

@@ -173,6 +173,7 @@ class JavaResolver:
             cmd = [
                 settings.java_bin,
                 "-Xss8m",
+                f"-Xmx{settings.resolver_jvm_max_heap}",
                 "-cp",
                 f"{lib}/*",
                 "dev.steno.resolver.Main",

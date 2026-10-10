@@ -4,6 +4,8 @@ Separate from the API/MCP process so heavy work never slows queries (docs/how-it
 """
 
 import logging
+import multiprocessing
+import os
 import signal
 import time
 from datetime import UTC, datetime
@@ -53,7 +55,9 @@ def check_schedule() -> None:
         log.exception("nightly: check failed")
 
 
-def run_forever() -> None:
+def run_forever(schedule: bool = True) -> None:
+    """Claim and run jobs until stopped. `schedule`: also queue the nightly runs when due
+    (one process in a pool does it)."""
     stopping = False
 
     def stop(*_: object) -> None:
@@ -68,8 +72,36 @@ def run_forever() -> None:
     log.info("worker: polling every %ss", poll)
     last_check = 0.0
     while not stopping:
-        if time.monotonic() - last_check >= 60:
+        if schedule and time.monotonic() - last_check >= 60:
             check_schedule()
             last_check = time.monotonic()
         if not run_once():
             time.sleep(poll)
+
+
+def run_pool(processes: int) -> None:
+    """Run `processes` workers side by side, each claiming one job at a time. How many jobs
+    run at once across every worker is still capped by `max_parallel_jobs`. Ctrl+C (or
+    SIGTERM) stops each worker after its current job."""
+    ctx = multiprocessing.get_context("spawn")
+    pool = [
+        ctx.Process(target=run_forever, args=(i == 0,), name=f"worker-{i + 1}")
+        for i in range(processes)
+    ]
+    for p in pool:
+        p.start()
+    log.info(
+        "worker: %s processes, at most %s jobs at once",
+        processes,
+        get_settings().max_parallel_jobs,
+    )
+
+    def stop(*_: object) -> None:
+        for p in pool:
+            if p.is_alive() and p.pid:
+                os.kill(p.pid, signal.SIGTERM)
+
+    signal.signal(signal.SIGINT, stop)
+    signal.signal(signal.SIGTERM, stop)
+    for p in pool:
+        p.join()

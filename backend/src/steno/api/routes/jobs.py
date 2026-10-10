@@ -1,10 +1,10 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 
 from steno.api.deps import SessionDep, get_or_404
 from steno.api.schemas import JobCreate, JobDetail, JobOut, StageOut
 from steno.db.models import IngestionJob, IngestionStage, Repository
-from steno.ingestion.queue import enqueue
+from steno.ingestion.queue import RepositoryBusy, enqueue
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -18,7 +18,14 @@ def list_jobs(session: SessionDep, limit: int = 50) -> list[IngestionJob]:
 @router.post("", response_model=JobOut, status_code=201)
 def create_job(body: JobCreate, session: SessionDep) -> IngestionJob:
     get_or_404(session, Repository, body.repository_id)
-    return enqueue(session, body.repository_id, body.mode)
+    try:
+        return enqueue(session, body.repository_id, body.mode)
+    except RepositoryBusy as busy:
+        raise HTTPException(
+            409,
+            f"This repository already has a job {busy.job.status.value} (job {busy.job.id}); "
+            "wait for it to finish.",
+        ) from None
 
 
 @router.get("/{job_id}", response_model=JobDetail)

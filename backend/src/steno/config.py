@@ -33,7 +33,15 @@ class Settings(BaseSettings):
         / "steno-resolver"
     )
     java_bin: str = "java"
+    # The JVM helper's heap ceiling per job: what a Java repository can cost in memory
+    resolver_jvm_max_heap: str = "2g"
     resolver_jvm_timeout: int = 1800  # seconds per repository
+
+    # Ingestion jobs running at once, across every worker process and machine. Each job holds
+    # a clone and, for Java, a JVM: this is what bounds memory and disk (docs: storage.md)
+    max_parallel_jobs: int = 4
+    # Worker processes `steno worker` starts (each runs one job at a time)
+    worker_processes: int = 2
 
     # Worker queue polling
     worker_poll_seconds: float = 2.0
