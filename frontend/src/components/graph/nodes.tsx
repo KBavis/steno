@@ -2,15 +2,10 @@ import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
 import { ArrowUpRight, BookOpen, ChevronDown, ChevronRight, Info, Maximize2, PenLine } from 'lucide-react'
 import { useContext } from 'react'
 import { kindStyle } from '../../lib/graphStyle'
-import { ExpandContext, FocusContext, InspectContext } from './focus'
+import { ExpandContext, InspectContext } from './focus'
 import type { ClusterData, EntityData } from './layout'
 
 const hueClass = (hue?: number | null) => (hue === null || hue === undefined ? 'hue-none' : `hue-${hue % 8}`)
-
-function useDimmed(id: string) {
-  const near = useContext(FocusContext)
-  return near !== null && !near.has(id)
-}
 
 function Handles({ direction }: { direction: EntityData['direction'] }) {
   const horizontal = direction === 'RIGHT'
@@ -40,11 +35,10 @@ function InspectButton({ id }: { id: string }) {
   )
 }
 
-export function EntityNode({ id, data, selected }: NodeProps<Node<EntityData>>) {
+export function EntityNode({ data, selected }: NodeProps<Node<EntityData>>) {
   const { node, direction } = data
   const style = kindStyle(node.kind)
   const Icon = style.icon
-  const dimmed = useDimmed(id)
   const isFlow = node.kind === 'flow' || node.kind === 'endpoint'
   const [method, ...rest] = isFlow ? heading(node) : ['']
   return (
@@ -53,7 +47,6 @@ export function EntityNode({ id, data, selected }: NodeProps<Node<EntityData>>) 
         'gnode',
         `tone-${style.tone}`,
         selected ? 'is-selected' : '',
-        dimmed ? 'is-dimmed' : '',
         node.stub ? 'is-stub' : '',
         node.kind === 'function' && !node.significant ? 'is-quiet' : '',
       ].join(' ')}
@@ -84,7 +77,6 @@ export function SpaceNode({ id, data, selected }: NodeProps<Node<EntityData>>) {
   const { node } = data
   const s = node.stats ?? {}
   const Icon = kindStyle('space').icon
-  const dimmed = useDimmed(id)
   const facts = [
     s.applications ? plural(s.applications, 'application') : null,
     s.flows ? plural(s.flows, 'flow') : null,
@@ -94,7 +86,7 @@ export function SpaceNode({ id, data, selected }: NodeProps<Node<EntityData>>) {
   const preview = node.preview ?? []
   const more = (s.applications ?? 0) - preview.length
   return (
-    <div className={['tile', 'tile-space', hueClass(node.hue), selected ? 'is-selected' : '', dimmed ? 'is-dimmed' : ''].join(' ')}>
+    <div className={['tile', 'tile-space', hueClass(node.hue), selected ? 'is-selected' : ''].join(' ')}>
       <div className="tile-head">
         <span className="tile-icon"><Icon size={18} /></span>
         <div className="tile-titles">
@@ -124,9 +116,8 @@ export function AppNode({ id, data, selected }: NodeProps<Node<EntityData>>) {
   const { node } = data
   const s = node.stats ?? {}
   const Icon = kindStyle('application').icon
-  const dimmed = useDimmed(id)
   return (
-    <div className={['tile', 'tile-app', hueClass(node.hue), selected ? 'is-selected' : '', dimmed ? 'is-dimmed' : '', node.stub ? 'is-stub' : ''].join(' ')}>
+    <div className={['tile', 'tile-app', hueClass(node.hue), selected ? 'is-selected' : '', node.stub ? 'is-stub' : ''].join(' ')}>
       <div className="tile-head">
         <span className="tile-icon"><Icon size={17} /></span>
         <div className="tile-titles">
@@ -145,12 +136,11 @@ export function AppNode({ id, data, selected }: NodeProps<Node<EntityData>>) {
 }
 
 /** Something outside the current space that talks to it */
-export function GhostNode({ id, data, selected }: NodeProps<Node<EntityData>>) {
+export function GhostNode({ data, selected }: NodeProps<Node<EntityData>>) {
   const { node } = data
   const Icon = kindStyle(node.kind).icon
-  const dimmed = useDimmed(id)
   return (
-    <div className={['tile', 'tile-ghost', hueClass(node.hue), selected ? 'is-selected' : '', dimmed ? 'is-dimmed' : ''].join(' ')}>
+    <div className={['tile', 'tile-ghost', hueClass(node.hue), selected ? 'is-selected' : ''].join(' ')}>
       <div className="tile-head">
         <span className="tile-icon"><Icon size={15} /></span>
         <div className="tile-titles">
@@ -165,13 +155,12 @@ export function GhostNode({ id, data, selected }: NodeProps<Node<EntityData>>) {
 }
 
 /** Application view: a flow as one row — method, path, its handler, and what it does */
-export function FlowRowNode({ id, data, selected }: NodeProps<Node<EntityData>>) {
+export function FlowRowNode({ data, selected }: NodeProps<Node<EntityData>>) {
   const { node } = data
-  const dimmed = useDimmed(id)
   const [method, ...rest] = heading(node)
   const e = node.effects ?? {}
   return (
-    <div className={['row', 'row-flow', selected ? 'is-selected' : '', dimmed ? 'is-dimmed' : ''].join(' ')}>
+    <div className={['row', 'row-flow', selected ? 'is-selected' : ''].join(' ')}>
       <span className={`method m-${method.toLowerCase()}`}>{method}</span>
       <span className="row-text">
         <span className="row-title">{rest.join(' ')}</span>
@@ -189,16 +178,15 @@ export function FlowRowNode({ id, data, selected }: NodeProps<Node<EntityData>>)
 }
 
 /** Application view: a table, another application's endpoint, or an outside system */
-export function TargetRowNode({ id, data, selected }: NodeProps<Node<EntityData>>) {
+export function TargetRowNode({ data, selected }: NodeProps<Node<EntityData>>) {
   const { node } = data
   const style = kindStyle(node.kind)
   const Icon = style.icon
-  const dimmed = useDimmed(id)
   const u = node.usage ?? {}
   const isCall = node.kind !== 'table' && node.kind !== 'datastore'
   const [method, ...rest] = node.kind === 'endpoint' || node.kind === 'interface' ? node.label.split(' ') : ['']
   return (
-    <div className={['row', 'row-target', `tone-${style.tone}`, selected ? 'is-selected' : '', dimmed ? 'is-dimmed' : '', node.stub ? 'is-stub' : ''].join(' ')}>
+    <div className={['row', 'row-target', `tone-${style.tone}`, selected ? 'is-selected' : '', node.stub ? 'is-stub' : ''].join(' ')}>
       {method && rest.length ? <span className={`method m-${method.toLowerCase()}`}>{method}</span> : <Icon size={14} className="row-icon" aria-hidden="true" />}
       <span className="row-text">
         <span className="row-title">{method && rest.length ? rest.join(' ') : node.label}</span>
@@ -268,7 +256,6 @@ export function FlowHeadNode({ data }: NodeProps<Node<EntityData>>) {
  * step also says how many steps are inside it and what they touch. */
 export function StepRowNode({ id, data, selected }: NodeProps<Node<EntityData>>) {
   const { node } = data
-  const dimmed = useDimmed(id)
   const toggle = useContext(ExpandContext)
   const does = node.does ?? []
   const shown = does.slice(0, 2)
@@ -287,7 +274,6 @@ export function StepRowNode({ id, data, selected }: NodeProps<Node<EntityData>>)
         does.length || belowKinds.length ? '' : 'is-quiet',
         folded ? 'is-folded' : '',
         selected ? 'is-selected' : '',
-        dimmed ? 'is-dimmed' : '',
       ].join(' ')}
     >
       {node.has_children ? (

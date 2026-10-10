@@ -313,9 +313,11 @@ function Visualizer({ onExit }: { onExit: () => void }) {
   // Hover or selection lights up a node's connections and dims the rest. Nodes read the focus
   // from context so they keep their identity; rebuilding them mid-hover swallows clicks.
   // Live edges stay at their own depth so their labels remain on top of every line.
+  // Only the lit edges get new objects; the rest keep their identity (so they don't re-render)
+  // and are dimmed by the stage's `has-focus` class
+  const plain = useMemo(() => baseEdges.map((e) => (options.labels ? e : { ...e, label: undefined })), [baseEdges, options.labels])
   const { near, edges } = useMemo(() => {
     const focus = hovered ?? selected
-    const plain = baseEdges.map((e) => (options.labels ? e : { ...e, label: undefined }))
     if (!focus) return { near: null, edges: plain }
     const near = new Set([focus])
     const live = new Set<string>()
@@ -329,14 +331,19 @@ function Visualizer({ onExit }: { onExit: () => void }) {
     if (near.size === 1) return { near: null, edges: plain }
     return {
       near,
-      edges: baseEdges.map((e) => ({
-        ...e,
-        label: live.has(e.id) ? e.label : options.labels ? e.label : undefined,
-        className: `${e.className ?? ''} ${live.has(e.id) ? 'is-live' : 'is-dimmed'}`,
-        data: { ...e.data, state: live.has(e.id) ? 'live' : 'dimmed' },
-      })),
+      edges: plain.map((e, i) =>
+        live.has(e.id)
+          ? { ...e, label: baseEdges[i].label, className: `${e.className ?? ''} is-live`, data: { ...e.data, state: 'live' } }
+          : e,
+      ),
     }
-  }, [baseEdges, hovered, selected, options.labels])
+  }, [baseEdges, plain, hovered, selected])
+
+  // Dimming is one class on the stage; only the lit nodes get new objects (and re-render)
+  const shownNodes = useMemo(
+    () => (near ? nodes.map((n) => (near.has(n.id) ? { ...n, className: `${n.className ?? ''} is-near` } : n)) : nodes),
+    [nodes, near],
+  )
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => setNodes((current) => applyNodeChanges(changes, current)),
@@ -359,14 +366,16 @@ function Visualizer({ onExit }: { onExit: () => void }) {
     [routeKey],
   )
 
-  // Start loading a level while the pointer is over its tile
+  // Start loading a level once the pointer rests on its tile (not on every tile it crosses)
+  const prefetch = useRef<number>(undefined)
   const onNodeMouseEnter = useCallback(
     (_: unknown, n: Node) => {
       if (n.type === 'cluster') return
       setHovered(n.id)
       const node = (n.data as EntityData).node
       const target = node.drill || node.outside ? routeFor(node.kind, node.id) : null
-      if (target) prepare(target).catch(() => {})
+      window.clearTimeout(prefetch.current)
+      if (target) prefetch.current = window.setTimeout(() => prepare(target).catch(() => {}), 300)
     },
     [prepare],
   )
@@ -418,13 +427,14 @@ function Visualizer({ onExit }: { onExit: () => void }) {
         }}
       />
 
-      <div ref={stageRef} className={`viz-stage ${dense ? 'is-dense' : ''} view-${view?.view ?? 'loading'}`}>
+      <div ref={stageRef} className={`viz-stage ${dense ? 'is-dense' : ''} ${near ? 'has-focus' : ''} view-${view?.view ?? 'loading'}`}>
         <InspectContext.Provider value={setSelected}>
           <ExpandContext.Provider value={toggleStep}>
           <FocusContext.Provider value={near}>
             <ReactFlow
-              nodes={nodes}
+              nodes={shownNodes}
               edges={edges}
+              onlyRenderVisibleElements={nodes.length > 80}
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
               onNodesChange={onNodesChange}
@@ -437,7 +447,10 @@ function Visualizer({ onExit }: { onExit: () => void }) {
               elementsSelectable
               onNodeClick={onNodeClick}
               onNodeMouseEnter={onNodeMouseEnter}
-              onNodeMouseLeave={() => setHovered(undefined)}
+              onNodeMouseLeave={() => {
+                window.clearTimeout(prefetch.current)
+                setHovered(undefined)
+              }}
               onPaneClick={() => setSelected(undefined)}
               zoomOnDoubleClick={false}
             >

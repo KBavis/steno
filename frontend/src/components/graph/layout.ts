@@ -1,4 +1,5 @@
-import ELK from 'elkjs/lib/elk.bundled.js'
+import ELK from 'elkjs/lib/elk-api.js'
+import elkWorkerUrl from 'elkjs/lib/elk-worker.min.js?url'
 import type { ElkExtendedEdge, ElkNode } from 'elkjs/lib/elk-api'
 import type { Edge, Node } from '@xyflow/react'
 import { MarkerType } from '@xyflow/react'
@@ -7,7 +8,9 @@ import { alongCurve } from './curve'
 import type { Point, RoutedData } from './edges'
 import { partText, type LabelPart } from './labels'
 
-const elk = new ELK()
+// Layout runs in a web worker, so laying out a view (or prefetching one on hover) never
+// blocks panning and zooming the one on screen
+const elk = new ELK({ workerUrl: elkWorkerUrl })
 
 export type Direction = 'RIGHT' | 'DOWN'
 

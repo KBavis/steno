@@ -184,10 +184,9 @@
   opacity: 0.55;
 }
 
+/* No backdrop blur: over the canvas it's recomputed on every frame of a pan or zoom */
 .glass {
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
-  -webkit-backdrop-filter: blur(16px) saturate(1.5);
-  backdrop-filter: blur(16px) saturate(1.5);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
   border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
   box-shadow:
     0 1px 2px rgb(0 0 0 / 0.04),
@@ -708,6 +707,12 @@
   opacity: 0.28;
 }
 
+/* A dimmed tile stays opaque (only its contents fade), so links running behind it don't
+   show through across its name */
+.viz-stage.has-focus .react-flow__node:not(.is-near) .tile > * {
+  opacity: 0.28;
+}
+
 .tile.is-stub {
   border-style: dashed;
 }
@@ -968,7 +973,8 @@
   }
 }
 
-.react-flow__edge.is-dimmed {
+.react-flow__edge.is-dimmed,
+.viz-stage.has-focus .react-flow__edge:not(.is-live) {
   opacity: 0.12;
 }
 
@@ -1035,6 +1041,12 @@
 
 .elabel.is-dimmed {
   opacity: 0.12;
+}
+
+/* While a tile is focused, other links' labels are hidden, not faded: faded text lying across
+   dimmed tiles reads as clutter on top of their names */
+.viz-stage.has-focus .elabel:not(.is-live) {
+  visibility: hidden;
 }
 
 .viz-stage.is-dense .elabel:not(.is-live) {
@@ -1192,6 +1204,12 @@
 }
 
 .gnode.is-dimmed {
+  opacity: 0.22;
+}
+
+/* A dimmed tile stays opaque (only its contents fade), so links running behind it don't
+   show through across its name */
+.viz-stage.has-focus .react-flow__node:not(.is-near) .gnode > * {
   opacity: 0.22;
 }
 
@@ -1430,9 +1448,7 @@
   overflow-y: auto;
   padding: 18px 18px 32px;
   border-radius: 16px;
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
-  -webkit-backdrop-filter: blur(16px) saturate(1.5);
-  backdrop-filter: blur(16px) saturate(1.5);
+  background: color-mix(in srgb, var(--surface) 97%, transparent);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-lg);
   font-size: 13px;
@@ -1641,6 +1657,12 @@
 }
 
 .row.is-dimmed {
+  opacity: 0.25;
+}
+
+/* A dimmed tile stays opaque (only its contents fade), so links running behind it don't
+   show through across its name */
+.viz-stage.has-focus .react-flow__node:not(.is-near) .row > * {
   opacity: 0.25;
 }
 
@@ -2017,7 +2039,8 @@
   display: inline;
 }
 
-.viz-stage.is-dense .react-flow__edge.is-dimmed {
+.viz-stage.is-dense .react-flow__edge.is-dimmed,
+.viz-stage.is-dense.has-focus .react-flow__edge:not(.is-live) {
   opacity: 0.05;
 }
 
