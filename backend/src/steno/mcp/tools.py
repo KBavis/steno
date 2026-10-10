@@ -426,6 +426,15 @@ class Tools:
             "id": flow_id,
             "kind": "flow",
             "trigger": fl.get("trigger"),
+            **(
+                {
+                    "inferred": "nothing in the code starts this function; Steno treats it as an "
+                    "entry point because it does real work (a worker loop, a command, a callback "
+                    "a framework registers)"
+                }
+                if fl.get("inferred")
+                else {}
+            ),
             **self._where(flow_id),
             **({"purpose": fl.get("purpose")} if fl.get("purpose") else {}),
             "touches": {verb: sorted(names) for verb, names in totals.items()},

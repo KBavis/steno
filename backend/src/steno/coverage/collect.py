@@ -90,6 +90,7 @@ def collect(
         return items[key]
 
     _unknown_hosts(plan, resolver, item)
+    _inferred(plan, item)
     _unreachable(plan, resolver, item)
     _dropped(x, item)
     _unparsed(x, item)
@@ -106,6 +107,7 @@ def collect(
         "external_call",
         "library",
         "unresolved_type",
+        "inferred_entry",
         "unreachable_effect",
         "dropped_match",
     ]
@@ -176,6 +178,23 @@ def _unknown_hosts(plan: GraphPlan, r: Resolvers | None, item: Any) -> None:
                 "line": u.get("line"),
                 "function": u.get("function"),
                 "detail": u.get("url"),
+            }
+        )
+
+
+def _inferred(plan: GraphPlan, item: Any) -> None:
+    """Flows Steno started itself because nothing in the code starts them (D74): a worker loop,
+    a CLI command, a framework callback. Each is a flow already; naming its trigger takes a
+    rule (an entry point), which also makes the flow certain instead of inferred."""
+    for u in plan.stats.get("inferred_entries", []):
+        short = ".".join(u["function"].replace("#", ".").split("(")[0].split(".")[-2:])
+        it = item("unreachable", "inferred_entry", u["function"], f"No known trigger · {short}")
+        it.add(
+            {
+                "file": u.get("file"),
+                "line": u.get("line"),
+                "function": u["function"],
+                "detail": "started by something outside the code; flow inferred",
             }
         )
 

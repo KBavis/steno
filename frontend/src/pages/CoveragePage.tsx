@@ -23,6 +23,10 @@ const SIGNALS: Record<CoverageSignal, { label: string; help: string }> = {
     label: 'Missing library types',
     help: "Calls where a flow stopped because a value's type comes from a library Steno can't see (no dependency JARs yet), one item per library. The biggest ones say which JARs would help most.",
   },
+  inferred_entry: {
+    label: 'Unknown triggers',
+    help: "Work inside an application that nothing in the code starts (a worker loop, a CLI command, a callback a framework registers). Steno still gives it a flow, marked inferred; a rule that names its trigger makes the flow certain.",
+  },
   unreachable_effect: {
     label: 'Unreachable code',
     help: "Code that reads, writes, or calls out, but that no entry point reaches: dead code, a missing entry point (a consumer, a schedule), or a call the resolver can't follow.",

@@ -121,6 +121,8 @@ class Function(Protocol):
     def body_hash(self) -> str: ...
     @property
     def language(self) -> str: ...
+    @property
+    def in_class(self) -> bool: ...  # a method, not a module-level function
 
 
 class Resolver(Protocol):

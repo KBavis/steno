@@ -64,6 +64,7 @@ class JavaFunction:
     # Parameters annotated @Value("${key}"): their value comes from config
     param_values: tuple[tuple[str, str], ...] = ()
     language: str = "java"
+    in_class: bool = True
 
     @property
     def params(self) -> dict[str, Any]:

@@ -67,6 +67,7 @@ TRIGGER_KIND = {
     "Queue": "queue",
     "GrpcMethod": "grpc",
 }
+JAVA_IMPLICIT = {"toString", "equals", "hashCode", "compareTo", "close", "clone", "finalize"}
 SCHEDULE_NAME = {
     "cron": "Cron job",
     "fixed-rate": "Fixed-rate job",
@@ -202,6 +203,7 @@ class _Builder:
         self.utility: set[Key] = set()
         self.files: dict[str, dict[str, int]] = {}  # file path → counts, for File nodes
         self.counted: set[Key] = set()
+        self.inferred: set[Key] = set()  # entry points no rule names (D74)
 
     def run(self) -> GraphPlan:
         self._structure()
@@ -537,13 +539,12 @@ class _Builder:
             for ep in self.x.entry_points
             if self.entry_of[ep.function] in self.functions
         }
-        todo = deque(sorted(self.roots, key=_key_order))
-        while todo:
-            key = todo.popleft()
-            if key in self.graph:
-                continue
-            self.graph[key] = self._calls_from(key, rule_calls.get(key[0], []))
-            todo.extend(c.target for c in self.graph[key] if c.target not in self.graph)
+        self._walk(self.roots, rule_calls)
+        # Work inside an application that nothing in the code starts (a worker loop, a CLI
+        # command, a tool a framework registers): its own flow, marked inferred (D74)
+        self.inferred = self._inferred_roots(rule_calls)
+        self._walk(self.inferred, rule_calls)
+        self.roots |= self.inferred
 
         reachable = set(self.graph)
         callers: dict[Key, set[Key]] = defaultdict(set)
@@ -564,12 +565,75 @@ class _Builder:
             functions_reachable=len(reached_symbols),
             calls=sum(len(out) for out in self.graph.values()),
             utility=len({k[0] for k in self.utility}),
+            # Flows Steno started itself: coverage items (no known trigger), so a rule can name one
+            inferred_entries=[
+                {
+                    "function": key[0],
+                    "file": self._rel(self.functions[key[0]]),
+                    "line": self.functions[key[0]].span[0],
+                }
+                for key in sorted(self.inferred, key=_key_order)
+            ],
             # Effects in code no entry point reaches: coverage items (unreachable code), not facts
             unreached_effects=[
                 {"function": sym, "effects": [e.type for e in self.effects[sym]]}
                 for sym in unreached
             ],
         )
+
+    def _walk(self, roots: set[Key], rule_calls: dict[str, list[tuple[str, int, bool]]]) -> None:
+        """Add everything `roots` reach to the call graph."""
+        todo = deque(sorted(roots, key=_key_order))
+        while todo:
+            key = todo.popleft()
+            if key in self.graph:
+                continue
+            self.graph[key] = self._calls_from(key, rule_calls.get(key[0], []))
+            todo.extend(c.target for c in self.graph[key] if c.target not in self.graph)
+
+    def _inferred_roots(self, rule_calls: dict[str, list[tuple[str, int, bool]]]) -> set[Key]:
+        """Functions inside an application that nothing in the repository calls and no rule
+        starts, but that do real work (an effect at or below them). Something outside the code
+        runs them: a framework, a process manager, a scheduler no rule knows. Scripts and
+        tooling outside every application never start a flow."""
+        called: set[str] = set(self.entry_of) | set(self.entry_of.values())
+        for symbol in self.functions:
+            for inv in self._calls_of((symbol, None)):
+                called.add(inv.callee)
+                called.update(inv.candidates)
+        for calls in rule_calls.values():
+            called.update(callee for callee, _, _ in calls)
+        reached = {k[0] for k in self.graph}
+        # Classes the known flows already use: an uncalled method of one is dead code (an
+        # unused service method), not work something outside the code starts
+        used = {self.functions[s].container for s in reached if self.functions[s].in_class}
+        roots = set()
+        for symbol, fn in sorted(self.functions.items()):
+            if symbol in called or symbol in reached or _implicitly_called(fn):
+                continue
+            if fn.in_class and fn.container in used:
+                continue
+            rel = self._rel(fn)
+            module = self.s.module_of(rel)
+            # Not the application's own code: a Python script inside a Java service's folder
+            if not self._app_for(rel) or (module and module.language not in (None, fn.language)):
+                continue
+            if self._reaches_effect(symbol):
+                roots.add((symbol, None))
+        return roots
+
+    def _reaches_effect(self, symbol: str) -> bool:
+        seen, todo = set(), [symbol]
+        while todo:
+            current = todo.pop()
+            if current in seen or current not in self.functions:
+                continue
+            seen.add(current)
+            if self.effects.get(current):
+                return True
+            for inv in self._calls_of((current, None)):
+                todo.extend(t[0] for t, _ in self._targets(inv))
+        return False
 
     def _calls_from(self, key: Key, rule_calls: list[tuple[str, int, bool]]) -> list[Call]:
         """A function's calls in source order. A rule's call to a function the code already
@@ -680,6 +744,45 @@ class _Builder:
             if app:
                 self.plan.edge("BELONGS_TO", flow, app, **prov)
             self._steps(flow, trace)
+        for key in sorted(self.inferred, key=_key_order):
+            self._inferred_flow(key)
+
+    def _inferred_flow(self, key: Key) -> None:
+        """A flow no trigger is known for (D74): no STARTS edge, named after the function it
+        starts in, and marked `inferred` so nobody mistakes it for a known entry point."""
+        fn = self.functions[key[0]]
+        rel = self._rel(fn)
+        start, end = fn.span
+        prov = {**self._prov("inferred-entry", rel, start), "confidence": 0.5}
+        app = self._app_for(rel)
+        app_name = self.plan.nodes[app].props["name"] if app else self.ctx.repo
+        name = f"Background work · {fn.container.rsplit('.', 1)[-1]}.{fn.name}"
+        flow = ids.flow_id(app_name, name)
+        trace = self._trace(flow, key)
+        stops = sum(len(t.get("unresolved", [])) for t in trace)
+        self.plan.node(
+            flow,
+            ["Flow", "Searchable"],
+            name=name,
+            trigger="unknown",
+            trigger_kind="inferred",
+            inferred=True,
+            entry_symbol=key[0],
+            entry_file=rel,
+            entry_start_line=start,
+            entry_end_line=end,
+            functions=len({t["symbol"] for t in trace}),
+            steps=sum(1 for t in trace if t.get("step")),
+            trace=json.dumps(trace, separators=(",", ":")),
+            trace_files=sorted({t["file"] for t in trace}),
+            trace_symbols=sorted({t["symbol"] for t in trace}),
+            unresolved_calls=stops or None,
+            incomplete=bool(stops) or None,
+            **prov,
+        )
+        if app:
+            self.plan.edge("BELONGS_TO", flow, app, **prov)
+        self._steps(flow, trace)
 
     def _trace(self, flow: str, root: Key) -> list[dict[str, Any]]:
         """The flow's trace: a depth-first walk from the entry, each call in source order.
@@ -878,6 +981,17 @@ def _reaches_effect(nodes: set[Any], graph: dict[Any, list[Any]], effectful: set
                 result.add(q)
                 changed = True
     return result
+
+
+def _implicitly_called(fn: Function) -> bool:
+    """Methods the language itself calls (`__enter__`, `toString`) or that a constructor call
+    already covers: never a starting point of their own."""
+    name = fn.name
+    if name.startswith("__") and name.endswith("__"):
+        return True
+    if fn.language == "java":
+        return name == fn.container.rsplit(".", 1)[-1] or name in JAVA_IMPLICIT
+    return False
 
 
 def _matters(gap: UnresolvedCall, first_party: set[str]) -> bool:

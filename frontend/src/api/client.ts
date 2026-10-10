@@ -84,7 +84,7 @@ export interface JobDetail extends Job {
 // ---------------------------------------------------------------- coverage
 
 export type CoverageStatus = 'unexplained' | 'ignored' | 'explained'
-export type CoverageSignal = 'unknown_host' | 'external_call' | 'library' | 'unreachable_effect' | 'dropped_match' | 'unparsed' | 'unresolved_type'
+export type CoverageSignal = 'unknown_host' | 'external_call' | 'library' | 'unreachable_effect' | 'dropped_match' | 'unparsed' | 'unresolved_type' | 'inferred_entry'
 
 export interface CoverageSample {
   file?: string | null

@@ -870,6 +870,7 @@ NOT_HTTP = {
     "queue": ("QUEUE", "Queues"),
     "grpc": ("GRPC", "gRPC"),
     "channel": ("CHANNEL", "Channels"),
+    "inferred": ("INFERRED", "Background work (trigger unknown)"),
 }
 
 

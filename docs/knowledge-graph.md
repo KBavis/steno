@@ -313,6 +313,7 @@ RETURN s1.name, s2.name, count(*) AS calls
 - **There is no `Job` type.** Flows differ only by what triggers them:
   - `(:Interface)-[:STARTS]->(:Flow)`: HTTP, gRPC, a consumed topic
   - `(:Schedule)-[:STARTS]->(:Flow)`: cron, Spring `@Scheduled`, Quartz, a Kubernetes CronJob
+  - **no trigger known** (D74): work inside an application that nothing in the code starts (a worker loop, a CLI command, a framework callback). The flow has no `STARTS` edge, `trigger_kind: inferred`, `inferred: true`, and confidence 0.5, and the coverage report lists it until a rule names its trigger.
 
   Sync vs. async isn't the dividing line (a Kafka consumer is async). Each org's scheduling mechanism is a rule (or plugin) that emits the same `Schedule` node.
 - **There is no `Subflow` type.** Shared logic ("identify client") is a function that appears in several flows' traces.

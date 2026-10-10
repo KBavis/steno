@@ -88,6 +88,10 @@ class FunctionInfo:
     language = "python"
 
     @property
+    def in_class(self) -> bool:
+        return self.cls is not None
+
+    @property
     def symbol(self) -> str:
         return self.qualname
 

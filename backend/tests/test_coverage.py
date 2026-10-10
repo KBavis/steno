@@ -35,7 +35,7 @@ APP = {
             return await Tenants(tenant_url).ping()     # host is runtime data
 
 
-        async def nightly_cleanup():                    # no entry point reaches it
+        async def nightly_cleanup():                    # nothing calls it: an inferred flow
             async with httpx.AsyncClient() as client:
                 await client.delete("https://api.example.com/old")
     """,
@@ -57,13 +57,37 @@ def _report(tmp_path: Path):
     return {(i.signal, i.target): i for i in report.items}, report.metrics
 
 
+def _plan(tmp_path: Path):
+    for name, code in APP.items():
+        (tmp_path / name).write_text(dedent(code).lstrip())
+    (tmp_path / "requirements.txt").write_text("fastapi\nhttpx\nredis\n")
+    packs = [p for p in load_packs(get_settings().rule_packs_dir) if is_enabled(p, tmp_path)]
+    engine = run_folder(tmp_path, packs)
+    structure = detect(tmp_path, {ep.origin.file for ep in engine.out.entry_points})
+    ctx = Context("demo", "space:1", "org:1", 1, "c")
+    return build(engine.out, engine.resolver, structure, ctx)
+
+
+def test_uncalled_work_is_an_inferred_flow(tmp_path):
+    plan = _plan(tmp_path)
+    flows = {n.props["name"]: n for n in plan.nodes.values() if n.labels[0] == "Flow"}
+    inferred = flows["Background work · app.nightly_cleanup"]
+    assert inferred.props["inferred"] is True and inferred.props["trigger_kind"] == "inferred"
+    assert inferred.props["confidence"] == 0.5
+    # No trigger is known, so nothing STARTS it
+    assert not any(k[0] == "STARTS" and k[2] == inferred.id for k in plan.edges)
+    # Called functions (Tenants.ping) and the constructor aren't starting points of their own
+    assert set(flows) == {"POST /orders", "Background work · app.nightly_cleanup"}
+
+
 def test_each_gap_is_an_item(tmp_path):
     items, _ = _report(tmp_path)
     assert set(items) == {
         ("unknown_host", "app.Tenants"),
         ("external_call", "redis.Redis.publish"),
         ("library", "redis"),
-        ("unreachable_effect", "app.nightly_cleanup"),
+        # Nothing in the code starts it, but it does real work: a flow, flagged (D74)
+        ("inferred_entry", "app.nightly_cleanup"),
         ("unparsed", "broken.py"),
     }
 
