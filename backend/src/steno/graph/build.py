@@ -29,6 +29,7 @@ from steno.extraction.facts import (
     HttpRef,
     NodeFact,
     NodeRef,
+    config_keys,
     split_url,
 )
 from steno.graph import ids
@@ -489,6 +490,13 @@ class _Builder:
             }
         )
         short = owner.rsplit(".", 1)[-1]
+        node_id = ids.external_system_id(f"{UNRESOLVED_SYSTEM}:{owner}")
+        # What's known about the host, for whoever reads the graph: the settings it comes from
+        # (set outside the repository, or Steno would have read them) and the paths called
+        before = self.plan.nodes[node_id].props if node_id in self.plan.nodes else {}
+        keys = sorted({*before.get("config_keys", []), *config_keys(ref.url)})
+        _, path = split_url(ref.url)
+        paths = sorted({*before.get("paths", []), f"{ref.method} {path}"} - {f"{ref.method} "})
         return self._external(
             None,
             f"Unknown host · {short} ({file})" if file else f"Unknown host · {short}",
@@ -496,6 +504,14 @@ class _Builder:
             key=f"{UNRESOLVED_SYSTEM}:{owner}",
             stub=True,
             called_from=owner,
+            config_keys=keys or None,
+            paths=paths or None,
+            host_note=(
+                f"the host comes from {', '.join(keys)}, set where the app runs "
+                "(not in any config file in the repository)"
+                if keys
+                else "the host is runtime data"
+            ),
         )
 
     def _fact_edge(self, e: EdgeFact) -> None:

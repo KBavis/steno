@@ -303,7 +303,8 @@ class JavaResolver:
             if default is not None:
                 return default
             missing = True
-            return "{" + key.rsplit(".", 1)[-1] + "}"
+            # Kept as written, so whoever reads the URL sees which setting holds the value
+            return "${" + key + "}"
 
         out = _PROPERTY.sub(sub, text)
         return UNRESOLVED if missing and not placeholders else out

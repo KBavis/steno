@@ -9,8 +9,9 @@ Search is full-text for now (D54); cards and Jev routing come later.
 """
 
 import json
+import re
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from neo4j import Driver
@@ -20,6 +21,7 @@ from sqlalchemy.orm import Session
 from steno.api.links import source_url
 from steno.connectors.source import SourceError, read_file, slice_lines
 from steno.db.models import Connector, Repository
+from steno.extraction.facts import split_url
 from steno.graph.build import step_of
 from steno.graph.views import GraphViews, kind_of
 
@@ -50,6 +52,7 @@ class Tools:
     driver: Driver
     database: str
     session: Session  # Postgres: repositories, for links and reading code
+    _endpoint_cache: list[dict[str, Any]] | None = field(default=None, init=False, repr=False)
 
     # ------------------------------------------------------------------ helpers
 
@@ -326,6 +329,7 @@ class Tools:
             MATCH (s)-[r]->(t) WHERE type(r) IN $effects
             OPTIONAL MATCH (t)-[:STARTS]->(next:Flow)
             RETURN s.id AS step, type(r) AS type, t, r.operation AS op, r.url AS url,
+                   r.method AS method,
                    r.source_file AS file, r.source_line AS line, r.call_sites AS sites,
                    collect(next.id) AS leads
             """,
@@ -339,6 +343,9 @@ class Tools:
                     "type": row["type"],
                     "target": t.get("name"),
                     "target_id": t["id"],
+                    "method": row["method"],
+                    "unknown_host": bool(t.get("stub") and t.get("called_from")),
+                    "host_note": t.get("host_note"),
                     "op": row["op"],
                     "url": row["url"],
                     "file": row["file"],
@@ -396,6 +403,14 @@ class Tools:
                     if e["url"]:
                         does += f" {e['url']}"
                     entry.setdefault("does", []).append(does)
+                    if e["unknown_host"]:
+                        # Not a fact: what's known about the host, and endpoints elsewhere whose
+                        # method and path match, for the reader to weigh
+                        if e["host_note"]:
+                            entry.setdefault("host_unknown", []).append(e["host_note"])
+                        for hint in self._path_matches(e["method"], e["url"], flow_id):
+                            if hint not in entry.setdefault("possible_targets", []):
+                                entry["possible_targets"].append(hint)
                     for line, op in e["sites"]:  # every place it happens, not just the first
                         claim = f"{VERB[e['type']]} {e['target']}" + (f" ({op})" if op else "")
                         entry.setdefault("_cites", []).append(
@@ -645,6 +660,45 @@ class Tools:
             )
         ]
 
+    def _path_matches(self, method: str | None, url: str | None, flow_id: str) -> list[str]:
+        """Endpoints in other applications whose method and path match a call whose host isn't
+        known: `possibly POST /suggestion in budgeting-app-inference`. A hint, never an edge:
+        a matching path alone doesn't say which service a call reaches (D64)."""
+        if not method or not url:
+            return []
+        _, path = split_url(url)
+        if not path or path == "/":
+            return []
+        own = self._where(flow_id).get("application")
+        want = _path_shape(path)
+        out = []
+        for e in self._endpoints():
+            if e["method"] != method.upper() or e["app"] == own:
+                continue
+            have = _path_shape(e["path"])
+            exact = have == want
+            if exact or (len(have) > 1 and want.endswith(have)):  # the base URL adds a prefix
+                how = "path matches" if exact else "path ends the same way"
+                flow = f"; its flow: {e['flow']}" if e["flow"] else ""
+                out.append(
+                    f"possibly {e['method']} {e['path']} in {e['app']} ({how}; host unknown){flow}"
+                )
+        return out
+
+    def _endpoints(self) -> list[dict[str, Any]]:
+        if self._endpoint_cache is None:
+            self._endpoint_cache = [
+                dict(r)
+                for r in self._read(
+                    """
+                    MATCH (a:Application)-[:EXPOSES]->(e:HttpEndpoint)
+                    OPTIONAL MATCH (e)-[:STARTS]->(f:Flow)
+                    RETURN e.method AS method, e.path AS path, a.name AS app, f.id AS flow
+                    """
+                )
+            ]
+        return self._endpoint_cache
+
     def _flows_touching(self, targets: list[str], types: list[str]) -> list[dict[str, Any]]:
         """Every way a flow touches the targets: one row per operation and call site, from the
         flow's steps, which carry the file and line of the code that does it."""
@@ -730,6 +784,13 @@ class Tools:
         ]
 
 
+def _path_shape(path: str) -> str:
+    """A path with its parameters blanked, for matching a call to a route:
+    `/users/{id}/` and `/users/{userId}` → `/users/{}`."""
+    shape = re.sub(r"\{[^}]*\}", "{}", path.split("?", 1)[0]).rstrip("/")
+    return shape if shape.startswith("/") else "/" + shape
+
+
 def _sites(sites: list[str] | None, line: int | None, op: str | None) -> list[tuple[Any, Any]]:
     """An effect's call sites as (line, operation): from `call_sites` ("120 upsert"), or the
     single line and operation of an edge written before call sites were kept."""
@@ -787,9 +848,10 @@ def _fold(steps: list[dict[str, Any]], levels: int, under: str | None) -> list[d
         for d in s.get("does", []):
             if d not in target.setdefault("inside_does", []):
                 target["inside_does"].append(d)
-        for d in s.get("stops", []):
-            if d not in target.setdefault("stops", []):
-                target["stops"].append(d)
+        for k in ("stops", "host_unknown", "possible_targets"):  # stay visible when folded
+            for d in s.get(k, []):
+                if d not in target.setdefault(k, []):
+                    target[k].append(d)
     return shown
 
 

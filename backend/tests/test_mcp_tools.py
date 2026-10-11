@@ -58,3 +58,18 @@ def test_stops_say_where_and_why():
         "in place: web.post().uri(…).retrieve() at line 61: library type (org.springframework.web)",
         "in place: session.commit() at line 70: unknown type",
     ]
+
+
+def test_paths_match_whatever_their_parameters_are_called():
+    from steno.mcp.tools import _path_shape
+
+    assert _path_shape("/users/{id}/") == _path_shape("/users/{userId}") == "/users/{}"
+    assert _path_shape("suggestion") == "/suggestion"
+
+
+def test_a_base_url_from_config_keeps_its_key_and_the_path():
+    from steno.extraction.facts import config_keys, split_url
+
+    assert split_url("${suggestion-engine.base-url}suggestion") == (None, "/suggestion")
+    assert split_url("${plaid.api.baseUrl}/link/token/create") == (None, "/link/token/create")
+    assert config_keys("${plaid.api.baseUrl}/x/${other:default}") == ["other", "plaid.api.baseUrl"]

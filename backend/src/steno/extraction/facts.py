@@ -4,6 +4,7 @@ docs/how-it-works/ingestion/rules-and-packs.md §3 defines the vocabulary; these
 in-memory form.
 """
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
@@ -139,14 +140,16 @@ class Extraction:
 def split_url(value: Any) -> tuple[str | None, str]:
     """A URL, or a URL template, split into its host (None when unknown) and path:
     `https://{domain}/rest/api/content/{id}` → (None, `/rest/api/content/{id}`);
-    `{base_url}/rest/api/2/search` → (None, `/rest/api/2/search`)."""
+    `{base_url}/rest/api/2/search` → (None, `/rest/api/2/search`);
+    `${suggestion.base-url}suggestion` (a base URL from config) → (None, `/suggestion`)."""
     if not isinstance(value, str) or value == UNRESOLVED_TEXT:
         return None, ""
     if "://" in value:
         host, _, path = value.split("://", 1)[1].partition("/")
         path = "/" + path
-    elif value.startswith("{"):
-        host, path = "", value[value.find("}") + 1 :] if "}" in value else ""
+    elif value.startswith(("{", "${")):
+        rest = value[value.find("}") + 1 :] if "}" in value else ""
+        host, path = "", (rest if rest.startswith("/") or not rest else "/" + rest)
     elif value.startswith("/"):
         host, path = "", value
     else:
@@ -154,6 +157,15 @@ def split_url(value: Any) -> tuple[str | None, str]:
         path = "/" + path
     host = host.rsplit("@", 1)[-1]
     return (host if host and "{" not in host else None), path
+
+
+CONFIG_KEY = re.compile(r"\$\{([^}:]+)(?::[^}]*)?\}")
+
+
+def config_keys(value: Any) -> list[str]:
+    """The config keys a URL template's runtime parts come from: `${plaid.api.baseUrl}/x` →
+    [`plaid.api.baseUrl`]."""
+    return sorted(set(CONFIG_KEY.findall(value))) if isinstance(value, str) else []
 
 
 def database_of(url: Any) -> dict[str, str] | None:

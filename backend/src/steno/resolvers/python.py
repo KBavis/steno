@@ -866,6 +866,9 @@ class PythonResolver:
         value = self.value_of(expr, scope)
         if isinstance(value, (str, int, float)) and not isinstance(value, bool):
             return str(value)
+        env = self._env_key(expr, scope)
+        if env is not None:  # set where the app runs: name the setting, like Spring's ${key}
+            return "${" + env + "}"
         if isinstance(expr, ast.JoinedStr):
             parts = []
             for part in expr.values:
@@ -901,6 +904,18 @@ class PythonResolver:
             if base is not None and (chars is None or isinstance(chars, str)):
                 return getattr(base, expr.func.attr)(chars)
             return base
+        return None
+
+    def _env_key(self, expr: ast.expr, scope: Scope) -> str | None:
+        """`os.getenv("PLAID_URL")`, `os.environ.get(...)`, `os.environ["PLAID_URL"]`: the
+        environment variable a value comes from, when its value isn't known."""
+        if isinstance(expr, ast.Call) and expr.args:
+            if self.symbol_of(expr.func, scope) in ("os.getenv", "os.environ.get"):
+                key = self.value_of(expr.args[0], scope)
+                return key if isinstance(key, str) else None
+        if isinstance(expr, ast.Subscript) and self.symbol_of(expr.value, scope) == "os.environ":
+            key = self.value_of(expr.slice, scope)
+            return key if isinstance(key, str) else None
         return None
 
     def _name_template(self, name: str, scope: Scope, depth: int) -> str | None:
