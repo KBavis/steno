@@ -277,6 +277,8 @@ def ref_key(ref: Any) -> tuple:
 
 
 def _dedupe_edges(x: Extraction) -> None:
+    """The same fact found twice at the same place (two rules, or one rule matching twice).
+    The same effect at two places (two saves to one table) is two facts: each is a call site."""
     seen, kept = set(), []
     for e in x.edges:
         key = (
@@ -284,6 +286,8 @@ def _dedupe_edges(x: Extraction) -> None:
             ref_key(e.src),
             ref_key(e.dst),
             tuple(sorted((k, repr(v)) for k, v in e.props.items())),
+            e.origin.file,
+            e.origin.line,
         )
         if key not in seen:
             seen.add(key)

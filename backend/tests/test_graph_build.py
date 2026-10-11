@@ -194,3 +194,16 @@ def test_unidentified_stores_belong_to_their_own_repository():
         stores.append({n.id for n in plan.nodes.values() if "DataStore" in n.labels})
     assert stores[0] and stores[1]
     assert stores[0].isdisjoint(stores[1])
+
+
+def test_an_effect_keeps_every_operation_and_call_site():
+    """A function that deletes and saves to the same table: both operations, every line."""
+    from steno.graph.build import GraphPlan
+
+    plan = GraphPlan()
+    plan.edge("WRITES_TO", "step:a", "table:t", operation="delete", source_line=164)
+    plan.edge("WRITES_TO", "step:a", "table:t", operation="upsert", source_line=120)
+    plan.edge("WRITES_TO", "step:a", "table:t", operation="upsert", source_line=140)
+    props = plan.edges[("WRITES_TO", "step:a", "table:t")].props
+    assert props["operation"] == "delete, upsert"
+    assert props["call_sites"] == ["120 upsert", "140 upsert", "164 delete"]

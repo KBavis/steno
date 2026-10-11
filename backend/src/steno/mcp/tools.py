@@ -326,7 +326,8 @@ class Tools:
             MATCH (s)-[r]->(t) WHERE type(r) IN $effects
             OPTIONAL MATCH (t)-[:STARTS]->(next:Flow)
             RETURN s.id AS step, type(r) AS type, t, r.operation AS op, r.url AS url,
-                   r.source_file AS file, r.source_line AS line, collect(next.id) AS leads
+                   r.source_file AS file, r.source_line AS line, r.call_sites AS sites,
+                   collect(next.id) AS leads
             """,
             id=flow_id,
             effects=EFFECTS,
@@ -342,6 +343,7 @@ class Tools:
                     "url": row["url"],
                     "file": row["file"],
                     "line": row["line"],
+                    "sites": _sites(row["sites"], row["line"], row["op"]),
                     "leads_to": [f for f in row["leads"] if f],
                 }
             )
@@ -394,9 +396,11 @@ class Tools:
                     if e["url"]:
                         does += f" {e['url']}"
                     entry.setdefault("does", []).append(does)
-                    entry.setdefault("_cites", []).append(
-                        self._cite(does, repo, commit, e["file"], e["line"])
-                    )
+                    for line, op in e["sites"]:  # every place it happens, not just the first
+                        claim = f"{VERB[e['type']]} {e['target']}" + (f" ({op})" if op else "")
+                        entry.setdefault("_cites", []).append(
+                            self._cite(claim, repo, commit, e["file"], line)
+                        )
                     for nxt in e["leads_to"]:
                         sync = e["type"] == "CALLS"
                         leads.append(
@@ -642,34 +646,38 @@ class Tools:
         ]
 
     def _flows_touching(self, targets: list[str], types: list[str]) -> list[dict[str, Any]]:
-        """Every way a flow touches the targets, one row per kind of edge and call site: from
-        the flow's steps, which carry the file and line of the code that does it."""
+        """Every way a flow touches the targets: one row per operation and call site, from the
+        flow's steps, which carry the file and line of the code that does it."""
         if not targets:
             return []
-        return [
-            {
-                "flow": r["fl"],
-                "trigger": r["trigger"],
-                "how": VERB[r["type"]] + (f" ({r['op']})" if r["op"] else ""),
-                "target": r["target"],
-                "file": r["file"],
-                "line": r["line"],
-                "repo": r["repo"],
-                "commit": r["commit"],
-            }
-            for r in self._read(
-                """
-                MATCH (fl:Flow)<-[:BELONGS_TO]-(:Step)-[r]->(t)
-                WHERE t.id IN $ids AND type(r) IN $types
-                RETURN DISTINCT fl.id AS fl, fl.trigger AS trigger, type(r) AS type,
-                       r.operation AS op, t.name AS target, r.source_file AS file,
-                       r.source_line AS line, fl.repo AS repo, fl.commit AS commit
-                ORDER BY fl, type, file, line
-                """,
-                ids=targets,
-                types=types,
-            )
-        ]
+        out = []
+        for r in self._read(
+            """
+            MATCH (fl:Flow)<-[:BELONGS_TO]-(:Step)-[r]->(t)
+            WHERE t.id IN $ids AND type(r) IN $types
+            RETURN DISTINCT fl.id AS fl, fl.trigger AS trigger, type(r) AS type,
+                   r.operation AS op, t.name AS target, r.source_file AS file,
+                   r.source_line AS line, r.call_sites AS sites, fl.repo AS repo,
+                   fl.commit AS commit
+            ORDER BY fl, type, file, line
+            """,
+            ids=targets,
+            types=types,
+        ):
+            for line, op in _sites(r["sites"], r["line"], r["op"]):
+                out.append(
+                    {
+                        "flow": r["fl"],
+                        "trigger": r["trigger"],
+                        "how": VERB[r["type"]] + (f" ({op})" if op else ""),
+                        "target": r["target"],
+                        "file": r["file"],
+                        "line": line,
+                        "repo": r["repo"],
+                        "commit": r["commit"],
+                    }
+                )
+        return out
 
     def _flows_of(self, node_id: str, kind: str) -> list[str]:
         if kind == "flow":
@@ -720,6 +728,18 @@ class Tools:
                 groups.items(), key=lambda kv: min(f["hops"] for f in kv[1])
             )
         ]
+
+
+def _sites(sites: list[str] | None, line: int | None, op: str | None) -> list[tuple[Any, Any]]:
+    """An effect's call sites as (line, operation): from `call_sites` ("120 upsert"), or the
+    single line and operation of an edge written before call sites were kept."""
+    if sites:
+        out = []
+        for site in sites:
+            at, _, how = site.partition(" ")
+            out.append((int(at) if at.isdigit() else None, how or None))
+        return out
+    return [(line, op)]
 
 
 def _unique(citations: list[dict[str, Any]]) -> list[dict[str, Any]]:

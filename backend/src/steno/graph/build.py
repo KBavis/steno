@@ -132,17 +132,33 @@ class GraphPlan:
         return id
 
     def edge(self, type: str, src: str, dst: str, **props: Any) -> None:
+        """One edge per (type, from, to). An effect that happens several times in one function
+        (a delete and two saves on the same table) keeps every operation and every call site:
+        `operation: "delete, upsert"`, `call_sites: ["120 upsert", "164 delete"]`."""
         key = (type, src, dst)
-        if key in self.edges:  # one edge per pair; keep the first call site, merge flags
+        site = _call_site(type, props)
+        if key in self.edges:
             current = self.edges[key].props
             for k, v in props.items():
                 if isinstance(v, bool) and isinstance(current.get(k), bool):
                     current[k] = current[k] or v  # e.g. async: true from a background-task rule
+                elif k == "operation" and v and current.get(k) and v != current[k]:
+                    current[k] = ", ".join(sorted({*str(current[k]).split(", "), str(v)}))
                 else:
                     current.setdefault(k, v)
+            if site:
+                current["call_sites"] = sorted(
+                    {*current.get("call_sites", []), site}, key=_site_order
+                )
         else:
             self.edges[key] = GraphEdge(
-                type, src, dst, {k: v for k, v in props.items() if v is not None}
+                type,
+                src,
+                dst,
+                {
+                    **{k: v for k, v in props.items() if v is not None},
+                    **({"call_sites": [site]} if site else {}),
+                },
             )
 
     def counts(self) -> dict[str, dict[str, int]]:
@@ -1006,6 +1022,20 @@ def _reaches_effect(nodes: set[Any], graph: dict[Any, list[Any]], effectful: set
                 result.add(q)
                 changed = True
     return result
+
+
+def _call_site(type: str, props: dict[str, Any]) -> str | None:
+    """`"120 upsert"`: where in its function an effect happens, and how."""
+    line = props.get("source_line")
+    if type not in EFFECTS or not line:
+        return None
+    op = props.get("operation")
+    return f"{line} {op}" if op else str(line)
+
+
+def _site_order(site: str) -> tuple[int, str]:
+    line, _, rest = site.partition(" ")
+    return (int(line) if line.isdigit() else 0, rest)
 
 
 def _implicitly_called(fn: Function) -> bool:
