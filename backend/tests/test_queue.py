@@ -8,7 +8,7 @@ from sqlalchemy.exc import OperationalError
 from steno.config import get_settings
 from steno.db.models import Connector, ConnectorKind, IngestionJob, JobMode, JobStatus, Repository
 from steno.db.session import _session_factory
-from steno.ingestion.queue import RepositoryBusy, claim_next, enqueue
+from steno.ingestion.queue import RepositoryBusy, claim_next, enqueue, recover_interrupted
 
 
 @pytest.fixture
@@ -65,3 +65,13 @@ def test_no_claim_beyond_the_parallel_limit(session, monkeypatch):
     repo = _repo(session, "queue-test-c")
     enqueue(session, repo.id, JobMode.DRY_RUN)
     assert claim_next(session) is None  # the limit is reached: the job waits
+
+
+def test_interrupted_jobs_unlock_their_repository(session):
+    repo = _repo(session, "queue-test-d")
+    job = enqueue(session, repo.id, JobMode.DRY_RUN)
+    job.status = JobStatus.RUNNING  # its worker was stopped mid-job
+    session.flush()
+    assert job.id in recover_interrupted(session)
+    assert job.status == JobStatus.FAILED and job.error.startswith("interrupted")
+    assert enqueue(session, repo.id, JobMode.DRY_RUN).id != job.id  # unlocked

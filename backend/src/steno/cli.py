@@ -104,6 +104,19 @@ def job_enqueue(
         typer.echo(f"queued job {job.id} ({mode}) for {repo}")
 
 
+@job_app.command("recover")
+def job_recover() -> None:
+    """Mark jobs left `running` by a worker that's no longer running as failed, so their
+    repositories can be ingested again. Only run it when no worker is running (make dev does)."""
+    from steno.db.session import session_scope
+    from steno.ingestion.queue import recover_interrupted
+
+    with session_scope() as session:
+        ids = recover_interrupted(session)
+    if ids:
+        typer.echo(f"marked {len(ids)} interrupted job(s) failed: {', '.join(map(str, ids))}")
+
+
 @job_app.command("nightly")
 def job_nightly() -> None:
     """Run the nightly check now: queue a full run for every repository whose default branch

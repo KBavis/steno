@@ -84,3 +84,17 @@ def claim_next(session: Session) -> IngestionJob | None:
         job.status = JobStatus.RUNNING
         job.started_at = func.now()
     return job
+
+
+def recover_interrupted(session: Session) -> list[int]:
+    """Jobs still `running` with no worker running them (the worker was stopped mid-job): mark
+    them failed, which also unlocks their repositories. Callers make sure no worker is running;
+    a worker heartbeat would make this safe while workers run (later)."""
+    jobs = list(
+        session.scalars(select(IngestionJob).where(IngestionJob.status == JobStatus.RUNNING))
+    )
+    for job in jobs:
+        job.status = JobStatus.FAILED
+        job.finished_at = func.now()
+        job.error = "interrupted: the worker running it stopped"
+    return [job.id for job in jobs]
