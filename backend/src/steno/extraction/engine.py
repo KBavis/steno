@@ -221,6 +221,9 @@ class Engine:
         globs = rule.files or config_files.DEFAULT_GLOBS
         for path in self.files:
             rel = path.relative_to(self.repo).as_posix()
+            # Test configuration (src/test/resources, test fixtures) describes no running app
+            if is_test_file(path.relative_to(self.repo)):
+                continue
             if not any(
                 fnmatch.fnmatch(rel, g) or fnmatch.fnmatch(path.name, g.rsplit("/", 1)[-1])
                 for g in globs
