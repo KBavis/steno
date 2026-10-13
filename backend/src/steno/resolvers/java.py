@@ -25,13 +25,20 @@ from typing import Any
 from ast_grep_py import SgNode
 
 from steno.config import get_settings
-from steno.resolvers.base import UNRESOLVED, Invocation, LibraryCall, UnresolvedCall, span
+from steno.resolvers.base import (
+    UNRESOLVED,
+    Hook,
+    Invocation,
+    LibraryCall,
+    UnresolvedCall,
+    span,
+)
 from steno.source.files import is_test_file, source_files
 
 log = logging.getLogger(__name__)
 
 # JDK packages that reach the network or a database; the rest of the JDK isn't a library to cover
-JDK_IO = {"java.net", "java.sql", "java.nio", "javax.net", "javax.sql", "javax.jms"}
+JDK_IO = {"java.net", "java.sql", "java.nio", "java.io", "javax.net", "javax.sql", "javax.jms"}
 _PROPERTY = re.compile(r"\$\{([^}:]+)(?::([^}]*))?\}")
 _DOMAINS = {"com", "org", "io", "net", "dev", "de", "uk", "co", "me", "ch", "fr", "nl", "app"}
 
@@ -86,6 +93,9 @@ class JavaType:
     is_abstract: bool
     bases: list[str] = field(default_factory=list)
     entity: str | None = None  # a Spring Data repository's entity
+    annotations: list[str] = field(default_factory=list)
+    # JPA relationships: {field, kind, target, cascade?}
+    relations: list[dict[str, Any]] = field(default_factory=list)
 
 
 class JavaResolver:
@@ -115,6 +125,8 @@ class JavaResolver:
                 bool(t.get("abstract")),
                 t.get("bases", []),
                 t.get("entity"),
+                t.get("annotations", []),
+                t.get("relations", []),
             )
             for t in data.get("types", [])
         }
@@ -133,6 +145,18 @@ class JavaResolver:
                 tuple((f.get("param_values") or {}).items()),
             )
             for f in data.get("functions", [])
+        }
+        self._accessors = {
+            f["symbol"]: f["accessors"] for f in data.get("functions", []) if f.get("accessors")
+        }
+        self._annotations = {
+            f["symbol"]: f["annotations"] for f in data.get("functions", []) if f.get("annotations")
+        }
+        # Repository methods with their own query: symbol → (query text, native SQL?)
+        self.queries = {
+            f["symbol"]: (f["query"], bool(f.get("native")))
+            for f in data.get("functions", [])
+            if f.get("query")
         }
         self._implementations = {
             f["symbol"]: f["implementations"]
@@ -356,6 +380,83 @@ class JavaResolver:
             if t in self.types and self.types[t].entity:
                 return self.types[t].entity
         return cls
+
+    def cascades(self, entity: str) -> list[tuple[str, str, list[str]]]:
+        """An entity's JPA relationships that cascade: (target entity, field, cascade types)."""
+        t = self.types.get(entity)
+        return [
+            (r["target"], r["field"], r["cascade"])
+            for r in (t.relations if t else [])
+            if r.get("cascade")
+        ]
+
+    def touched_fields(self, fn: JavaFunction) -> set[str]:
+        """Entity relationships `fn` reads or sets: `category.getValidTimes()`,
+        `user.setAccounts(...)`, `Category.builder().validTimes(...)`, whether the accessor is
+        Lombok's or written by hand (`entity.field`)."""
+        members = list(self._accessors.get(fn.symbol, []))
+        members += [c["callee"] for c in self._calls.get(fn.symbol, []) if c.get("callee")]
+        out = set()
+        for member in members:
+            owner, _, name = member.partition("#")
+            name = name.split("(", 1)[0]
+            if owner.endswith("Builder") and "." in owner:  # Category.CategoryBuilder
+                owner = owner.rsplit(".", 1)[0]
+            field_name = name
+            for prefix in ("get", "set", "add", "is"):
+                if name.startswith(prefix) and name[len(prefix) : len(prefix) + 1].isupper():
+                    field_name = name[len(prefix)].lower() + name[len(prefix) + 1 :]
+                    break
+            t = self.types.get(owner)
+            if t is not None and any(r["field"] == field_name for r in t.relations):
+                out.add(f"{owner}.{field_name}")
+        return out
+
+    def relation_target(self, entity: str, field_name: str) -> str | None:
+        t = self.types.get(entity)
+        return next(
+            (r["target"] for r in (t.relations if t else []) if r["field"] == field_name), None
+        )
+
+    def annotations_of(self, symbol: str) -> list[str]:
+        return self._annotations.get(symbol, [])
+
+    def hook_candidates(self) -> Iterator[Hook]:
+        """Framework types this code extends or implements, and framework annotations on its
+        classes and methods (D101). The framework calls a hook class's overriding methods."""
+        for t in self.types.values():
+            if t.kind == "annotation":
+                continue
+            header = (t.span[0], t.span[0] + len(t.annotations))
+            for base in t.bases:
+                if base not in self.types:
+                    yield Hook(t.name, "extends", base, t.file, header, self._overrides(t))
+            for a in t.annotations:
+                if a not in self.types:
+                    yield Hook(t.name, "annotation", a, t.file, header)
+        for fn in self._functions.values():
+            for a in self._annotations.get(fn.symbol, []):
+                if a not in self.types and a != "java.lang.Override":
+                    header = (fn.span[0], fn.span[0] + len(self._annotations[fn.symbol]))
+                    yield Hook(fn.symbol, "annotation", a, self._rel(fn.path), header, (fn.symbol,))
+
+    def _overrides(self, t: JavaType) -> tuple[str, ...]:
+        """Methods of `t` that override a framework type's (`@Override`, and no first-party
+        ancestor declares them): what the framework calls."""
+        ours = {
+            f.name
+            for a in self.ancestors(t.name)
+            if a in self.types
+            for f in self._functions.values()
+            if f.container == a
+        }
+        return tuple(
+            f.symbol
+            for f in self._functions.values()
+            if f.container == t.name
+            and "java.lang.Override" in self._annotations.get(f.symbol, [])
+            and f.name not in ours
+        )
 
     def entry_function(self, symbol: str) -> str:
         """Where a flow really starts: an endpoint declared on an interface (an OpenAPI-generated

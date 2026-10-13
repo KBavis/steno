@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from fnmatch import fnmatch
 from typing import Any
 
+from steno.accounting import Ledger, short
 from steno.extraction.facts import (
     UNRESOLVED_TEXT,
     AppRef,
@@ -120,6 +121,7 @@ class GraphPlan:
     stats: dict[str, Any] = field(default_factory=dict)
     # Functions an entry point reaches (coverage reads it; too large for the stage metrics)
     reached: set[str] = field(default_factory=set)
+    ledger: Any = None  # the map-layer ledger (D101), for the coverage report
 
     def node(self, id: str, labels: list[str], **props: Any) -> str:
         existing = self.nodes.get(id)
@@ -189,9 +191,11 @@ def build(
     structure: Structure,
     ctx: Context,
     http_systems: list[HttpSystem] | None = None,
+    packs: list[Any] | None = None,
 ) -> GraphPlan:
-    """`http_systems`: the enabled packs' HTTP signatures, which name the services calls go to."""
-    return _Builder(x, resolver, structure, ctx, http_systems or []).run()
+    """`http_systems`: the enabled packs' HTTP signatures, which name the services calls go to.
+    `packs`: every pack, for the map-layer ledger's lists of I/O and harmless libraries (D101)."""
+    return _Builder(x, resolver, structure, ctx, http_systems or [], packs or []).run()
 
 
 class _Builder:
@@ -202,11 +206,14 @@ class _Builder:
         s: Structure,
         ctx: Context,
         http_systems: list[HttpSystem],
+        packs: list[Any],
     ):
         self.x, self.r, self.s, self.ctx = x, r, s, ctx
+        self.ledger = Ledger(x, r, packs)
         self.http_systems = http_systems
         self.unmet: list[dict[str, Any]] = []  # coverage: calls whose target can't be named
         self.plan = GraphPlan()
+        self.plan.ledger = self.ledger
         self.now = datetime.now(UTC).isoformat()
         self.apps: dict[str, str] = {}  # module path → application node id
         self.functions: dict[str, Function] = {f.symbol: f for f in r.functions()} if r else {}
@@ -224,6 +231,7 @@ class _Builder:
 
     def run(self) -> GraphPlan:
         self._structure()
+        self._unknown_hooks()
         self.app_stores = self._application_stores()
         for node in self.x.nodes:
             self._fact_node(node)
@@ -664,20 +672,53 @@ class _Builder:
         # Classes the known flows already use: an uncalled method of one is dead code (an
         # unused service method), not work something outside the code starts
         used = {self.functions[s].container for s in reached if self.functions[s].in_class}
+        callbacks = self.ledger.callback_entries()  # a framework calls these (D101)
         roots = set()
         for symbol, fn in sorted(self.functions.items()):
-            if symbol in called or symbol in reached or _implicitly_called(fn):
+            if symbol in reached or _implicitly_called(fn):
                 continue
-            if fn.in_class and fn.container in used:
+            callback = symbol in callbacks
+            if not callback and (symbol in called or (fn.in_class and fn.container in used)):
                 continue
             rel = self._rel(fn)
             module = self.s.module_of(rel)
             # Not the application's own code: a Python script inside a Java service's folder
             if not self._app_for(rel) or (module and module.language not in (None, fn.language)):
                 continue
-            if self._reaches_effect(symbol):
+            if callback or self._reaches_effect(symbol):
                 roots.add((symbol, None))
         return roots
+
+    def _unknown_hooks(self) -> None:
+        """Each application's framework hooks no rule explains (D101): code a framework runs
+        that may touch anything, listed on the application so every answer about it can say so."""
+        # Grouped by framework type, rarest first: one request filter isn't buried under twenty
+        # validators of the same kind
+        by_app: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
+        for hook in self.ledger.unknown_hooks():
+            app = self._app_for(hook.file)
+            if not app:
+                continue
+            owner = hook.symbol.split("#", 1)[0].split("(", 1)[0].rsplit(".", 1)[-1]
+            target = ("" if hook.kind == "extends" else "@") + short(hook.target)
+            where = f"{owner} ({hook.file}:{hook.header[0]})"
+            if where not in by_app[app][target]:
+                by_app[app][target].append(where)
+        for app, groups in by_app.items():
+            lines = []
+            for target, places in sorted(groups.items(), key=lambda g: (len(g[1]), g[0])):
+                if len(places) == 1:
+                    lines.append(f"{target}: {places[0]}")
+                else:
+                    names = ", ".join(p.split(" (", 1)[0] for p in places[:4])
+                    more = f", …{len(places) - 4} more" if len(places) > 4 else ""
+                    lines.append(f"{target} ×{len(places)}: {names}{more}")
+            self.plan.node(app, ["Application"], unknown_hooks=lines)
+        self.plan.stats["unknown_hooks"] = [
+            {"symbol": h.symbol, "kind": h.kind, "target": h.target, "file": h.file,
+             "line": h.header[0]}
+            for h in self.ledger.unknown_hooks()
+        ]  # fmt: skip
 
     def _reaches_effect(self, symbol: str) -> bool:
         seen, todo = set(), [symbol]
@@ -774,7 +815,7 @@ class _Builder:
                 else trigger_name
             )
             flow = ids.flow_id(app_name, name)
-            trace = self._trace(flow, (entry_symbol, None))
+            trace = self._cascades_touched(self._trace(flow, (entry_symbol, None)))
             stops = sum(len(t.get("unresolved", [])) for t in trace)
             start, end = entry.span
             self.plan.node(
@@ -813,9 +854,17 @@ class _Builder:
         prov = {**self._prov("inferred-entry", rel, start), "confidence": 0.5}
         app = self._app_for(rel)
         app_name = self.plan.nodes[app].props["name"] if app else self.ctx.repo
-        name = f"Background work · {fn.container.rsplit('.', 1)[-1]}.{fn.name}"
+        where = f"{fn.container.rsplit('.', 1)[-1]}.{fn.name}"
+        hook = self.ledger.callback_entries().get(key[0])
+        marks = [hook.target] if hook else self.ledger.marks(key[0])
+        # A framework calls it (a filter, a validator, a @Bean): say which, not "background"
+        name = (
+            f"Framework callback · {where} (via {', '.join(short(m) for m in marks)})"
+            if marks
+            else f"Background work · {where}"
+        )
         flow = ids.flow_id(app_name, name)
-        trace = self._trace(flow, key)
+        trace = self._cascades_touched(self._trace(flow, key))
         stops = sum(len(t.get("unresolved", [])) for t in trace)
         self.plan.node(
             flow,
@@ -824,6 +873,7 @@ class _Builder:
             trigger="unknown",
             trigger_kind="inferred",
             inferred=True,
+            framework=", ".join(marks) or None,
             entry_symbol=key[0],
             entry_file=rel,
             entry_start_line=start,
@@ -878,17 +928,45 @@ class _Builder:
         visit(root, "1", None, frozenset())
         return entries
 
+    def _cascades_touched(self, trace: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Keep an ORM cascade write only when the flow touches every relationship it goes
+        through (D102): saving a new User with empty accounts writes no account rows; adding a
+        valid-time row to a category's list and saving the category does write category_vt."""
+        touched: set[str] = set()
+        fields = getattr(self.r, "touched_fields", None) if self.r else None
+        for t in trace:
+            fn = self.functions.get(t["symbol"])
+            if fn is not None and fields is not None:
+                touched |= fields(fn)
+        self._touched = touched
+        for t in trace:
+            if t.get("effects"):
+                t["effects"] = [e for e in t["effects"] if self._cascade_ok(e.get("cascade"))]
+                if not t["effects"]:
+                    del t["effects"]
+        return trace
+
+    def _cascade_ok(self, chain: Any) -> bool:
+        if not chain:
+            return True
+        return all(link in getattr(self, "_touched", set()) for link in str(chain).split(" > "))
+
     def _gaps(self, symbol: str) -> list[dict[str, Any]]:
         """The calls in a function Steno couldn't follow that may matter (D71): named like a
         first-party function (a step that may be missing) or like I/O (an effect that may be).
         A chain of builder calls through a library type isn't listed call by call; the coverage
         report counts every one, per library."""
         assert self.r
-        return [
-            g.describe()
-            for g in self.r.unresolved_calls(self.functions[symbol])
-            if _matters(g, self.first_party_names)
+        fn = self.functions[symbol]
+        followed = [
+            g
+            for g in self.r.unresolved_calls(fn)
+            if self.ledger.keeps(g)
+            and (g.reason == "library type" or _matters(g, self.first_party_names))
         ]
+        # I/O-capable library calls no rule explains (D101): the flow may touch more
+        return [g.describe() for g in sorted([*followed, *self.ledger.unexplained_calls(fn)],
+                                              key=lambda g: g.line)]  # fmt: skip
 
     def _entry(self, key: Key, fn: Function, path: str, call: Call | None) -> dict[str, Any]:
         start, end = fn.span
@@ -911,7 +989,11 @@ class _Builder:
             "significant": key in self.significant,
             "utility": key in self.utility,
             "effects": [
-                {"edge": e.type, "target": e.dst, **_pick(e.props, "operation", "method", "url")}
+                {
+                    "edge": e.type,
+                    "target": e.dst,
+                    **_pick(e.props, "operation", "method", "url", "cascade"),
+                }
                 for e in self.effects.get(key[0], [])
             ],
             "doc": fn.doc,
@@ -969,6 +1051,8 @@ class _Builder:
                     self.plan.edge("NEXT", previous, sid, **prov)
                 previous = sid
                 for e in self.effects.get(t["symbol"], []):
+                    if not self._cascade_ok(dict(e.props).get("cascade")):
+                        continue
                     self.plan.edge(e.type, sid, e.dst, **dict(e.props))
                     self.plan.edge(
                         e.type,

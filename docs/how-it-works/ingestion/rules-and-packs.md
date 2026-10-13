@@ -296,6 +296,21 @@ enabled_when:                   # any one of these turns the pack on
 
 A pack is **auto-enabled** when any `enabled_when` condition holds (D25). Checking imports as well as declared dependencies matters: a library often arrives indirectly (Contextualized uses `requests` without listing it).
 
+### The ledger: I/O and harmless libraries (Decided, D101)
+
+A pack can also say which library code can change the map and which can't:
+
+```yaml
+library:
+  io:        # calls into these can reach a store, a broker, or a service: unexplained ones are gaps
+    - org.springframework.security.authentication.AuthenticationManager#authenticate
+  harmless:  # these never start work or touch anything on their own: never a gap
+    - org.springframework.stereotype
+    - sqlalchemy.orm.Session.commit
+```
+
+Entries are packages, types, or `Type#method` (Python: dotted), matched by prefix. Steno's core lists cover common I/O libraries and harmless ones (the JDK, logging, Jackson, Lombok, typing). A library call into an `io` entry must be explained by a rule (at its line, or by its pack in the same function) or it's a stop on the flow; a framework hook (a class extending a framework type, a framework annotation or decorator) must be matched by a rule at its declaration, or be `harmless`, or it's an unknown hook on its application. `steno-pack-spring-security` has no rules yet: it only declares what must be visible.
+
 ### HTTP signatures (Decided, D64)
 
 A pack may also include an `http.yaml` that names services by the **hosts** they're called at. It has no rules or tests of its own: the graph builder reads it when it decides where an outbound HTTP call goes. Packs that only hold signatures use `language: any` and `enabled_when: { always: true }`.

@@ -32,6 +32,7 @@ from steno.extraction.facts import (
     Origin,
     Ref,
     TableOfRef,
+    config_keys,
     database_of,
     host_of,
 )
@@ -386,6 +387,8 @@ class Engine:
         if r is None or ctx.scope is None or cap.expr is None or _names_code(r, cap.node):
             return _strip_quotes(cap.text)  # config values, method names, operators: their text
         value = r.value_of(cap.expr, ctx.scope)
+        if value is UNRESOLVED:
+            self._unset(ctx, cap.text)
         return UNRESOLVED_TEXT if value is UNRESOLVED else value
 
     def _parameter_function(self, ctx: Ctx, spec: Any) -> NodeRef | None:
@@ -406,7 +409,9 @@ class Engine:
         cap = self._cap(ctx, spec)
         if not isinstance(cap, Capture) or cap.expr is None or ctx.scope is None:
             return None
-        return ctx.resolver.template_of(cap.expr, ctx.scope) if ctx.resolver else None
+        out = ctx.resolver.template_of(cap.expr, ctx.scope) if ctx.resolver else None
+        self._unset(ctx, out)
+        return out
 
     def _text(self, ctx: Ctx, spec: Any) -> Any:
         cap = self._cap(ctx, spec)
@@ -524,6 +529,12 @@ class Engine:
                 value = self._url_template(ctx, spec) or "{" + _placeholder(spec) + "}"
             out = _join_url(out, str(value))
         return out or None
+
+    def _unset(self, ctx: Ctx, text: Any) -> None:
+        """Remember the config keys a value needed and the repository doesn't set."""
+        for key in config_keys(text):
+            if not (self.resolver and key in self.resolver.properties):
+                self.out.unset_config.append((ctx.origin, key))
 
     def _drop(self, ctx: Ctx, reason: str) -> None:
         self.out.dropped.append((ctx.origin, reason))

@@ -1,5 +1,5 @@
 id: jpa-entity-table
-description: An entity with an explicit table, e.g. @Entity @Table(name = "transaction", schema = "budget") class Transaction
+description: An entity with an explicit table name, e.g. @Entity @Table(name = "budgetUser", schema = "budget") class User - the physical table is budget_user, because Spring Boot's default naming strategy turns camelCase into snake_case, explicit names included
 match:
   rule:
     kind: class_declaration
@@ -17,7 +17,7 @@ match:
                     kind: element_value_pair
                     all:
                       - has: { field: key, regex: "^name$" }
-                      - has: { field: value, pattern: $TABLE }
+                      - has: { field: value, kind: string_literal, has: { kind: string_fragment, pattern: $GIVEN } }
               # An optional schema (the first branch that matches wins)
               - any:
                   - has:
@@ -28,13 +28,15 @@ match:
                           - has: { field: key, regex: "^schema$" }
                           - has: { field: value, pattern: $SCHEMA }
                   - kind: annotation
+  transform:
+    TABLE: { convert: { source: $GIVEN, toCase: snakeCase } }
 emit:
   - node: Entity
     as: entity
     name: "@class"
   - node: Table
     as: table
-    name: $TABLE             # as written; a physical naming strategy may still change it
+    name: $TABLE             # Spring Boot's physical name (spring.jpa.hibernate.naming.physical-strategy can change it)
     schema: $SCHEMA
   - edge: MAPS_TO
     from: entity

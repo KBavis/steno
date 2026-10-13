@@ -15,9 +15,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from steno.accounting import Ledger
 from steno.extraction.facts import Extraction
 from steno.graph.build import GraphPlan
-from steno.resolvers.base import Function, Resolvers, looks_like_io
+from steno.resolvers.base import Function, Resolvers
 from steno.rule_packs.packs import Pack
 
 SAMPLES = 5
@@ -97,16 +98,20 @@ def collect(
     _dropped(x, item)
     _unparsed(x, item)
     no_io: dict[str, Any] = {"total": 0, "explained": 0, "by_app": {}}
-    io = _external_calls(x, resolver, all_packs, item, where) if resolver else no_io
+    io = _external_calls(x, resolver, all_packs, item, where, plan.ledger) if resolver else no_io
+    _hooks(plan, item)
+    _config(x, item)
     if resolver:
         _libraries(resolver, all_packs, items, item)
-    gaps = _unresolved_types(resolver, item) if resolver else 0
+    gaps = _unresolved_types(resolver) if resolver else 0
 
     stats = plan.stats
     reachable, total = stats.get("functions_reachable", 0), stats.get("functions", 0)
     order = [
+        "unknown_hook",
         "unknown_host",
         "external_call",
+        "config_unset",
         "library",
         "unresolved_type",
         "inferred_entry",
@@ -128,8 +133,10 @@ def collect(
             "io_explained_pct": round(100 * io["explained"] / io["total"], 1)
             if io["total"]
             else None,
-            # Calls that stopped at a library type no JAR was available for (D71)
+            # Calls that ran through a library type no JAR was available for (D69)
             "unresolved_library_calls": gaps,
+            "unknown_hooks": len(plan.stats.get("unknown_hooks", [])),
+            "config_unset": len({key for _, key in x.unset_config}),
             "items": len(ranked),
             "by_signal": _count(i.signal for i in ranked),
             "applications": _per_application(resolver, plan, io["by_app"], ranked, where),
@@ -245,44 +252,51 @@ def _external_calls(
     packs: list[Pack],
     item: Any,
     where: Callable[[str | None], str],
+    ledger: Any = None,
 ) -> dict[str, Any]:
-    """Calls from first-party code into a library that look like I/O and that no rule
-    explains, grouped by the library function called (`com.x.Publisher#send`).
-
-    Explained: a rule matched on the call's lines, or a rule from the pack that covers that
-    library recorded something in the same function. (`stmt = select(Job)` is the read;
-    `await session.execute(stmt)` a few lines later runs it.)
-    """
-    explained = _matched_lines(x)
-    libs_of = {p.name: _libs(p) for p in packs}
-    by_file: dict[str, list[tuple[int, set[str]]]] = defaultdict(list)
-    for o in _origins(x):
-        by_file[o.file].append((o.line, libs_of.get(o.pack, set())))
+    """Library calls that can do I/O (declared by core lists and packs, D101) that no rule
+    explains, grouped by the library function called (`com.x.Publisher#send`). Explained: a
+    rule matched on the call's lines, or the library's pack recorded something in the same
+    function (`stmt = select(Job)` is the read; `session.execute(stmt)` runs it)."""
+    ledger = ledger or Ledger(x, r, packs)
     total = covered = 0
     by_app: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "explained": 0})
-    for resolver in r:
-        for call in resolver.library_calls():
-            if not looks_like_io(call.method):
-                continue
-            fn = call.function
-            rel = r.rel(fn.path)
-            counts = by_app[where(rel)]
-            start, end = fn.span
-            total += 1
-            counts["total"] += 1
-            lines = range(call.line, call.end_line + 1)
-            lib = _norm(call.library)
-            in_function = any(
-                start <= line <= end and _covers(libs, lib) for line, libs in by_file.get(rel, [])
-            )
-            if in_function or any((rel, line) in explained for line in lines):
-                covered += 1
-                counts["explained"] += 1
-                continue
-            item("external_call", "external_call", call.symbol, call.symbol).add(
-                {"file": rel, "line": call.line, "function": fn.symbol, "library": call.library}
-            )
+    for call, explained in ledger.calls:
+        rel = r.rel(call.function.path)
+        counts = by_app[where(rel)]
+        total += 1
+        counts["total"] += 1
+        if explained:
+            covered += 1
+            counts["explained"] += 1
+            continue
+        item("external_call", "external_call", call.symbol, call.symbol).add(
+            {"file": rel, "line": call.line, "function": call.function.symbol,
+             "library": call.library}
+        )  # fmt: skip
     return {"total": total, "explained": covered, "by_app": dict(by_app)}
+
+
+def _hooks(plan: GraphPlan, item: Any) -> None:
+    """Framework hooks no rule explains (D101): code a framework runs (a request filter, a
+    validator, a CLI command) that may start work or touch something the graph doesn't show.
+    One item per framework type, annotation, or decorator, so one rule fixes them all."""
+    for h in plan.stats.get("unknown_hooks", []):
+        target = h["target"]
+        label = f"Framework hook no rule explains · {target.replace('#', '.').rsplit('.', 1)[-1]}"
+        item("unmet_join", "unknown_hook", target, label).add(
+            {"file": h["file"], "line": h["line"], "function": h["symbol"],
+             "detail": f"{h['kind']} {target}"}
+        )  # fmt: skip
+
+
+def _config(x: Extraction, item: Any) -> None:
+    """Config keys a fact needs that no config file in the repository sets (D101): set where
+    the app runs. The fact keeps the key; its value isn't known."""
+    for origin, key in x.unset_config:
+        item("config", "config_unset", key, f"Config set outside the repository · {key}").add(
+            {"file": origin.file, "line": origin.line, "detail": f"read by rule {origin.rule}"}
+        )
 
 
 def _libraries(r: Resolvers, packs: list[Pack], items: dict[Any, Item], item: Any) -> None:
@@ -325,26 +339,17 @@ def _matched_lines(x: Extraction) -> set[tuple[str, int]]:
     return {(o.file, o.line) for o in _origins(x)}
 
 
-def _unresolved_types(r: Resolvers, item: Any) -> int:
-    """Calls that stopped because a value's type comes from a library Steno can't see (D71),
-    one item per library: what a missing dependency JAR costs, and which ones matter most."""
-    count = 0
-    for resolver in r:
-        for fn in resolver.functions():
-            for gap in resolver.unresolved_calls(fn):
-                if gap.reason != "library type" or not gap.library:
-                    continue
-                count += 1
-                label = f"Library types not available · {gap.library}"
-                item("unmet_join", "unresolved_type", gap.library, label).add(
-                    {
-                        "file": r.rel(fn.path),
-                        "line": gap.line,
-                        "function": fn.symbol,
-                        "detail": gap.text,
-                    }
-                )
-    return count
+def _unresolved_types(r: Resolvers) -> int:
+    """How many calls ran through a library type Steno can't see (no dependency JARs, D69):
+    a number for deciding about JARs, not items. A chain through a library type is accounted
+    for at the library call it starts from (D101)."""
+    return sum(
+        1
+        for resolver in r
+        for fn in resolver.functions()
+        for gap in resolver.unresolved_calls(fn)
+        if gap.reason == "library type" and gap.library
+    )
 
 
 def _libs(pack: Pack) -> set[str]:

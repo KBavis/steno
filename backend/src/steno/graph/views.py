@@ -698,13 +698,28 @@ class GraphViews:
             )
         # Functions aren't searchable architecture nodes, but their names help find a flow:
         # a match in a flow's trace opens that flow
-        for row in self._read(
+        # Functions whose names contain every word (`category suggestion` finds
+        # SuggestionEngineClient.predictCategory); no cap that hides flows silently
+        terms = [w.lower() for w in words]
+        rows = self._read(
             "MATCH (fl:Flow) "
-            "WITH fl, [s IN fl.trace_symbols WHERE toLower(s) CONTAINS toLower($t)] AS hits "
-            "WHERE size(hits) > 0 "
-            "RETURN fl, hits[0] AS symbol ORDER BY size(hits[0]) LIMIT 5",
-            t=words[0],
-        ):
+            "WITH fl, [s IN fl.trace_symbols WHERE all(t IN $terms WHERE toLower(s) CONTAINS t)]"
+            " AS found WHERE size(found) > 0 "
+            "WITH fl, found ORDER BY size(found[0]) "
+            "RETURN fl, found[0] AS symbol",
+            terms=terms,
+        )
+        if not rows and len(terms) > 1:  # no function has them all: any of them
+            rows = self._read(
+                "MATCH (fl:Flow) "
+                "WITH fl, [s IN fl.trace_symbols "
+                "WHERE any(t IN $terms WHERE toLower(s) CONTAINS t)] AS found "
+                "WHERE size(found) > 0 "
+                "WITH fl, found ORDER BY size(found[0]) "
+                "RETURN fl, found[0] AS symbol",
+                terms=terms,
+            )
+        for row in rows[:limit]:
             fl = row["fl"]
             out.append(
                 {
@@ -714,6 +729,8 @@ class GraphViews:
                     "sub": f"in {fl.get('name')}",
                 }
             )
+        if len(rows) > limit:
+            out.append({"id": None, "kind": "more", "label": f"{len(rows) - limit} more flows"})
         return out
 
     def _breadcrumbs(self, node_id: str) -> list[dict[str, Any]]:

@@ -11,3 +11,6 @@ enabled_when:
     - org.hibernate.orm:hibernate-core
     - org.hibernate:hibernate-core
   imports: [jakarta.persistence, javax.persistence]
+library:
+  # Mapping annotations: the entity rules read what matters (entity → table)
+  harmless: [jakarta.persistence, javax.persistence, org.hibernate.annotations]

@@ -134,6 +134,9 @@ class Extraction:
     entry_points: list[EntryPointFact] = field(default_factory=list)
     # Facts a rule matched but couldn't complete: (origin, reason)
     dropped: list[tuple[Origin, str]] = field(default_factory=list)
+    # Config keys a fact needed that no config file in the repository sets (D101): set where
+    # the app runs (environment, deploy files, a config server)
+    unset_config: list[tuple[Origin, str]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
 

@@ -167,6 +167,7 @@ def flows(ctx: JobContext) -> dict[str, Any]:
             commit=ctx.job.to_sha,
         ),
         http_systems=[s for p in engine.packs for s in p.http_systems],
+        packs=ctx.state["all_packs"],  # the ledger's I/O and harmless lists (D101)
     )
     ctx.state["plan"] = plan
     ctx.state["structure"] = structure

@@ -6,3 +6,5 @@ description: Default values of pydantic-settings fields, so settings.X reference
 enabled_when:
   dependencies: [pydantic-settings]
   imports: [pydantic_settings]
+library:
+  harmless: [pydantic_settings]

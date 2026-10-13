@@ -68,6 +68,10 @@ A disagreement means **look here**, not "the rules are wrong". Each one is triag
 
 **The join rate** is the share of sends that join a known receiver (or a known external system). It's the main number for how connected an organization's graph is: the value of cross-service answers grows with it. Orphan receivers catch misses from the other side, without knowing in advance what was missed.
 
+### The ledger (D101)
+
+Steno models the **map**: what starts work, what work touches, the route between them, and the joins across applications. It can't promise every map fact is found, but it can promise nothing that could change the map is silently ignored: every I/O-capable library call and every framework hook is explained by a rule, declared harmless by a pack, or shown as a gap: a stop on the flow, an unknown hook on its application, a coverage item. Everything below the map (how a function computes its result) is code detail, read from the code Steno points to.
+
 ## 5. What an agent sees
 
 Impact and dependents answers carry a **completeness block** (Proposed; `POC` stage A), so an incomplete answer never looks complete:

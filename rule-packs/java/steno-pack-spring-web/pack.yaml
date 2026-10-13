@@ -12,3 +12,15 @@ enabled_when:
     - org.springframework:spring-webflux
     - org.springframework:spring-web
   imports: [org.springframework.web]
+library:
+  harmless:
+    - org.springframework.web.bind.annotation.ControllerAdvice
+    - org.springframework.web.bind.annotation.RestControllerAdvice
+    - org.springframework.web.bind.annotation.ExceptionHandler
+    - org.springframework.web.bind.annotation.ResponseBody
+    - org.springframework.web.bind.annotation.RestController
+    - org.springframework.web.bind.annotation.Controller
+    - org.springframework.stereotype.Controller
+    - org.springframework.web.bind.annotation.ResponseStatus
+    - org.springframework.web.bind.annotation.CrossOrigin
+    - org.springframework.http

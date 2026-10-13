@@ -6,3 +6,5 @@ description: FastAPI routers, endpoints, and their URL prefixes
 enabled_when:
   dependencies: [fastapi]
   imports: [fastapi]
+library:
+  harmless: [fastapi.Depends, fastapi.APIRouter, fastapi.FastAPI.include_router, fastapi.HTTPException, starlette.exceptions]

@@ -8,3 +8,5 @@ enabled_when:
     - org.springframework.cloud:spring-cloud-starter-openfeign
     - io.github.openfeign:feign-core
   imports: [org.springframework.cloud.openfeign, feign]
+library:
+  harmless: [org.springframework.cloud.openfeign.EnableFeignClients, org.springframework.cloud.openfeign.FeignClient]

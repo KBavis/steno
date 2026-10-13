@@ -53,6 +53,11 @@ class Pack:
     path: Path
     rules: list[Rule]
     http_systems: list[HttpSystem] = field(default_factory=list)
+    # The map-layer ledger (D101): library types, packages, or `Type#method`s that can do I/O
+    # (an unexplained call into one is a gap), and ones that never create an entry point or an
+    # integration point (never a gap)
+    io: list[str] = field(default_factory=list)
+    harmless: list[str] = field(default_factory=list)
 
 
 def load_pack(path: Path) -> Pack:
@@ -86,6 +91,8 @@ def load_pack(path: Path) -> Pack:
         path=path,
         rules=rules,
         http_systems=_http_systems(path / "http.yaml"),
+        io=list((meta.get("library") or {}).get("io") or []),
+        harmless=list((meta.get("library") or {}).get("harmless") or []),
     )
 
 

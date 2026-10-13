@@ -89,6 +89,7 @@ import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -141,6 +142,7 @@ final class Analyzer {
     private final Map<String, Boolean> jdk = new HashMap<>();
     private final List<Map<String, Object>> errors = new ArrayList<>();
     private Map<String, List<String>> subtypes;
+    private final Map<String, Set<String>> accessors = new HashMap<>();
 
     Analyzer(Path root, List<Path> jars) throws IOException {
         this.root = root;
@@ -350,6 +352,25 @@ final class Analyzer {
         if (Lombok.has(c, "Async")) {
             m.put("async", true);
         }
+        List<String> annotations = annotationNames(c.getAnnotations(), c);
+        if (!annotations.isEmpty()) {
+            m.put("annotations", annotations);
+        }
+        // A Spring Data repository method's own query: its tables are read or written (JPQL
+        // names entities and their relationships; native SQL names tables)
+        for (AnnotationExpr a : c.getAnnotations()) {
+            if (!a.getNameAsString().equals("Query") && !a.getNameAsString().endsWith(".Query")) {
+                continue;
+            }
+            Object query = annotationValue(a, "value", c);
+            if (query instanceof String q) {
+                m.put("query", q);
+                Object nat = annotationValue(a, "nativeQuery", c);
+                if (Boolean.TRUE.equals(nat)) {
+                    m.put("native", true);
+                }
+            }
+        }
         if (fn.isAbstract()) {
             m.put("abstract", true);
             List<String> impls = implementations(fn);
@@ -369,6 +390,10 @@ final class Analyzer {
             }
         });
         m.put("hash", hash(c));
+        Set<String> touched = accessors.get(fn.symbol());
+        if (touched != null) {
+            m.put("accessors", new ArrayList<>(touched));
+        }
         return m;
     }
 
@@ -392,13 +417,13 @@ final class Analyzer {
         if (entity != null) {
             m.put("entity", entity);
         }
-        List<String> annotations = new ArrayList<>();
-        for (AnnotationExpr a : td.getAnnotations()) {
-            String n = typeName(a.getNameAsString(), td);
-            annotations.add(n != null ? n : a.getNameAsString());
-        }
+        List<String> annotations = annotationNames(td.getAnnotations(), td);
         if (!annotations.isEmpty()) {
             m.put("annotations", annotations);
+        }
+        List<Map<String, Object>> relations = relations(td);
+        if (!relations.isEmpty()) {
+            m.put("relations", relations);
         }
         return m;
     }
@@ -425,6 +450,87 @@ final class Analyzer {
             }
         }
         return null;
+    }
+
+    private List<String> annotationNames(NodeList<AnnotationExpr> annotations, Node at) {
+        List<String> out = new ArrayList<>();
+        for (AnnotationExpr a : annotations) {
+            String n = typeName(a.getNameAsString(), at);
+            out.add(n != null ? n : a.getNameAsString());
+        }
+        return out;
+    }
+
+    /** JPA relationships of an entity: the field, the entity it points to (a collection's
+     *  element type), and its cascade types. A save or delete cascades along them. */
+    private List<Map<String, Object>> relations(TypeDeclaration<?> td) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (FieldDeclaration f : td.getFields()) {
+            for (AnnotationExpr a : f.getAnnotations()) {
+                String kind = a.getNameAsString();
+                if (!Set.of("OneToMany", "ManyToOne", "OneToOne", "ManyToMany").contains(kind)) {
+                    continue;
+                }
+                for (VariableDeclarator v : f.getVariables()) {
+                    TypeRef declared = new TypeRef(v.getType(), f);
+                    TypeRef element = kind.endsWith("ToMany") ? argument(declared) : declared;
+                    String target = element == null ? null : typeName(element.type(), element.at());
+                    if (target == null) {
+                        continue;
+                    }
+                    List<String> cascade = new ArrayList<>();
+                    Object c = annotationValue(a, "cascade", f);
+                    if (c instanceof List<?> list) {
+                        list.forEach(x -> cascade.add(String.valueOf(x)));
+                    } else if (c != null) {
+                        cascade.add(String.valueOf(c));
+                    }
+                    Map<String, Object> r = new LinkedHashMap<>();
+                    r.put("field", v.getNameAsString());
+                    r.put("kind", kind);
+                    r.put("target", target);
+                    if (!cascade.isEmpty()) {
+                        r.put("cascade", cascade);
+                    }
+                    out.add(r);
+                }
+            }
+        }
+        return out;
+    }
+
+    /** An annotation attribute's value: a string or boolean constant, an enum constant's name
+     *  (`CascadeType.ALL` → ALL), or a list of them. */
+    private Object annotationValue(AnnotationExpr a, String key, Node at) {
+        Expression value = null;
+        if (a instanceof SingleMemberAnnotationExpr s && key.equals("value")) {
+            value = s.getMemberValue();
+        } else if (a instanceof NormalAnnotationExpr n) {
+            value = n.getPairs().stream().filter(p -> p.getNameAsString().equals(key))
+                    .map(p -> p.getValue()).findFirst().orElse(null);
+        }
+        return value == null ? null : constant(value);
+    }
+
+    private Object constant(Expression e) {
+        if (e instanceof com.github.javaparser.ast.expr.ArrayInitializerExpr arr) {
+            List<Object> out = new ArrayList<>();
+            for (Expression x : arr.getValues()) {
+                Object v = constant(x);
+                if (v != null) {
+                    out.add(v);
+                }
+            }
+            return out;
+        }
+        if (e instanceof FieldAccessExpr f) {
+            return f.getNameAsString();
+        }
+        if (e instanceof BooleanLiteralExpr b) {
+            return b.getValue();
+        }
+        Object v = valueOf(e, 0);
+        return v;
     }
 
     private List<String> baseNames(TypeDeclaration<?> td) {
@@ -488,7 +594,13 @@ final class Analyzer {
             m.put("end_col", r.end.column);
             if (call.fn() != null && call.generated()) {
                 counts[3]++;
-                continue; // a Lombok getter: resolved, but not a step
+                // A Lombok getter, setter, or builder: not a step, but which fields a function
+                // touches decides whether a save cascades along them (D102)
+                if (!setsEmpty(site)) { // `.accounts(new ArrayList<>())` adds no rows
+                    accessors.computeIfAbsent(fn.symbol(), k -> new LinkedHashSet<>())
+                            .add(call.fn().container() + "#" + call.fn().name());
+                }
+                continue;
             }
             if (call.fn() != null && site instanceof ObjectCreationExpr && isThrowable(call.fn().container())) {
                 continue; // building an exception to throw isn't a step of the flow
@@ -532,6 +644,24 @@ final class Analyzer {
             out.add(m);
         }
         return out;
+    }
+
+    /** A setter or builder call whose only argument is an empty collection. */
+    private static boolean setsEmpty(Expression site) {
+        if (!(site instanceof MethodCallExpr m) || m.getArguments().size() != 1) {
+            return false;
+        }
+        Expression arg = m.getArgument(0);
+        if (arg instanceof ObjectCreationExpr o) {
+            return o.getArguments().isEmpty() && o.getAnonymousClassBody().isEmpty()
+                    && o.getType().getNameAsString().matches(".*(List|Set|Collection|Map)");
+        }
+        if (arg instanceof MethodCallExpr c) {
+            String n = c.getNameAsString();
+            return (n.equals("of") && c.getArguments().isEmpty())
+                    || n.equals("emptyList") || n.equals("emptySet") || n.equals("emptyMap");
+        }
+        return false;
     }
 
     /** The subclass methods that can really run when `fn` is abstract (an interface method). */

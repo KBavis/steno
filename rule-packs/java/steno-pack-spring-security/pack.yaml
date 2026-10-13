@@ -1,0 +1,17 @@
+name: steno-pack-spring-security
+version: 0.1.0
+language: java
+source: core
+description: Spring Security. No rules yet - it marks what can't be seen without them (D101) - authentication calls back into the application (loading users), so it's I/O-capable; filters and security configuration stay unknown hooks until interceptors are modeled.
+enabled_when:
+  dependencies: [org.springframework.boot:spring-boot-starter-security, org.springframework.security:spring-security-core]
+  imports: [org.springframework.security]
+library:
+  io:
+    - org.springframework.security.authentication.AuthenticationManager#authenticate
+    - org.springframework.security.authentication.AuthenticationProvider#authenticate
+    - org.springframework.security.core.userdetails.UserDetailsService#loadUserByUsername
+  harmless:
+    - org.springframework.security.crypto
+    - org.springframework.security.core.GrantedAuthority
+    - org.springframework.security.core.userdetails.UserDetails

@@ -6,3 +6,22 @@ description: SQLAlchemy models, the tables they map to, and the queries that rea
 enabled_when:
   dependencies: [sqlalchemy]
   imports: [sqlalchemy]
+library:
+  # Transaction and session housekeeping: not a read or a write of their own
+  harmless:
+    - sqlalchemy.orm.Session.commit
+    - sqlalchemy.orm.Session.flush
+    - sqlalchemy.orm.Session.refresh
+    - sqlalchemy.orm.Session.rollback
+    - sqlalchemy.orm.Session.close
+    - sqlalchemy.ext.asyncio.AsyncSession.commit
+    - sqlalchemy.ext.asyncio.AsyncSession.flush
+    - sqlalchemy.ext.asyncio.AsyncSession.refresh
+    - sqlalchemy.ext.asyncio.AsyncSession.rollback
+    - sqlalchemy.ext.asyncio.AsyncSession.close
+    - sqlalchemy.orm.DeclarativeBase
+    - sqlalchemy.orm.declarative_base
+    - sqlalchemy.select
+    - sqlalchemy.update
+    - sqlalchemy.delete
+    - sqlalchemy.insert

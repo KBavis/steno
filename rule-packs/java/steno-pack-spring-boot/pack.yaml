@@ -12,3 +12,17 @@ enabled_when:
     - org.springframework.boot:spring-boot
     - org.springframework:spring-context
   imports: [org.springframework.boot, org.springframework.scheduling, org.springframework.context]
+library:
+  # Wiring and configuration: they never start work or touch a store on their own
+  harmless:
+    - org.springframework.stereotype
+    - org.springframework.context.annotation
+    - org.springframework.boot.autoconfigure
+    - org.springframework.boot.SpringBootConfiguration
+    - org.springframework.boot.context.properties
+    - org.springframework.beans.factory.annotation
+    - org.springframework.transaction.annotation
+    - org.springframework.scheduling.annotation.EnableScheduling
+    - org.springframework.scheduling.annotation.EnableAsync
+    - org.springframework.scheduling.annotation.Async
+    - org.springframework.validation.annotation.Validated

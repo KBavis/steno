@@ -12,3 +12,14 @@ enabled_when:
     - org.springframework.boot:spring-boot-starter-data-r2dbc
     - org.springframework.data:spring-data-commons
   imports: [org.springframework.data]
+library:
+  # Repository interfaces: their reads and writes are found where they're called
+  harmless:
+    - org.springframework.data.repository
+    - org.springframework.data.jpa.repository.JpaRepository
+    - org.springframework.data.jpa.repository.JpaSpecificationExecutor
+    - org.springframework.data.jpa.repository.Query
+    - org.springframework.data.jpa.repository.Modifying
+    - org.springframework.data.mongodb.repository
+    - org.springframework.data.annotation
+    - org.springframework.data.jpa.repository.JpaRepository#flush

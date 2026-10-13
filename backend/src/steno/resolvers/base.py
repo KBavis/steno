@@ -100,6 +100,19 @@ class LibraryCall:
     end_line: int
 
 
+@dataclass(frozen=True)
+class Hook:
+    """A place a framework runs first-party code without the code calling it (D101): a class
+    extending or implementing a framework type, or a framework annotation or decorator."""
+
+    symbol: str  # the class or function it's on
+    kind: str  # extends | annotation | decorator
+    target: str  # the framework type, annotation, or decorator
+    file: str
+    header: tuple[int, int]  # the declaration's first lines: where a rule matching it starts
+    entries: tuple[str, ...] = ()  # the functions the framework calls (overridden methods, …)
+
+
 class Function(Protocol):
     """A first-party function or method, in any language."""
 
@@ -206,6 +219,11 @@ class Resolvers:
 
     def unresolved_calls(self, fn: Function) -> list[UnresolvedCall]:
         return self.for_function(fn).unresolved_calls(fn)
+
+    def touched_fields(self, fn: Function) -> set[str]:
+        """The entity relationships a function reads or sets (`com.x.Category.validTimes`)."""
+        pick = getattr(self.for_function(fn), "touched_fields", None)
+        return pick(fn) if pick else set()
 
     def entry_function(self, symbol: str) -> str:
         """The function a flow starts in: the implementation when the entry point is declared

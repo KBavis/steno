@@ -1,0 +1,4 @@
+# Spring Boot's default naming: the physical table of @Table(name = "budgetUser") is budget_user
+nodes:
+  - Entity: { name: com.x.User }
+  - Table: { name: budget_user }

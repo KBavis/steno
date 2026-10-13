@@ -9,6 +9,7 @@ Each clue type has exactly one assembler here:
 plus the references a rule can't complete on its own: `table_of` and partial identities.
 """
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,7 @@ def assemble(x: Extraction, r: Resolvers | None, repo: Path) -> None:
     _prefix_chains(x)
     if r:
         _tables(x, r)
+        _queries(x, r)
         _clients(x, r, repo)
         _passed_functions(x, r, repo)
     _partial_references(x)
@@ -101,9 +103,111 @@ def _tables(x: Extraction, r: Resolvers) -> None:
                     x.dropped.append((edge.origin, "table_of: not a mapped entity"))
                     break
                 setattr(edge, end, NodeRef.of("Table", {"name": table}))
+                if edge.type == "WRITES_TO" and resolver is not None and entity:
+                    kept += _cascaded(edge, entity, resolver, entity_table)
         else:
             kept.append(edge)
     x.edges = kept
+
+
+# Which cascade types carry which write (JPA): a save persists or merges, a delete removes
+CASCADES = {
+    "insert": {"ALL", "PERSIST"},
+    "upsert": {"ALL", "PERSIST", "MERGE"},
+    "update": {"ALL", "MERGE"},
+    "delete": {"ALL", "REMOVE"},
+}
+
+
+def _cascaded(
+    edge: EdgeFact, entity: str, resolver: Resolver, entity_table: dict[Any, Any], depth: int = 0
+) -> list[EdgeFact]:
+    """Writes an ORM makes for you: saving a `Category` also writes its `validTimes` rows into
+    `category_vt` when the relationship cascades (`@OneToMany(cascade = ALL)`)."""
+    cascades = getattr(resolver, "cascades", None)
+    if cascades is None or depth > 3:
+        return []
+    wanted = CASCADES.get(str(edge.props.get("operation")), {"ALL"})
+    out = []
+    for target, field_name, kinds in cascades(entity):
+        table = entity_table.get(target)
+        if table is None or not wanted & set(kinds):
+            continue
+        child = EdgeFact(
+            edge.type,
+            edge.src,
+            NodeRef.of("Table", {"name": table}),
+            {
+                **edge.props,
+                # the relationships it goes through, all of which the flow must touch (D102)
+                "cascade": " > ".join(
+                    [*filter(None, [edge.props.get("cascade")]), f"{entity}.{field_name}"]
+                ),
+            },
+            edge.origin,
+        )
+        out.append(child)
+        out += _cascaded(child, target, resolver, entity_table, depth + 1)
+    return out
+
+
+# `FROM Category c`, `JOIN c.validTimes vt`, `JOIN FETCH t.account a`, `UPDATE Order o`
+_JPQL_SOURCE = re.compile(
+    r"\b(FROM|JOIN(?:\s+FETCH)?|UPDATE|INTO)\s+([A-Za-z_][\w.]*)(?:\s+(?:AS\s+)?([A-Za-z_]\w*))?",
+    re.IGNORECASE,
+)
+_SQL_KEYWORDS = {"select", "where", "on", "set", "join", "left", "inner", "order", "group", "as"}
+
+
+def _queries(x: Extraction, rs: Resolvers) -> None:
+    """A repository method's own query (`@Query`): the tables it reads, and for an UPDATE,
+    DELETE, or INSERT, writes. JPQL names entities and follows their relationships
+    (`JOIN c.validTimes` reads `category_vt`); native SQL names tables."""
+    java = rs.by_language.get("java")
+    queries = getattr(java, "queries", None)
+    if not queries:
+        return
+    entity_table = {
+        e.src.props.get("name"): e.dst.props.get("name")
+        for e in x.edges
+        if e.type == "MAPS_TO" and isinstance(e.src, NodeFact) and isinstance(e.dst, NodeFact)
+    }
+    by_simple = {name.rsplit(".", 1)[-1]: name for name in entity_table if isinstance(name, str)}
+    for symbol, (query, native) in queries.items():
+        fn = rs.function(symbol)
+        if fn is None:
+            continue
+        verb = query.strip().split(None, 1)[0].lower() if query.strip() else ""
+        writes = {"update": "update", "delete": "delete", "insert": "insert"}.get(verb)
+        tables: dict[str, bool] = {}  # table → is it the one written
+        aliases: dict[str, str] = {}
+        for kw, name, alias in _JPQL_SOURCE.findall(query):
+            target = writes is not None and kw.lower() in ("update", "into", "from") and not tables
+            if native:
+                tables.setdefault(name.split(".")[-1], target)
+                continue
+            if "." in name and name.split(".")[0] in aliases:  # JOIN c.validTimes
+                head, field_name = name.split(".", 1)
+                entity = java.relation_target(aliases[head], field_name)  # type: ignore[union-attr]
+            else:
+                entity = by_simple.get(name.rsplit(".", 1)[-1])
+            if entity is None:
+                continue
+            if alias and alias.lower() not in _SQL_KEYWORDS:
+                aliases[alias] = entity
+            table = entity_table.get(entity)
+            if table:
+                tables.setdefault(table, target)
+        origin = Origin(
+            "query-tables", "core", fn.path.relative_to(java.root).as_posix(), fn.span[0]
+        )  # type: ignore[union-attr]
+        for table, written in tables.items():
+            src = NodeRef.of("Function", {"symbol": symbol})
+            dst = NodeRef.of("Table", {"name": table})
+            if written and writes:
+                x.edges.append(EdgeFact("WRITES_TO", src, dst, {"operation": writes}, origin))
+            else:
+                x.edges.append(EdgeFact("READS_FROM", src, dst, {"operation": "select"}, origin))
 
 
 # --------------------------------------------------------------------- clients

@@ -121,6 +121,7 @@ class Tools:
     def search(self, query: str, scope: str | None = None, limit: int = 10) -> dict[str, Any]:
         hits = self.views.search(query, limit=max(limit * 3, 20))
         out = []
+        more = next((h["label"] for h in hits if h.get("kind") == "more"), None)
         for h in hits:
             if not h.get("id"):
                 continue
@@ -137,6 +138,11 @@ class Tools:
             "query": query,
             "searched": [scope] if scope else ["organization"],
             "results": out,
+            **(
+                {"more": f"{more} match by function name; narrow the words or use scope"}
+                if more or len(out) >= limit
+                else {}
+            ),  # fmt: skip
             "next": [
                 "get_node(id) for an application, space, or interface",
                 "get_flow(id) for a flow's steps",
@@ -184,6 +190,8 @@ class Tools:
                     "trigger": fl.get("trigger"),
                     "trigger_kind": kind_of(list(trig.labels)) if trig is not None else None,
                     "steps": fl.get("steps"),
+                    **({"inferred": True} if fl.get("inferred") else {}),
+                    **({"incomplete": True} if fl.get("incomplete") else {}),
                     **{verb: sorted(set(names)) for verb, names in touches.items()},
                 }
             )
@@ -220,6 +228,11 @@ class Tools:
             "data": {k: sorted(v) for k, v in data.items()},
             "outbound": {k: sorted(v) for k, v in outbound.items()},
             "modules": modules,
+            "completeness": {
+                **_hooks_note(app.get("unknown_hooks") or []),
+                "incomplete_flows": sum(1 for f in flows if f.get("incomplete")),
+                "inferred_flows": sum(1 for f in flows if f.get("inferred")),
+            },
             "citations": citations,
             "next": [
                 "get_flow(flow id) for what a flow does, step by step",
@@ -466,14 +479,7 @@ class Tools:
                 else ""
             ),
             "steps": steps,
-            **(
-                {
-                    "incomplete": f"{fl.get('unresolved_calls')} calls Steno couldn't follow; "
-                    "the flow may continue past them (see each step's `stops`)"
-                }
-                if fl.get("incomplete")
-                else {}
-            ),
+            "completeness": self._flow_completeness(fl),
             **({"leads_to": leads} if leads else {}),
             "citations": citations,
         }
@@ -623,12 +629,40 @@ class Tools:
                             }
                             frontier.append((nxt, hops + 1))
         grouped = self._group(found)
+        # What the answer can't vouch for: unknown framework hooks in the applications found
+        # (a request filter reading this table would be missing from the list)
+        hooks: list[str] = []
+        for row in self._read(
+            "MATCH (fl:Flow)-[:BELONGS_TO]->(a:Application) WHERE fl.id IN $ids "
+            "RETURN DISTINCT a.name AS app, a.unknown_hooks AS h",
+            ids=list(found),
+        ):
+            hooks += [f"{row['app']}: {h}" for h in row["h"] or []]
+        incomplete = sum(
+            1
+            for r in self._read(
+                "MATCH (fl:Flow) WHERE fl.id IN $ids AND fl.incomplete RETURN fl.id AS id",
+                ids=list(found),
+            )
+        )
         out: dict[str, Any] = {
             "id": start,
             "kind": kind,
             "direction": direction,
             **({"via": via} if via else {}),
             "dependents" if direction == "upstream" else "downstream_flows": grouped,
+            "completeness": {
+                **_hooks_note(hooks),
+                **(
+                    {
+                        "incomplete_flows": f"{incomplete} of these flows have calls Steno "
+                        "couldn't follow (see get_flow)"
+                    }
+                    if incomplete
+                    else {}
+                ),
+                "complete": not hooks and not incomplete,
+            },  # fmt: skip
             "citations": _unique(citations),
             "next": ["get_flow(flow id) for how a dependent uses it"],
         }
@@ -636,6 +670,56 @@ class Tools:
             out["touches"] = sorted(
                 (f"{v['how']} {v['name']}" for v in touched.values()), key=str.lower
             )
+        else:
+            possible = self._possible_callers(self._targets_of(start, kind))
+            if possible:
+                # Not facts: calls whose host Steno doesn't know, with a matching method and
+                # path (D100). Listed so "nothing calls this" is never said when something may
+                out["possible_callers"] = possible
+                out["possible_callers_note"] = (
+                    "calls from flows whose host is set outside the repository and whose method "
+                    "and path match; not confirmed"
+                )
+        return out
+
+    def _possible_callers(self, targets: list[str]) -> list[dict[str, Any]]:
+        endpoints = [
+            dict(r)
+            for r in self._read(
+                "MATCH (e:HttpEndpoint) WHERE e.id IN $ids "
+                "RETURN e.method AS method, e.path AS path",
+                ids=targets,
+            )
+        ]
+        if not endpoints:
+            return []
+        out = []
+        for r in self._read(
+            """
+            MATCH (fl:Flow)<-[:BELONGS_TO]-(:Step)-[c:CALLS]->(x:ExternalSystem)
+            WHERE x.called_from IS NOT NULL
+            OPTIONAL MATCH (fl)-[:BELONGS_TO]->(a:Application)
+            RETURN DISTINCT fl.id AS flow, fl.trigger AS trigger, a.name AS app,
+                   c.method AS method, c.url AS url
+            """
+        ):
+            _, path = split_url(r["url"])
+            if not path or not r["method"]:
+                continue
+            want = _path_shape(path)
+            for e in endpoints:
+                have = _path_shape(e["path"])
+                if r["method"].upper() == e["method"] and (
+                    have == want or (len(have) > 1 and want.endswith(have))
+                ):
+                    out.append(
+                        {
+                            "flow": r["flow"],
+                            "trigger": r["trigger"],
+                            "application": r["app"],
+                            "call": f"{r['method']} {r['url']}",
+                        }
+                    )
         return out
 
     def _targets_of(self, node_id: str, kind: str) -> list[str]:
@@ -659,6 +743,31 @@ class Tools:
                 "MATCH (t)-[:STARTS]->(:Flow {id: $id}) RETURN t.id AS t", id=flow_id
             )
         ]
+
+    def _flow_completeness(self, fl: Any) -> dict[str, Any]:
+        """What this answer can't vouch for (D71, D101): calls in the flow Steno couldn't follow,
+        whether its trigger is known, and framework hooks in its application (filters,
+        validators, callbacks) that may run around it without the graph showing it."""
+        rows = self._read(
+            "MATCH (:Flow {id: $id})-[:BELONGS_TO]->(a:Application) RETURN a.unknown_hooks AS h",
+            id=fl["id"],
+        )
+        hooks = (rows[0]["h"] if rows else None) or []
+        out: dict[str, Any] = {}
+        if fl.get("incomplete"):
+            out["calls_not_followed"] = (
+                f"{fl.get('unresolved_calls')} calls Steno couldn't follow or explain; the flow "
+                "may do more past them (see each step's `stops`)"
+            )
+        if fl.get("inferred"):
+            out["trigger"] = (
+                "not known: nothing in the code starts this; "
+                + (f"the framework calls it ({fl.get('framework')})" if fl.get("framework")
+                   else "something outside the code runs it")
+            )  # fmt: skip
+        out.update(_hooks_note(hooks))
+        out["complete"] = not out
+        return out
 
     def _path_matches(self, method: str | None, url: str | None, flow_id: str) -> list[str]:
         """Endpoints in other applications whose method and path match a call whose host isn't
@@ -784,6 +893,20 @@ class Tools:
         ]
 
 
+def _hooks_note(hooks: list[str]) -> dict[str, Any]:
+    if not hooks:
+        return {}
+    shown = hooks[:8]
+    return {
+        "framework_hooks": shown + ([f"…and {len(hooks) - 8} more"] if len(hooks) > 8 else []),
+        "framework_hooks_note": (
+            "code the framework runs that no rule explains (request filters, validators, "
+            "callbacks): it may run around this application's flows and read or write things "
+            "the graph doesn't show; read it with view_flow_code on its 'Framework callback' flow"
+        ),
+    }
+
+
 def _path_shape(path: str) -> str:
     """A path with its parameters blanked, for matching a call to a route:
     `/users/{id}/` and `/users/{userId}` → `/users/{}`."""
@@ -880,8 +1003,10 @@ def _span(lines: str) -> tuple[int | None, int | None]:
 
 
 def fit(result: dict[str, Any], max_tokens: int) -> dict[str, Any]:
-    """Cut a result to about `max_tokens`: the longest lists lose items from the end until it
-    fits, and `truncated` says what was left out."""
+    """Cut a result to about `max_tokens` without ever making it look empty: citations go
+    first (down to a few), then the longest lists lose items from the end, but no list goes
+    below one item; inside a kept item (a group of flows), its own list is trimmed instead.
+    `truncated` says what was left out. An answer may run over budget rather than lie."""
     budget = max_tokens * CHARS_PER_TOKEN
 
     def size(obj: Any) -> int:
@@ -889,6 +1014,37 @@ def fit(result: dict[str, Any], max_tokens: int) -> dict[str, Any]:
 
     if size(result) <= budget:
         return result
+    cut: dict[str, int] = defaultdict(int)
+
+    def trim(key: str, keep: int) -> bool:
+        if isinstance(result.get(key), list) and len(result[key]) > keep:
+            result[key] = result[key][:-1]
+            cut[key] += 1
+            return True
+        return False
+
+    while size(result) > budget and trim("citations", 3):
+        pass
+    lists = [k for k, v in result.items() if isinstance(v, list) and k not in ("next",)]
+    while size(result) > budget:
+        candidates = [k for k in lists if len(result[k]) > 1]
+        if not candidates:
+            break
+        trim(max(candidates, key=lambda k: size(result[k])), 1)
+    # Still over: trim the lists inside what's left (each group keeps one flow)
+    for key in lists:
+        for item in result[key]:
+            if not isinstance(item, dict):
+                continue
+            for inner, value in item.items():
+                while size(result) > budget and isinstance(value, list) and len(value) > 1:
+                    value.pop()
+                    cut[f"{key}.{inner}"] += 1
+    if cut:
+        result["truncated"] = {
+            k: f"{n} more not shown; raise max_tokens to see them" for k, n in cut.items()
+        }
+    return result
     cut: dict[str, int] = {}
     lists = [k for k, v in result.items() if isinstance(v, list) and k not in ("next",)]
     while size(result) > budget and lists:

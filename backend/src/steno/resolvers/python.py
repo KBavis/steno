@@ -25,6 +25,7 @@ from ast_grep_py import SgNode
 
 from steno.resolvers.base import (
     UNRESOLVED,
+    Hook,
     Invocation,
     LibraryCall,
     UnresolvedCall,
@@ -52,7 +53,10 @@ _YIELDING = {
 BUILTINS = {"dict", "list", "set", "tuple", "str", "int", "float", "bool", "bytes", "object"}
 FuncNode = ast.FunctionDef | ast.AsyncFunctionDef
 # Standard-library modules that do I/O; the rest of the standard library isn't a library to cover
-STDLIB_IO = {"socket", "smtplib", "ftplib", "urllib", "http", "sqlite3", "subprocess"}
+STDLIB_IO = {
+    "socket", "smtplib", "ftplib", "urllib", "http", "sqlite3", "subprocess", "pathlib",
+    "shutil", "pickle",
+}  # fmt: skip
 
 
 @dataclass
@@ -157,6 +161,7 @@ class PythonResolver:
         self.root = root
         self.modules: dict[str, ModuleInfo] = {}
         self.by_path: dict[Path, ModuleInfo] = {}
+        self.aliases: dict[str, ModuleInfo] = {}  # package-qualified names of modules
         self.errors: list[tuple[Path, str]] = []
         # Return types of library methods, taught by `client` clues: (type, method) → type
         self.return_hints: dict[tuple[str, str], str] = {}
@@ -191,6 +196,14 @@ class PythonResolver:
             self._index_statement(mod, stmt)
         self.modules[mod.name] = mod
         self.by_path[path.resolve()] = mod
+        # Also reachable by its package-qualified name: inside a project folder (its own
+        # requirements.txt), `manager` is still imported as `suggestion_engine.inference.manager`
+        # when the folders above it are packages
+        folder, prefix = source_root, []
+        while (folder / "__init__.py").exists() and folder != self.root:
+            prefix.insert(0, folder.name)
+            self.aliases.setdefault(".".join([*prefix, *([mod.name] if mod.name else [])]), mod)
+            folder = folder.parent
 
     def _index_statement(self, mod: ModuleInfo, stmt: ast.stmt) -> None:
         if isinstance(stmt, ast.Import):
@@ -259,6 +272,14 @@ class PythonResolver:
                     for target in sub.targets:
                         if _is_self_attr(target):
                             info.self_attrs.setdefault(target.attr, (sub.value, method, False))
+                        elif (  # self.x, self.r = x, r
+                            isinstance(target, ast.Tuple)
+                            and isinstance(sub.value, ast.Tuple)
+                            and len(target.elts) == len(sub.value.elts)
+                        ):
+                            for elt, value in zip(target.elts, sub.value.elts, strict=True):
+                                if _is_self_attr(elt):
+                                    info.self_attrs.setdefault(elt.attr, (value, method, False))
         return info
 
     # ------------------------------------------------- reading a rule's match
@@ -310,6 +331,9 @@ class PythonResolver:
 
     # ------------------------------------------------------------------ lookup
 
+    def _module(self, name: str) -> ModuleInfo | None:
+        return self.modules.get(name) or self.aliases.get(name)
+
     def module_at(self, path: Path) -> ModuleInfo | None:
         return self.by_path.get(path.resolve())
 
@@ -338,11 +362,11 @@ class PythonResolver:
         self, symbol: str
     ) -> ClassInfo | FunctionInfo | tuple[ModuleInfo, str] | ModuleInfo | None:
         """A repository definition for a qualified symbol, following re-exports."""
-        if symbol in self.modules:
-            return self.modules[symbol]
+        if self._module(symbol) is not None:
+            return self._module(symbol)
         parts = symbol.split(".")
         for i in range(len(parts) - 1, 0, -1):
-            mod = self.modules.get(".".join(parts[:i]))
+            mod = self._module(".".join(parts[:i]))
             if mod is None:
                 continue
             name, rest = parts[i], parts[i + 1 :]
@@ -451,7 +475,7 @@ class PythonResolver:
             return f"{mod.name}.{name}"
         if name in mod.imports:
             return self.canonical(mod.imports[name])
-        if name in BUILTINS:
+        if name in BUILTINS or name == "open":
             return f"builtins.{name}"
         return f"{mod.name}.{name}"
 
@@ -476,7 +500,7 @@ class PythonResolver:
             if expr.id in scope.module.module_imports:
                 return True
             sym = scope.module.imports.get(expr.id)
-            return sym is not None and sym in self.modules
+            return sym is not None and self._module(sym) is not None
         if isinstance(expr, ast.Attribute):
             return self._is_module_ref(expr.value, scope)
         return False
@@ -492,6 +516,8 @@ class PythonResolver:
         if isinstance(found, ClassInfo):
             return found.qualname
         if found is None and sym.rsplit(".", 1)[-1][:1].isupper():  # a library class, by convention
+            return sym
+        if sym.startswith("builtins.") and sym[9:] in BUILTINS:  # set(), dict(), list()
             return sym
         return None
 
@@ -1236,10 +1262,44 @@ class PythonResolver:
                         call.end_lineno or call.lineno,
                     )
 
+    def hook_candidates(self) -> Iterator[Hook]:
+        """Library base classes and library decorators on this code (D101): a framework runs
+        it. `@router.post(...)` is a hook a rule explains; `@mcp.tool()` may be one no rule
+        does."""
+        for mod in self.modules.values():
+            for cls in mod.classes.values():
+                start = min([cls.node.lineno, *(d.lineno for d in cls.node.decorator_list)])
+                for base in cls.node.bases:
+                    sym = self.symbol_of(base, Scope(mod))
+                    if sym and self.library_of(sym):
+                        yield Hook(
+                            cls.qualname,
+                            "extends",
+                            self.canonical(sym),
+                            self._rel(mod.path),
+                            (start, cls.node.lineno),
+                        )
+        for fn in self.functions():
+            scope = self.scope_of(fn)
+            for d in fn.node.decorator_list:
+                target = d.func if isinstance(d, ast.Call) else d
+                sym = self.symbol_of(target, scope)
+                if sym and self.library_of(sym):
+                    yield Hook(
+                        fn.qualname,
+                        "decorator",
+                        sym,
+                        self._rel(fn.path),
+                        (fn.span[0], fn.node.lineno),
+                        (fn.qualname,),
+                    )
+
     def library_of(self, symbol: str) -> str | None:
         """The library a symbol belongs to; None for first-party code, builtins, and standard
         library modules that don't do I/O."""
         top = symbol.split(".")[0]
+        if symbol == "builtins.open":  # reading or writing a file (D101)
+            return "builtins"
         if top in self._first_party or top == "builtins":
             return None
         if top in sys.stdlib_module_names and top not in STDLIB_IO:
@@ -1260,7 +1320,7 @@ class PythonResolver:
 
     @property
     def _first_party(self) -> set[str]:
-        return {name.split(".")[0] for name in self.modules}
+        return {name.split(".")[0] for name in [*self.modules, *self.aliases]}
 
     def _rel(self, path: Path) -> str:
         try:

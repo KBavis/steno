@@ -262,22 +262,26 @@ def test_library_chain_stops_visibly(engine, repo: Path) -> None:  # type: ignor
     flow = _flow(engine, repo)
     place = json.loads(flow["trace"])[1]
     stops = place.get("unresolved", [])
-    # web.post() is a known library call; what it returns isn't, so the chain stops there.
-    # uri() isn't listed in the trace (not I/O, not ours); retrieve() is named like I/O.
+    # web.post() is a WebClient call (I/O-capable, D101) and no rule in this pack explains
+    # it, so it's the stop; the builder calls after it are code detail, not listed
     assert [(s["reason"], s.get("library")) for s in stops] == [
-        ("library type", "org.springframework.web")
+        ("I/O call no rule explains", "org.springframework.web")
     ]
-    assert "retrieve" in stops[0]["call"]
+    assert "post" in stops[0]["call"]
     assert flow["incomplete"] is True and flow["unresolved_calls"] == 1
 
 
-def test_coverage_counts_unresolved_library_types(engine, repo: Path) -> None:  # type: ignore[no-untyped-def]
+def test_coverage_accounts_for_io_calls_and_hooks(engine, repo: Path) -> None:  # type: ignore[no-untyped-def]
+    """D101: the unexplained WebClient call is an item; chains through library types are a
+    number for the JAR decision, not items."""
     plan = _flow(engine, repo)["plan"]
     report = collect(engine.out, engine.resolver, plan, [PACK])
-    gaps = [i for i in report.items if i.signal == "unresolved_type"]
-    assert [i.target for i in gaps] == ["org.springframework.web"]
-    assert gaps[0].occurrences == 2  # uri() and retrieve()
-    assert report.metrics["unresolved_library_calls"] == 2
+    calls = [i for i in report.items if i.signal == "external_call"]
+    assert [i.target for i in calls] == [
+        "org.springframework.web.reactive.function.client.WebClient#post"
+    ]
+    assert not [i for i in report.items if i.signal == "unresolved_type"]
+    assert report.metrics["unresolved_library_calls"] >= 2
 
 
 def test_url_template_keeps_constant_parts(engine, repo: Path) -> None:  # type: ignore[no-untyped-def]
