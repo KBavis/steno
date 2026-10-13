@@ -140,12 +140,30 @@ class InterceptorFact:
 
 
 @dataclass
+class AccessRule:
+    """A request matcher's access (D103): `requestMatchers(POST, "/auth/**").permitAll()`.
+    It applies to the endpoints of the application that declares it."""
+
+    method: str | None
+    pattern: re.Pattern[str]
+    specificity: tuple[bool, int]  # names a method; length of the literal prefix
+    access: str
+    origin: Origin
+
+    def matches(self, method: str | None, path: str) -> bool:
+        return (self.method is None or self.method == method) and bool(
+            self.pattern.match(re.sub(r"\{[^}]*\}", "x", path))
+        )
+
+
+@dataclass
 class Extraction:
     nodes: list[NodeFact] = field(default_factory=list)
     edges: list[EdgeFact] = field(default_factory=list)
     clues: list[ClueFact] = field(default_factory=list)
     entry_points: list[EntryPointFact] = field(default_factory=list)
     interceptors: list[InterceptorFact] = field(default_factory=list)
+    access_rules: list[AccessRule] = field(default_factory=list)
     # Facts a rule matched but couldn't complete: (origin, reason)
     dropped: list[tuple[Origin, str]] = field(default_factory=list)
     # Config keys a fact needed that no config file in the repository sets (D101): set where

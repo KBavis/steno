@@ -15,6 +15,7 @@ from typing import Any
 
 from steno.extraction.facts import (
     UNRESOLVED_TEXT,
+    AccessRule,
     AppRef,
     ClueFact,
     EdgeFact,
@@ -94,11 +95,10 @@ ACCESS = {
 
 
 def _access(x: Extraction) -> None:
-    """Who may call each HTTP endpoint (D103): `access` from request matchers
-    (`requestMatchers("/auth/**").permitAll()`; the most specific matcher wins, one naming the
-    method before one that doesn't, `anyRequest()` last) or the handler's own annotation
-    (`@PreAuthorize("hasRole('ADMIN')")`, which wins over matchers)."""
-    rules = []  # (method, pattern regex, specificity, access)
+    """Who may call each HTTP endpoint (D103). A handler's own annotation
+    (`@PreAuthorize("hasRole('ADMIN')")`) is set here; request matchers
+    (`requestMatchers("/auth/**").permitAll()`) become `access_rules`, which the graph builder
+    applies to the endpoints of the application that declares them."""
     by_function = {}
     for c in x.clues:
         if c.kind != "access":
@@ -114,27 +114,22 @@ def _access(x: Extraction) -> None:
         patterns = [t for t in _tokens(text) if t.startswith("/")] or ["/**"]
         for pattern in patterns:
             literal = len(re.split(r"[*{]", pattern, maxsplit=1)[0])
-            rules.append(
-                (methods[0] if methods else None, _ant(pattern), (bool(methods), literal), rule)
+            x.access_rules.append(
+                AccessRule(
+                    methods[0] if methods else None,
+                    _ant(pattern),
+                    (bool(methods), literal),
+                    rule,
+                    c.origin,
+                )
             )
     handler_of = {
         id(ep.trigger): ep.function for ep in x.entry_points if isinstance(ep.trigger, NodeFact)
     }
     for node in x.nodes:
-        if node.label != "HttpEndpoint" or not isinstance(node.props.get("path"), str):
-            continue
-        own = by_function.get(handler_of.get(id(node)))
+        own = by_function.get(handler_of.get(id(node))) if node.label == "HttpEndpoint" else None
         if own:
             node.props["access"] = own
-            continue
-        method, path = node.props.get("method"), re.sub(r"\{[^}]*\}", "x", node.props["path"])
-        matching = [
-            (spec, rule)
-            for m, rx, spec, rule in rules
-            if (m is None or m == method) and rx.match(path)
-        ]
-        if matching:
-            node.props["access"] = max(matching, key=lambda r: r[0])[1]
 
 
 def _rule_text(rule: str, value: str) -> str | None:

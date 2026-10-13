@@ -674,9 +674,7 @@ class GraphViews:
         }
 
     def search(self, text: str, limit: int = 12) -> list[dict[str, Any]]:
-        words = [
-            w for w in "".join(c if c.isalnum() or c in "_-/" else " " for c in text).split() if w
-        ]
+        words = search_words(text)
         if not words:
             return []
         query = " AND ".join(f"{_escape(w)}*" for w in words)
@@ -709,7 +707,7 @@ class GraphViews:
             "RETURN fl, found[0] AS symbol",
             terms=terms,
         )
-        if not rows and len(terms) > 1:  # no function has them all: any of them
+        if not rows and not out and len(terms) > 1:  # nothing has them all: any of them
             rows = self._read(
                 "MATCH (fl:Flow) "
                 "WITH fl, [s IN fl.trace_symbols "
@@ -934,6 +932,13 @@ def _merge_edges(
             if e["type"] in unit and e.get("n", 1) > 1:
                 e["label"] = f"{e['n']} {unit[e['type']]}"
     return out
+
+
+def search_words(text: str) -> list[str]:
+    """A query's words, split the way the full-text index splits names: `budgeting-app` →
+    `budgeting`, `app`; `/auth/register` → `auth`, `register`. Wildcard terms skip the index's
+    analyzer, so a word kept whole (`budgeting\\-app*`) would never match."""
+    return "".join(c if c.isalnum() or c == "_" else " " for c in text.lower()).split()
 
 
 def _escape(word: str) -> str:

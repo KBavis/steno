@@ -117,6 +117,7 @@ class JavaResolver:
             for p in (files if files is not None else source_files(root, (".java",)))
             if p.suffix == ".java" and not is_test_file(p.relative_to(root))
         ]
+        self.language_level = java_version(root)
         data = self._run(sources, jars or []) if sources else {}
         self._stats: dict[str, Any] = data.get("stats", {})
         for e in data.get("errors", []):
@@ -226,6 +227,7 @@ class JavaResolver:
                 str(out),
                 "--jars",
                 str(jar_list),
+                *(["--language-level", self.language_level] if self.language_level else []),
             ]
             try:
                 done = subprocess.run(
@@ -664,12 +666,45 @@ class JavaResolver:
             return str(path)
 
     def stats(self) -> dict[str, Any]:
-        return self._stats
+        return {**self._stats, "language_level": self.language_level or "default (21)"}
 
 
 def _group(name: str) -> str:
     """jakarta's and javax's Default group are the same group."""
     return DEFAULT_GROUP if name.rsplit(".", 1)[-1] == "Default" else name
+
+
+# Where a build declares its Java version
+_JAVA_VERSION = [
+    re.compile(r"(?:source|target)Compatibility\s*=\s*['\"]?(?:JavaVersion\.VERSION_)?([\d._]+)"),
+    re.compile(r"languageVersion(?:\s*=\s*|\.set\()\s*JavaLanguageVersion\.of\(\s*(\d+)"),
+    re.compile(r"\brelease(?:\s*=\s*|\.set\()\s*(\d+)"),
+    re.compile(r"<maven\.compiler\.(?:source|release|target)>\s*([\d.]+)\s*<"),
+    re.compile(r"<java\.version>\s*([\d.]+)\s*<"),
+    re.compile(r"<release>\s*(\d+)\s*</release>"),
+]
+
+
+def java_version(root: Path) -> str | None:
+    """The Java version a repository's builds declare (Gradle `sourceCompatibility`, a
+    toolchain's `languageVersion`, `release`; Maven `maven.compiler.source` / `release`,
+    `java.version`). With several modules, the highest: it parses the older ones too. None
+    when no build says, and the helper uses the newest it knows."""
+    found: list[tuple[int, ...]] = []
+    for f in source_files(root):
+        if f.name not in ("build.gradle", "build.gradle.kts", "pom.xml"):
+            continue
+        text = f.read_text(errors="replace")
+        for pattern in _JAVA_VERSION:
+            for v in pattern.findall(text):
+                parts = v.replace("_", ".").strip(".").split(".")
+                if parts and all(p.isdigit() for p in parts):
+                    nums = tuple(int(p) for p in parts)
+                    found.append(nums[1:] if nums[0] == 1 and len(nums) > 1 else nums)
+    if not found:
+        return None
+    best = max(found)
+    return ".".join(str(n) for n in best) if best[0] > 4 else "1." + ".".join(map(str, best))
 
 
 def library_of(fqn: str) -> str | None:

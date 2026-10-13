@@ -302,6 +302,19 @@ class _Builder:
 
     # ------------------------------------------------------- extracted facts
 
+    def _access(self, endpoint: NodeFact, app: str | None) -> dict[str, str]:
+        """An endpoint's access from its application's request matchers (D103): the most
+        specific match wins, one naming the method before one that doesn't."""
+        path = endpoint.props.get("path")
+        if not isinstance(path, str):
+            return {}
+        matching = [
+            r
+            for r in self.x.access_rules
+            if self._app_for(r.origin.file) == app and r.matches(endpoint.props.get("method"), path)
+        ]
+        return {"access": max(matching, key=lambda r: r.specificity).access} if matching else {}
+
     def _fact_node(self, n: NodeFact) -> str | None:
         if id(n) in self.fact_ids:
             return self.fact_ids[id(n)]
@@ -314,6 +327,8 @@ class _Builder:
             k: v for k, v in n.props.items() if not isinstance(v, (dict, list)) or k == "fields"
         }
         if label == "HttpEndpoint":
+            if "access" not in props:
+                props.update(self._access(n, app))
             nid = p.node(
                 ids.http_endpoint_id(app_name, n.props["method"], n.props["path"]),
                 labels,

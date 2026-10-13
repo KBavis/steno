@@ -14,6 +14,7 @@ import java.util.Map;
  *
  * <pre>
  * steno-resolver --root REPO --files FILES.txt --out OUT.json [--jars JARS.txt]
+ *                [--language-level 17]
  * </pre>
  *
  * <p>FILES.txt lists the Java files to read, one path per line (the engine decides which are
@@ -29,12 +30,14 @@ public final class Main {
         Path files = null;
         Path out = null;
         Path jars = null;
+        String level = null;
         for (int i = 0; i + 1 < args.length; i += 2) {
             switch (args[i]) {
                 case "--root" -> root = Path.of(args[i + 1]);
                 case "--files" -> files = Path.of(args[i + 1]);
                 case "--out" -> out = Path.of(args[i + 1]);
                 case "--jars" -> jars = Path.of(args[i + 1]);
+                case "--language-level" -> level = args[i + 1];
                 default -> usage();
             }
         }
@@ -58,14 +61,15 @@ public final class Main {
                 }
             }
         }
-        Map<String, Object> result = new Analyzer(root, jarList).run(sources);
+        Map<String, Object> result = new Analyzer(root, jarList, level).run(sources);
         try (BufferedWriter w = Files.newBufferedWriter(out, StandardCharsets.UTF_8)) {
             Json.write(result, w);
         }
     }
 
     private static void usage() {
-        System.err.println("usage: steno-resolver --root REPO --files FILES.txt --out OUT.json [--jars JARS.txt]");
+        System.err.println("usage: steno-resolver --root REPO --files FILES.txt --out OUT.json"
+                + " [--jars JARS.txt] [--language-level 17]");
         System.exit(2);
     }
 }

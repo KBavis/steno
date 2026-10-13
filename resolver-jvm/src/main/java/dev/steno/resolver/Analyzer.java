@@ -145,6 +145,13 @@ final class Analyzer {
     private final Map<String, Set<String>> accessors = new HashMap<>();
 
     Analyzer(Path root, List<Path> jars) throws IOException {
+        this(root, jars, null);
+    }
+
+    /** `languageLevel`: the repository's Java version (`17`, `1.8`), from its build files; the
+     *  newest JavaParser knows when it's unknown. Parsing at the repository's own level keeps
+     *  what's valid there valid here (`_` or `record` as names in old code). */
+    Analyzer(Path root, List<Path> jars, String languageLevel) throws IOException {
         this.root = root;
         solver.add(new ReflectionTypeSolver(true));
         solver.add(repoSolver);
@@ -152,8 +159,24 @@ final class Analyzer {
             solver.add(new JarTypeSolver(jar));
         }
         config = new ParserConfiguration()
-                .setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_21)
+                .setLanguageLevel(level(languageLevel))
                 .setSymbolResolver(new JavaSymbolSolver(solver));
+    }
+
+    static ParserConfiguration.LanguageLevel level(String version) {
+        if (version == null || version.isBlank()) {
+            return ParserConfiguration.LanguageLevel.JAVA_21;
+        }
+        String v = version.strip();
+        for (String name : List.of(v.replace('.', '_'), v.replaceFirst("^1\\.", ""))) {  // 1.4, 1.8 → 8
+            try {
+                return ParserConfiguration.LanguageLevel.valueOf("JAVA_" + name);
+            } catch (IllegalArgumentException e) {
+                // try the next spelling
+            }
+        }
+        // Newer than this JavaParser knows: the newest it does
+        return ParserConfiguration.LanguageLevel.JAVA_21;
     }
 
     // ------------------------------------------------------------------ records

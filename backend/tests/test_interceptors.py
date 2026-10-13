@@ -129,6 +129,22 @@ FILES = {
             public void run() {}
         }
     """,
+    # Another application in the repository: the Java app's security config isn't its own
+    "worker/pyproject.toml": """
+        [project]
+        name = "worker"
+        dependencies = ["fastapi"]
+    """,
+    "worker/main.py": """
+        from fastapi import FastAPI
+
+        app = FastAPI()
+
+
+        @app.post("/admin/tasks")
+        def run():
+            return {}
+    """,
 }
 
 
@@ -186,3 +202,6 @@ def test_the_filter_reaches_the_user_table_through_the_lambda_bean(flows: dict) 
 def test_access_from_request_matchers(flows: dict) -> None:
     assert flows["POST /auth/register"]["access"] == "public"
     assert flows["POST /admin/jobs"]["access"] == "role:ADMIN"
+    # Matchers apply to the application that declares them, not the whole repository
+    assert flows["POST /admin/tasks"].get("access") is None
+    assert not any(t.get("interceptor") for t in flows["POST /admin/tasks"]["steps"])
