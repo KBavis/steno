@@ -91,16 +91,31 @@ function saveOptions(o: ViewOptions) {
   }
 }
 type Positions = Record<string, { x: number; y: number }>
-function loadPositions(key: string): Positions {
+/** Nodes the viewer dragged, for the layout they were dragged on: `layout` names every node and
+ *  its size, so positions from a layout that has since changed (new flows, bigger groups) are
+ *  dropped instead of placing today's nodes where yesterday's were */
+interface Arrangement {
+  layout: string
+  moved: Positions
+}
+function layoutKey(nodes: Node[]): string {
+  let h = 0
+  for (const n of nodes) {
+    for (const c of `${n.id}:${n.width}x${n.height};`) h = (Math.imul(h, 31) + c.charCodeAt(0)) | 0
+  }
+  return `${nodes.length}:${h}`
+}
+function loadPositions(key: string, layout: string): Positions {
   try {
-    return JSON.parse(localStorage.getItem(POSITIONS_KEY + key) ?? '{}')
+    const saved = JSON.parse(localStorage.getItem(POSITIONS_KEY + key) ?? 'null') as Arrangement | null
+    return saved?.layout === layout ? saved.moved : {}
   } catch {
     return {}
   }
 }
-function savePositions(key: string, p: Positions | null) {
+function savePositions(key: string, a: Arrangement | null) {
   try {
-    if (p) localStorage.setItem(POSITIONS_KEY + key, JSON.stringify(p))
+    if (a) localStorage.setItem(POSITIONS_KEY + key, JSON.stringify(a))
     else localStorage.removeItem(POSITIONS_KEY + key)
   } catch {
     // arrangement is a convenience
@@ -218,6 +233,8 @@ function Visualizer({ onExit }: { onExit: () => void }) {
   )
 
   const shownKey = useRef<string>(undefined)
+  // The shown layout's key, for saving dragged positions against it
+  const layout = useRef('')
   useEffect(() => {
     let live = true
     setError(undefined)
@@ -246,7 +263,8 @@ function Visualizer({ onExit }: { onExit: () => void }) {
           setHovered(undefined)
         }
         // A flow's rows move as it folds, so positions dragged earlier aren't reused there
-        const saved = next.view === 'flow' ? {} : loadPositions(routeKey)
+        layout.current = layoutKey(laidNodes)
+        const saved = next.view === 'flow' ? {} : loadPositions(routeKey, layout.current)
         setView(next)
         setNodes(laidNodes.map((n) => (saved[n.id] ? { ...n, position: saved[n.id] } : n)))
         setBaseEdges(laidEdges)
@@ -316,9 +334,12 @@ function Visualizer({ onExit }: { onExit: () => void }) {
   // Only the lit edges get new objects; the rest keep their identity (so they don't re-render)
   // and are dimmed by the stage's `has-focus` class
   const plain = useMemo(() => baseEdges.map((e) => (options.labels ? e : { ...e, label: undefined })), [baseEdges, options.labels])
+  // The application view draws lines only for what's lit, so the rest aren't mounted at all:
+  // hidden lines (hundreds of paths and labels) still cost every pan and zoom frame
+  const onlyLit = view?.view === 'application'
   const { near, edges } = useMemo(() => {
     const focus = hovered ?? selected
-    if (!focus) return { near: null, edges: plain }
+    if (!focus) return { near: null, edges: onlyLit ? [] : plain }
     const near = new Set([focus])
     const live = new Set<string>()
     for (const e of baseEdges) {
@@ -328,16 +349,13 @@ function Visualizer({ onExit }: { onExit: () => void }) {
         live.add(e.id)
       }
     }
-    if (near.size === 1) return { near: null, edges: plain }
-    return {
-      near,
-      edges: plain.map((e, i) =>
-        live.has(e.id)
-          ? { ...e, label: baseEdges[i].label, className: `${e.className ?? ''} is-live`, data: { ...e.data, state: 'live' } }
-          : e,
-      ),
-    }
-  }, [baseEdges, plain, hovered, selected])
+    if (near.size === 1) return { near: null, edges: onlyLit ? [] : plain }
+    const lit = (e: Edge, i: number) =>
+      live.has(e.id)
+        ? { ...e, label: baseEdges[i].label, className: `${e.className ?? ''} is-live`, data: { ...e.data, state: 'live' } }
+        : e
+    return { near, edges: onlyLit ? plain.flatMap((e, i) => (live.has(e.id) ? [lit(e, i)] : [])) : plain.map(lit) }
+  }, [baseEdges, plain, hovered, selected, onlyLit])
 
   // Dimming is one class on the stage; only the lit nodes get new objects (and re-render)
   const shownNodes = useMemo(
@@ -349,11 +367,14 @@ function Visualizer({ onExit }: { onExit: () => void }) {
     (changes: NodeChange[]) => setNodes((current) => applyNodeChanges(changes, current)),
     [],
   )
-  const onDragStop = useCallback(() => {
-    const p: Positions = {}
-    for (const n of flow.getNodes()) p[n.id] = n.position
-    savePositions(routeKey, p)
-  }, [flow, routeKey])
+  const onDragStop = useCallback(
+    (_: unknown, __: Node, dragged: Node[]) => {
+      const moved = { ...loadPositions(routeKey, layout.current) }
+      for (const n of dragged) moved[n.id] = n.position
+      savePositions(routeKey, { layout: layout.current, moved })
+    },
+    [routeKey],
+  )
 
   const onNodeClick = useCallback(
     (_: unknown, n: Node) => {
@@ -434,7 +455,6 @@ function Visualizer({ onExit }: { onExit: () => void }) {
             <ReactFlow
               nodes={shownNodes}
               edges={edges}
-              onlyRenderVisibleElements={nodes.length > 80}
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
               onNodesChange={onNodesChange}
