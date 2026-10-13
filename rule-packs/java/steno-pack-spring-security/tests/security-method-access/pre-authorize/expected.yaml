@@ -1,0 +1,2 @@
+clues:
+  - access: { function: "com.x.AdminController#purge()", rule: expression, value: "hasRole('ADMIN')" }

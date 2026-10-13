@@ -1,0 +1,2 @@
+clues:
+  - provides: { function: "com.x.AuthConfig#userLookup()" }

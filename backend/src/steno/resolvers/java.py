@@ -37,6 +37,8 @@ from steno.source.files import is_test_file, source_files
 
 log = logging.getLogger(__name__)
 
+# Bean Validation's default group: what `@Valid` and constraints without `groups` use
+DEFAULT_GROUP = "jakarta.validation.groups.Default"
 # JDK packages that reach the network or a database; the rest of the JDK isn't a library to cover
 JDK_IO = {"java.net", "java.sql", "java.nio", "java.io", "javax.net", "javax.sql", "javax.jms"}
 _PROPERTY = re.compile(r"\$\{([^}:]+)(?::([^}]*))?\}")
@@ -96,6 +98,9 @@ class JavaType:
     annotations: list[str] = field(default_factory=list)
     # JPA relationships: {field, kind, target, cascade?}
     relations: list[dict[str, Any]] = field(default_factory=list)
+    usages: list[dict[str, Any]] = field(default_factory=list)  # annotation usages, with groups
+    valid_fields: list[dict[str, str]] = field(default_factory=list)  # fields marked @Valid
+    base_args: dict[str, list[str]] = field(default_factory=dict)  # Base → its type arguments
 
 
 class JavaResolver:
@@ -127,6 +132,9 @@ class JavaResolver:
                 t.get("entity"),
                 t.get("annotations", []),
                 t.get("relations", []),
+                t.get("usages", []),
+                t.get("valid_fields", []),
+                t.get("base_args", {}),
             )
             for t in data.get("types", [])
         }
@@ -145,6 +153,15 @@ class JavaResolver:
                 tuple((f.get("param_values") or {}).items()),
             )
             for f in data.get("functions", [])
+        }
+        self._parameters = {
+            f["symbol"]: f["parameters"] for f in data.get("functions", []) if f.get("parameters")
+        }
+        # What a method returns, when its body is that implementation (a lambda bean)
+        self._returns = {
+            f["symbol"]: f["returns"]
+            for f in data.get("functions", [])
+            if f.get("returns") and f.get("returns_implementation")
         }
         self._accessors = {
             f["symbol"]: f["accessors"] for f in data.get("functions", []) if f.get("accessors")
@@ -390,6 +407,62 @@ class JavaResolver:
             if r.get("cascade")
         ]
 
+    def returns_of(self, symbol: str) -> str | None:
+        """The type a method returns its own implementation of (a @Bean whose body is a lambda,
+        a method reference, or an anonymous class): a call on that type runs this code."""
+        return self._returns.get(symbol)
+
+    def validation_applies(self, validator: str, entry: str) -> bool:
+        """Whether Bean Validation runs `validator` (a `ConstraintValidator<A, T>`) when the
+        framework calls `entry`: a parameter marked `@Valid` (Default group) or `@Validated(G)`
+        whose type, or a type it cascades into through `@Valid` fields, carries constraint `A`
+        in an active group."""
+        t = self.types.get(validator)
+        args = next(
+            (
+                v
+                for k, v in (t.base_args.items() if t else [])
+                if k.endswith(".ConstraintValidator")
+            ),
+            None,
+        )
+        if not args:
+            return False
+        constraint = args[0]
+        for p in self._parameters.get(entry, []):
+            active: set[str] | None = None
+            for a in p["annotations"]:
+                name = a["annotation"]
+                if name.endswith(".Valid") or name == "Valid":
+                    active = {DEFAULT_GROUP}
+                elif name.endswith(".Validated") or name == "Validated":
+                    active = set(a.get("groups") or []) or {DEFAULT_GROUP}
+            if active is not None and self._carries(p["type"], constraint, active, set()):
+                return True
+        # A constraint directly on a parameter (`@MonthYearConstraint MonthYear m`)
+        return any(
+            a["annotation"] == constraint
+            for p in self._parameters.get(entry, [])
+            for a in p["annotations"]
+        )
+
+    def _carries(
+        self, type_name: str | None, constraint: str, active: set[str], seen: set[str]
+    ) -> bool:
+        if not type_name or type_name in seen:
+            return False
+        seen.add(type_name)
+        t = self.types.get(type_name)
+        if t is None:
+            return False
+        for u in t.usages:
+            if u["annotation"] != constraint:
+                continue
+            groups = {_group(g) for g in u.get("groups") or []} or {DEFAULT_GROUP}
+            if groups & {_group(g) for g in active}:
+                return True
+        return any(self._carries(f["type"], constraint, active, seen) for f in t.valid_fields)
+
     def touched_fields(self, fn: JavaFunction) -> set[str]:
         """Entity relationships `fn` reads or sets: `category.getValidTimes()`,
         `user.setAccounts(...)`, `Category.builder().validTimes(...)`, whether the accessor is
@@ -592,6 +665,11 @@ class JavaResolver:
 
     def stats(self) -> dict[str, Any]:
         return self._stats
+
+
+def _group(name: str) -> str:
+    """jakarta's and javax's Default group are the same group."""
+    return DEFAULT_GROUP if name.rsplit(".", 1)[-1] == "Default" else name
 
 
 def library_of(fqn: str) -> str | None:

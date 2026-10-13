@@ -1,0 +1,15 @@
+id: constraint-validator
+description: A custom validator's check, e.g. isValid in class AuthRequestDuplicateUsernameValidator implements ConstraintValidator<AuthRequestDuplicateUsername, AuthRequestDto> - it runs before every entry point that validates a parameter carrying that constraint
+match:
+  rule:
+    kind: method_declaration
+    has: { field: name, regex: "^isValid$" }
+    inside:
+      stopBy: end
+      kind: class_declaration
+      has: { field: interfaces, has: { stopBy: end, regex: "^ConstraintValidator\\b" } }
+emit:
+  - interceptor:
+      function: "@function"
+      kind: validation
+      applies_to: { validates: "@class" }

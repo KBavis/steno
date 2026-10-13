@@ -1,0 +1,5 @@
+# A doFilter that isn't in a filter class (Helper) isn't one
+interceptors:
+  - function: "com.x.JwtFilter#doFilterInternal(jakarta.servlet.http.HttpServletRequest,jakarta.servlet.http.HttpServletResponse,jakarta.servlet.FilterChain)"
+    kind: filter
+    applies_to: { http: true }

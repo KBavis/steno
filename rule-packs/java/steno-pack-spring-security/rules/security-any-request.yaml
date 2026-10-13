@@ -1,0 +1,12 @@
+id: security-any-request
+description: The rule for every other path, e.g. .anyRequest().authenticated()
+match:
+  rule:
+    pattern: $X.anyRequest().$RULE($$$VALUE)
+  constraints:
+    RULE: { regex: "^(permitAll|anonymous|authenticated|fullyAuthenticated|denyAll|hasRole|hasAnyRole|hasAuthority|hasAnyAuthority)$" }
+emit:
+  - clue: access
+    matchers: '"/**"'
+    rule: $RULE
+    value: $$$VALUE

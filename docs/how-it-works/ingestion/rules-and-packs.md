@@ -296,6 +296,21 @@ enabled_when:                   # any one of these turns the pack on
 
 A pack is **auto-enabled** when any `enabled_when` condition holds (D25). Checking imports as well as declared dependencies matters: a library often arrives indirectly (Contextualized uses `requests` without listing it).
 
+### Interceptors and access (Decided, D103)
+
+Code that runs around entry points without being called by them is declared with an `interceptor` emit:
+
+```yaml
+emit:
+  - interceptor:
+      function: "@function"            # the code that runs
+      kind: filter                     # filter | validation | …
+      applies_to: http                 # every HTTP entry point of the application
+      # applies_to: { validates: "@class" }   the resolver decides (Bean Validation groups, @Valid cascades)
+```
+
+Each flow lists the interceptors that apply to it as its first steps. Two clues complete the picture: `access` (`matchers`, `rule`, `value`, or `function` for a handler's own annotation) gives endpoints an `access` property (`public`, `authenticated`, `role:ADMIN`), and `provides` (`function`) lets a `@Bean` whose body is the implementation stand in for the interface it returns. Packs: `steno-pack-spring-security` (filters, request matchers, `@PreAuthorize`), `steno-pack-bean-validation` (`ConstraintValidator`s), `steno-pack-spring-boot` (`@Bean` providers).
+
 ### The ledger: I/O and harmless libraries (Decided, D101)
 
 A pack can also say which library code can change the map and which can't:

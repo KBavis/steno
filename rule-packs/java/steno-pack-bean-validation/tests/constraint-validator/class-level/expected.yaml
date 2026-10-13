@@ -1,0 +1,4 @@
+interceptors:
+  - function: "com.x.UniqueNameValidator#isValid(com.x.UserDto,jakarta.validation.ConstraintValidatorContext)"
+    kind: validation
+    applies_to: { validates: com.x.UniqueNameValidator }

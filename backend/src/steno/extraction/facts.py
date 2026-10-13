@@ -127,11 +127,25 @@ class EntryPointFact:
 
 
 @dataclass
+class InterceptorFact:
+    """Code a framework runs around entry points (D103): a request filter, a validator,
+    middleware. `scope` says which: `{"http": True}` (every HTTP entry point of its
+    application), `{"paths": [...]}`, or `{"validates": "<validator class>"}` (where the
+    language's resolver decides validation applies)."""
+
+    function: str
+    kind: str  # filter | validation | middleware | …
+    scope: dict[str, Any]
+    origin: Origin
+
+
+@dataclass
 class Extraction:
     nodes: list[NodeFact] = field(default_factory=list)
     edges: list[EdgeFact] = field(default_factory=list)
     clues: list[ClueFact] = field(default_factory=list)
     entry_points: list[EntryPointFact] = field(default_factory=list)
+    interceptors: list[InterceptorFact] = field(default_factory=list)
     # Facts a rule matched but couldn't complete: (origin, reason)
     dropped: list[tuple[Origin, str]] = field(default_factory=list)
     # Config keys a fact needed that no config file in the repository sets (D101): set where

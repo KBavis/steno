@@ -1,0 +1,17 @@
+id: security-method-access
+description: A handler's own access rule, e.g. @PreAuthorize("hasRole('ADMIN')") or @Secured("ROLE_ADMIN") - it wins over request matchers
+match:
+  rule:
+    kind: method_declaration
+    has:
+      kind: modifiers
+      has:
+        kind: annotation
+        all:
+          - has: { field: name, regex: "^(PreAuthorize|Secured|RolesAllowed)$" }
+          - has: { field: arguments, has: { nthChild: 1, pattern: $EXPR } }
+emit:
+  - clue: access
+    function: "@function"
+    rule: expression
+    value: $EXPR

@@ -27,6 +27,7 @@ from steno.extraction.facts import (
     EntryPointFact,
     Extraction,
     HttpRef,
+    InterceptorFact,
     NodeFact,
     NodeRef,
     Origin,
@@ -49,6 +50,10 @@ CLUE_FIELDS: dict[str, dict[str, str]] = {
     "prefix": {"owner": "symbol", "value": "value"},
     "mount": {"parent": "symbol", "child": "symbol", "prefix": "value"},
     "property": {"key": "text", "value": "value"},
+    # Who may call an entry point (D103): request matchers and their rule, or a method's own
+    "access": {"matchers": "text", "rule": "text", "value": "text", "function": "symbol"},
+    # Dependency injection: a @Bean method provides its return type (D103)
+    "provides": {"function": "symbol"},
     "client": {
         "type": "class",
         "target": "ref",
@@ -258,6 +263,8 @@ class Engine:
                     self._emit_clue(ctx, item)
                 elif "entry_point" in item:
                     self._emit_entry_point(ctx, item["entry_point"])
+                elif "interceptor" in item:
+                    self._emit_interceptor(ctx, item["interceptor"])
                 else:
                     self.out.errors.append(f"{ctx.rule.id}: unknown emit {sorted(item)}")
             except _Drop as reason:
@@ -346,6 +353,19 @@ class Engine:
                 fields[key] = value
         self.out.clues.append(ClueFact(kind, fields, ctx.origin))
 
+    def _emit_interceptor(self, ctx: Ctx, item: dict[str, Any]) -> None:
+        function = self._anchor(ctx, item.get("function", "@function"))
+        if not function:
+            raise _Drop("interceptor outside a function")
+        scope = item.get("applies_to", "http")
+        if scope == "http":
+            scope = {"http": True}
+        elif isinstance(scope, dict):
+            scope = {k: self._value(ctx, v) for k, v in scope.items()}
+        self.out.interceptors.append(
+            InterceptorFact(function, str(item.get("kind", "interceptor")), scope, ctx.origin)
+        )
+
     def _emit_entry_point(self, ctx: Ctx, item: dict[str, Any]) -> None:
         function = self._anchor(ctx, item["function"])
         for trigger in self._refs(ctx, item["trigger"]):
@@ -366,8 +386,8 @@ class Engine:
 
     def _cap(self, ctx: Ctx, spec: Any) -> Capture | None | object:
         """The capture a `$NAME` spec refers to; _OMIT if unbound; None if not a capture."""
-        if isinstance(spec, str) and spec.startswith("$") and spec[1:].isidentifier():
-            return ctx.captures.get(spec[1:], _OMIT)
+        if isinstance(spec, str) and spec.startswith("$") and spec.lstrip("$").isidentifier():
+            return ctx.captures.get(spec.lstrip("$"), _OMIT)  # $X, and $$$X (several nodes)
         return None
 
     def _value(self, ctx: Ctx, spec: Any) -> Any:

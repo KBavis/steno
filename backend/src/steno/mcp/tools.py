@@ -190,6 +190,7 @@ class Tools:
                     "trigger": fl.get("trigger"),
                     "trigger_kind": kind_of(list(trig.labels)) if trig is not None else None,
                     "steps": fl.get("steps"),
+                    **({"access": fl.get("access")} if fl.get("access") else {}),
                     **({"inferred": True} if fl.get("inferred") else {}),
                     **({"incomplete": True} if fl.get("incomplete") else {}),
                     **{verb: sorted(set(names)) for verb, names in touches.items()},
@@ -402,6 +403,7 @@ class Tools:
                     ("one of several implementations", t.get("candidate")),
                     ("helper, not expanded", t.get("utility")),
                     ("called again, see above", t.get("repeat")),
+                    (f"runs before the handler ({t.get('interceptor')})", t.get("interceptor")),
                 )
                 if on
             ]
@@ -458,6 +460,7 @@ class Tools:
             "id": flow_id,
             "kind": "flow",
             "trigger": fl.get("trigger"),
+            **({"access": fl.get("access")} if fl.get("access") else {}),
             **(
                 {
                     "inferred": "nothing in the code starts this function; Steno treats it as an "

@@ -88,12 +88,21 @@ class Ledger:
         ]:
             self.origins[o.file].add(o.line)
             self.pack_lines[o.file].append((o.line, o.pack))
+        # Interceptors (D103): the framework hooks a rule placed in front of entry points
+        self.interceptors = {i.function for i in x.interceptors}
+        # Dependency injection: a @Bean's return type → the method providing it, when one does
+        self.providers = self._providers(x, rs)
+        self.provided: dict[str, list[tuple[LibraryCall, str]]] = defaultdict(list)
         self.calls: list[tuple[LibraryCall, bool]] = []  # I/O-capable calls, explained?
         self.hooks: list[tuple[Hook, bool]] = []  # framework hooks, explained?
         self._marks: dict[str, list[str]] = defaultdict(list)
         if rs:
             for r in rs:
                 for call in r.library_calls():
+                    owner = call.symbol.split("#", 1)[0]
+                    if owner in self.providers:  # runs the app's own code (a @Bean's)
+                        self.provided[call.function.symbol].append((call, self.providers[owner]))
+                        continue
                     exact_io = any(call.symbol.split("#", 1)[0] == i for i in self.io)
                     if _exception(call.symbol) or (_constructor(call.symbol) and not exact_io):
                         continue  # reading an exception's message, building a client: not I/O
@@ -134,8 +143,24 @@ class Ledger:
             for line, pack in self.pack_lines.get(rel, [])
         )
 
+    @staticmethod
+    def _providers(x: Extraction, rs: Resolvers | None) -> dict[str, str]:
+        found: dict[str, list[str]] = defaultdict(list)
+        for c in x.clues:
+            fn = c.fields.get("function") if c.kind == "provides" else None
+            returns = getattr(rs.by_language.get("java"), "returns_of", None) if rs else None
+            if fn and returns and returns(fn):
+                found[returns(fn)].append(fn)
+        return {t: fns[0] for t, fns in found.items() if len(fns) == 1}  # one bean, one answer
+
     def _declared(self, hook: Hook) -> bool:
-        """A rule matched the declaration itself (a mapping, an entity, a listener)."""
+        """A rule matched the declaration itself (a mapping, an entity, a listener), or placed
+        the code the framework calls through it (an interceptor)."""
+        if self.interceptors & set(hook.entries) or (
+            hook.kind == "extends"
+            and any(i.startswith(hook.symbol + "#") for i in self.interceptors)
+        ):
+            return True
         lines = self.origins.get(hook.file, set())
         return any(hook.header[0] <= line <= hook.header[1] for line in lines)
 

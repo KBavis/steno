@@ -1,0 +1,11 @@
+id: spring-bean-provider
+description: A @Bean method provides its return type, e.g. @Bean UserDetailsService userDetailsService() { return username -> repo.findByUsername(username)...; } - a call on that type runs the code it returns
+match:
+  rule:
+    kind: method_declaration
+    has:
+      kind: modifiers
+      has: { regex: "^@Bean\\b" }
+emit:
+  - clue: provides
+    function: "@function"

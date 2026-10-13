@@ -356,6 +356,40 @@ final class Analyzer {
         if (!annotations.isEmpty()) {
             m.put("annotations", annotations);
         }
+        // Parameters with their types and annotations (`@Validated(Group.class) Dto dto`):
+        // which interceptors apply to an entry point (validation, D103)
+        List<Map<String, Object>> parameters = new ArrayList<>();
+        for (Parameter p : c.getParameters()) {
+            List<Map<String, Object>> usages = usages(p.getAnnotations(), c);
+            if (usages.isEmpty()) {
+                continue;
+            }
+            Map<String, Object> pm = new LinkedHashMap<>();
+            pm.put("name", p.getNameAsString());
+            String t = typeName(p.getType(), c);
+            pm.put("type", t);
+            pm.put("annotations", usages);
+            parameters.add(pm);
+        }
+        if (!parameters.isEmpty()) {
+            m.put("parameters", parameters);
+        }
+        if (c instanceof MethodDeclaration md) {
+            String ret = typeName(md.getType(), md);
+            if (ret != null && !ret.equals("void")) {
+                m.put("returns", ret);
+            }
+            // Its body is the implementation it returns (`return username -> repo.find(...)`),
+            // not a factory handing back someone else's (`return config.getManager()`)
+            boolean[] impl = {false};
+            md.getBody().ifPresent(b -> b.walk(com.github.javaparser.ast.stmt.ReturnStmt.class, r ->
+                    r.getExpression().ifPresent(e -> impl[0] |= e instanceof LambdaExpr
+                            || e instanceof MethodReferenceExpr
+                            || (e instanceof ObjectCreationExpr o && o.getAnonymousClassBody().isPresent()))));
+            if (impl[0]) {
+                m.put("returns_implementation", true);
+            }
+        }
         // A Spring Data repository method's own query: its tables are read or written (JPQL
         // names entities and their relationships; native SQL names tables)
         for (AnnotationExpr a : c.getAnnotations()) {
@@ -425,6 +459,54 @@ final class Analyzer {
         if (!relations.isEmpty()) {
             m.put("relations", relations);
         }
+        // Annotation usages with their attributes (groups), on the class and its fields, and
+        // fields marked @Valid (validation cascades into them)
+        List<Map<String, Object>> usages = new ArrayList<>(usages(td.getAnnotations(), td));
+        List<Map<String, Object>> cascades = new ArrayList<>();
+        for (FieldDeclaration f : td.getFields()) {
+            for (VariableDeclarator v : f.getVariables()) {
+                for (Map<String, Object> u : usages(f.getAnnotations(), f)) {
+                    Map<String, Object> withField = new LinkedHashMap<>(u);
+                    withField.put("field", v.getNameAsString());
+                    usages.add(withField);
+                }
+                if (Lombok.has(f, "Valid")) {
+                    TypeRef declared = new TypeRef(v.getType(), f);
+                    TypeRef element = argument(declared);
+                    String t = typeName((element != null ? element : declared).type(), f);
+                    if (t != null) {
+                        cascades.add(Map.of("field", v.getNameAsString(), "type", t));
+                    }
+                }
+            }
+        }
+        if (!usages.isEmpty()) {
+            m.put("usages", usages);
+        }
+        if (!cascades.isEmpty()) {
+            m.put("valid_fields", cascades);
+        }
+        Map<String, Object> baseArgs = new LinkedHashMap<>();
+        List<ClassOrInterfaceType> declaredBases = new ArrayList<>();
+        if (td instanceof ClassOrInterfaceDeclaration ci) {
+            declaredBases.addAll(ci.getExtendedTypes());
+            declaredBases.addAll(ci.getImplementedTypes());
+        }
+        for (ClassOrInterfaceType b : declaredBases) {
+            if (b.getTypeArguments().isEmpty()) {
+                continue;
+            }
+            List<String> args = new ArrayList<>();
+            for (Type a : b.getTypeArguments().get()) {
+                String n = typeName(a, td);
+                args.add(n != null ? n : a.asString());
+            }
+            String bn = typeName(b, td);
+            baseArgs.put(bn != null ? bn : b.getNameWithScope(), args);
+        }
+        if (!baseArgs.isEmpty()) {
+            m.put("base_args", baseArgs);
+        }
         return m;
     }
 
@@ -457,6 +539,25 @@ final class Analyzer {
         for (AnnotationExpr a : annotations) {
             String n = typeName(a.getNameAsString(), at);
             out.add(n != null ? n : a.getNameAsString());
+        }
+        return out;
+    }
+
+    /** Annotation usages: the annotation and its `groups` (class literals), when it has any. */
+    private List<Map<String, Object>> usages(NodeList<AnnotationExpr> annotations, Node at) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (AnnotationExpr a : annotations) {
+            String n = typeName(a.getNameAsString(), at);
+            Map<String, Object> u = new LinkedHashMap<>();
+            u.put("annotation", n != null ? n : a.getNameAsString());
+            Object groups = annotationValue(a, "groups", at);
+            if (groups == null && a.getNameAsString().endsWith("Validated")) {
+                groups = annotationValue(a, "value", at); // @Validated(Group.class)
+            }
+            if (groups != null) {
+                u.put("groups", groups instanceof List<?> l ? l : List.of(groups));
+            }
+            out.add(u);
         }
         return out;
     }
@@ -522,6 +623,10 @@ final class Analyzer {
                 }
             }
             return out;
+        }
+        if (e instanceof ClassExpr c) {  // Group.class
+            String n = typeName(c.getType(), c);
+            return n != null ? n : c.getType().asString();
         }
         if (e instanceof FieldAccessExpr f) {
             return f.getNameAsString();

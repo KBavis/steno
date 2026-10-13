@@ -31,6 +31,7 @@ from steno.resolvers.base import Resolver, Resolvers
 def assemble(x: Extraction, r: Resolvers | None, repo: Path) -> None:
     _dedupe_clues(x)
     _prefix_chains(x)
+    _access(x)
     if r:
         _tables(x, r)
         _queries(x, r)
@@ -79,6 +80,94 @@ def _join_path(prefix: str, path: str) -> str:
         return prefix or "/"
     joined = (prefix.rstrip("/") + "/" + path.lstrip("/")) if prefix else path
     return joined if joined.startswith(("/", UNRESOLVED_TEXT)) else "/" + joined
+
+
+# ---------------------------------------------------------------------- access
+
+ACCESS = {
+    "permitAll": "public",
+    "anonymous": "anonymous",
+    "authenticated": "authenticated",
+    "fullyAuthenticated": "authenticated",
+    "denyAll": "denied",
+}
+
+
+def _access(x: Extraction) -> None:
+    """Who may call each HTTP endpoint (D103): `access` from request matchers
+    (`requestMatchers("/auth/**").permitAll()`; the most specific matcher wins, one naming the
+    method before one that doesn't, `anyRequest()` last) or the handler's own annotation
+    (`@PreAuthorize("hasRole('ADMIN')")`, which wins over matchers)."""
+    rules = []  # (method, pattern regex, specificity, access)
+    by_function = {}
+    for c in x.clues:
+        if c.kind != "access":
+            continue
+        rule = _rule_text(str(c.fields.get("rule", "")), str(c.fields.get("value", "")))
+        if rule is None:
+            continue
+        if c.fields.get("function"):
+            by_function[c.fields["function"]] = rule
+            continue
+        text = str(c.fields.get("matchers", ""))
+        methods = re.findall(r"HttpMethod\.(\w+)", text)
+        patterns = [t for t in _tokens(text) if t.startswith("/")] or ["/**"]
+        for pattern in patterns:
+            literal = len(re.split(r"[*{]", pattern, maxsplit=1)[0])
+            rules.append(
+                (methods[0] if methods else None, _ant(pattern), (bool(methods), literal), rule)
+            )
+    handler_of = {
+        id(ep.trigger): ep.function for ep in x.entry_points if isinstance(ep.trigger, NodeFact)
+    }
+    for node in x.nodes:
+        if node.label != "HttpEndpoint" or not isinstance(node.props.get("path"), str):
+            continue
+        own = by_function.get(handler_of.get(id(node)))
+        if own:
+            node.props["access"] = own
+            continue
+        method, path = node.props.get("method"), re.sub(r"\{[^}]*\}", "x", node.props["path"])
+        matching = [
+            (spec, rule)
+            for m, rx, spec, rule in rules
+            if (m is None or m == method) and rx.match(path)
+        ]
+        if matching:
+            node.props["access"] = max(matching, key=lambda r: r[0])[1]
+
+
+def _rule_text(rule: str, value: str) -> str | None:
+    if rule in ACCESS:
+        return ACCESS[rule]
+    names = _tokens(value)
+    if rule in ("hasRole", "hasAnyRole", "hasAuthority", "hasAnyAuthority"):
+        return "role:" + ",".join(names) if names else "role"
+    if rule == "expression":  # @PreAuthorize("hasRole('ADMIN')")
+        inner = re.findall(r"has(?:Any)?(?:Role|Authority)\(([^)]*)\)", value)
+        if inner:
+            return "role:" + ",".join(re.findall(r"'([^']+)'", inner[0]))
+        if "permitAll" in value:
+            return "public"
+        if "isAuthenticated" in value:
+            return "authenticated"
+        return f"expression:{value.strip(chr(34))}"
+    return None
+
+
+def _tokens(text: str) -> list[str]:
+    """Arguments as text (`"/a", ,, "/b"` or `/a`), quotes and separators dropped."""
+    return [t.strip().strip("\"'") for t in text.split(",") if t.strip().strip("\"'")]
+
+
+def _ant(pattern: str) -> re.Pattern[str]:
+    """An Ant-style path pattern: `**` any segments, `*` one segment's characters."""
+    out = ""
+    for token in re.findall(r"\*\*|\*|[^*]+", pattern):
+        out += ".*" if token == "**" else "[^/]*" if token == "*" else re.escape(token)
+    if out.endswith("/.*"):
+        out = out[:-3] + "(/.*)?"
+    return re.compile(f"^{out}$")
 
 
 # ---------------------------------------------------------------------- tables

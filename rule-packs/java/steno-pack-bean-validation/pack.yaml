@@ -1,0 +1,18 @@
+name: steno-pack-bean-validation
+version: 0.1.0
+language: java
+source: core
+description: Bean Validation (Jakarta / javax) - custom ConstraintValidators run in front of the entry points whose parameters they validate, by type, @Valid / @Validated groups, and @Valid cascades
+enabled_when:
+  dependencies:
+    - org.springframework.boot:spring-boot-starter-validation
+    - jakarta.validation:jakarta.validation-api
+    - javax.validation:validation-api
+    - org.hibernate.validator:hibernate-validator
+  imports: [jakarta.validation, javax.validation]
+library:
+  harmless:
+    - jakarta.validation.Constraint
+    - javax.validation.Constraint
+    - jakarta.validation.ConstraintValidatorContext
+    - javax.validation.ConstraintValidatorContext

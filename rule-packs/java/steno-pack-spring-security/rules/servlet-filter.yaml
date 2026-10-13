@@ -1,0 +1,17 @@
+id: servlet-filter
+description: A request filter, e.g. class JwtAuthenticationFilter extends OncePerRequestFilter { doFilterInternal(...) } - it runs before every HTTP entry point of its application
+match:
+  rule:
+    kind: method_declaration
+    has: { field: name, regex: "^(doFilterInternal|doFilter)$" }
+    inside:
+      stopBy: end
+      kind: class_declaration
+      any:
+        - has: { field: superclass, has: { regex: "^(OncePerRequestFilter|GenericFilterBean|AbstractAuthenticationProcessingFilter|BasicAuthenticationFilter)$" } }
+        - has: { field: interfaces, has: { stopBy: end, regex: "^Filter$" } }
+emit:
+  - interceptor:
+      function: "@function"
+      kind: filter
+      applies_to: http

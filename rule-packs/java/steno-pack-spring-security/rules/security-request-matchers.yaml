@@ -1,0 +1,13 @@
+id: security-request-matchers
+description: Who may call which paths, e.g. .requestMatchers(HttpMethod.POST, "/budget/performance").hasAuthority("ADMIN") or .antMatchers("/auth/**").permitAll() in a SecurityFilterChain
+match:
+  rule:
+    pattern: $X.$MATCHERS($$$PATHS).$RULE($$$VALUE)
+  constraints:
+    MATCHERS: { regex: "^(requestMatchers|antMatchers|mvcMatchers|regexMatchers)$" }
+    RULE: { regex: "^(permitAll|anonymous|authenticated|fullyAuthenticated|denyAll|hasRole|hasAnyRole|hasAuthority|hasAnyAuthority)$" }
+emit:
+  - clue: access
+    matchers: $$$PATHS
+    rule: $RULE
+    value: $$$VALUE

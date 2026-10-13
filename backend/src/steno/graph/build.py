@@ -228,6 +228,7 @@ class _Builder:
         self.files: dict[str, dict[str, int]] = {}  # file path → counts, for File nodes
         self.counted: set[Key] = set()
         self.inferred: set[Key] = set()  # entry points no rule names (D74)
+        self.interceptors: list[Any] = []  # code run in front of entry points (D103)
 
     def run(self) -> GraphPlan:
         self._structure()
@@ -605,6 +606,14 @@ class _Builder:
             if self.entry_of[ep.function] in self.functions
         }
         self._walk(self.roots, rule_calls)
+        # Interceptors run in front of the entry points they apply to (D103): their calls are
+        # part of those flows
+        self.interceptors = [
+            i
+            for i in self.x.interceptors
+            if self.r and self.r.entry_function(i.function) in self.functions
+        ]
+        self._walk({(i.function, None) for i in self.interceptors}, rule_calls)
         # Work inside an application that nothing in the code starts (a worker loop, a CLI
         # command, a tool a framework registers): its own flow, marked inferred (D74)
         self.inferred = self._inferred_roots(rule_calls)
@@ -618,7 +627,13 @@ class _Builder:
                 callers[c.target].add(key)
         effectful = {k for k in reachable if self.effects.get(k[0])}
         plain = {k: [c.target for c in out] for k, out in self.graph.items()}
-        self.significant = _reaches_effect(reachable, plain, effectful) | self.roots
+        # Interceptors are always shown: a validator that only checks a value still decides
+        # whether the flow goes on
+        self.significant = (
+            _reaches_effect(reachable, plain, effectful)
+            | self.roots
+            | {(i.function, None) for i in self.interceptors}
+        )
         self.utility = {
             k for k in reachable if len(callers[k]) >= UTILITY_FAN_IN and k not in self.significant
         }
@@ -662,6 +677,8 @@ class _Builder:
         runs them: a framework, a process manager, a scheduler no rule knows. Scripts and
         tooling outside every application never start a flow."""
         called: set[str] = set(self.entry_of) | set(self.entry_of.values())
+        called |= {i.function for i in self.interceptors}  # placed in front of entry points
+        called |= {p for calls in self.ledger.provided.values() for _, p in calls}
         for symbol in self.functions:
             for inv in self._calls_of((symbol, None)):
                 called.add(inv.callee)
@@ -741,6 +758,10 @@ class _Builder:
         for inv in self._calls_of(key):
             for target, candidate in self._targets(inv):
                 out.append(Call(target, inv.line, inv.conditional, inv.in_loop, False, candidate))
+        # A call on a type the app provides as a @Bean runs the bean's code (D103)
+        for call, provider in self.ledger.provided.get(key[0], []):
+            if provider in self.functions:
+                out.append(Call((provider, None), call.line))
         for callee, line, is_async in rule_calls:
             same = [i for i, c in enumerate(out) if c.target[0] == callee]
             if same:
@@ -815,7 +836,8 @@ class _Builder:
                 else trigger_name
             )
             flow = ids.flow_id(app_name, name)
-            trace = self._cascades_touched(self._trace(flow, (entry_symbol, None)))
+            before = self._interceptors_for(entry_symbol, trigger_node.labels, app)
+            trace = self._cascades_touched(self._trace(flow, (entry_symbol, None), before))
             stops = sum(len(t.get("unresolved", [])) for t in trace)
             start, end = entry.span
             self.plan.node(
@@ -824,6 +846,9 @@ class _Builder:
                 name=name,
                 trigger=trigger_name,
                 trigger_kind=trigger_kind,
+                # Who may call it (D103), and the interceptors that run first
+                access=trigger_node.props.get("access"),
+                interceptors=[i.function for i in before] or None,
                 entry_symbol=entry_symbol,
                 entry_file=self._rel(entry),
                 entry_start_line=start,
@@ -891,7 +916,28 @@ class _Builder:
             self.plan.edge("BELONGS_TO", flow, app, **prov)
         self._steps(flow, trace)
 
-    def _trace(self, flow: str, root: Key) -> list[dict[str, Any]]:
+    def _interceptors_for(
+        self, entry: str, trigger_labels: list[str], app: str | None
+    ) -> list[Any]:
+        """The interceptors that run before an entry point (D103), filters first: those in its
+        application whose scope covers it."""
+        if "HttpEndpoint" not in trigger_labels:
+            return []
+        fn = self.functions.get(entry)
+        out = []
+        for i in self.interceptors:
+            if self._app_for(i.origin.file) != app:
+                continue
+            scope = i.scope
+            if scope.get("http"):
+                out.append(i)
+            elif scope.get("validates") and fn is not None and self.r:
+                applies = getattr(self.r.for_function(fn), "validation_applies", None)
+                if applies and applies(scope["validates"], entry):
+                    out.append(i)
+        return sorted(out, key=lambda i: (i.kind != "filter", i.function))
+
+    def _trace(self, flow: str, root: Key, before: list[Any] | None = None) -> list[dict[str, Any]]:
         """The flow's trace: a depth-first walk from the entry, each call in source order.
 
         Every function the flow calls is listed once per call site (D63). A function already
@@ -925,7 +971,12 @@ class _Builder:
             for i, c in enumerate(self.graph.get(key, []), start=1):
                 visit(c.target, f"{path}.{i}", c, stack | {key})
 
-        visit(root, "1", None, frozenset())
+        # Interceptors first, each its own top-level step marked as running before the handler
+        for n, i in enumerate(before or [], start=1):
+            start = len(entries)
+            visit((i.function, None), str(n), None, frozenset())
+            entries[start]["interceptor"] = i.kind
+        visit(root, str(len(before or []) + 1), None, frozenset())
         return entries
 
     def _cascades_touched(self, trace: list[dict[str, Any]]) -> list[dict[str, Any]]:
