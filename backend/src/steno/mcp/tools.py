@@ -140,7 +140,9 @@ class Tools:
             "results": out,
             **(
                 {"more": f"{more} match by function name; narrow the words or use scope"}
-                if more or len(out) >= limit
+                if more
+                else {"more": "there may be more; narrow the words or use scope"}
+                if len(out) >= limit
                 else {}
             ),  # fmt: skip
             "next": [
@@ -482,7 +484,10 @@ class Tools:
                 else ""
             ),
             "steps": steps,
-            "completeness": self._flow_completeness(fl),
+            "completeness": self._flow_completeness(
+                fl,
+                sorted({e["target"] for es in effects.values() for e in es if e["unknown_host"]}),
+            ),
             **({"leads_to": leads} if leads else {}),
             "citations": citations,
         }
@@ -683,6 +688,12 @@ class Tools:
                     "calls from flows whose host is set outside the repository and whose method "
                     "and path match; not confirmed"
                 )
+                out["completeness"]["unconfirmed_callers"] = (
+                    f"{len(possible)} possible caller{'s' if len(possible) != 1 else ''} can't be "
+                    "confirmed or ruled out (see "
+                    "`possible_callers`)"
+                )
+                out["completeness"]["complete"] = False
         return out
 
     def _possible_callers(self, targets: list[str]) -> list[dict[str, Any]]:
@@ -747,10 +758,11 @@ class Tools:
             )
         ]
 
-    def _flow_completeness(self, fl: Any) -> dict[str, Any]:
+    def _flow_completeness(self, fl: Any, unknown_hosts: list[str] | None = None) -> dict[str, Any]:
         """What this answer can't vouch for (D71, D101): calls in the flow Steno couldn't follow,
-        whether its trigger is known, and framework hooks in its application (filters,
-        validators, callbacks) that may run around it without the graph showing it."""
+        calls whose host is set where the app runs (D100), whether its trigger is known, and
+        framework hooks in its application (filters, validators, callbacks) that may run around
+        it without the graph showing it."""
         rows = self._read(
             "MATCH (:Flow {id: $id})-[:BELONGS_TO]->(a:Application) RETURN a.unknown_hooks AS h",
             id=fl["id"],
@@ -761,6 +773,12 @@ class Tools:
             out["calls_not_followed"] = (
                 f"{fl.get('unresolved_calls')} calls Steno couldn't follow or explain; the flow "
                 "may do more past them (see each step's `stops`)"
+            )
+        if unknown_hosts:
+            out["hosts_unknown"] = (
+                f"calls to {', '.join(unknown_hosts)}: the host is set outside the repository, so "
+                "which application or system they reach isn't confirmed (see `host_unknown` and "
+                "`possible_targets` on the steps)"
             )
         if fl.get("inferred"):
             out["trigger"] = (

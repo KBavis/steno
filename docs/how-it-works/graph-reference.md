@@ -79,13 +79,13 @@ After a refactor, only the code pointers (a step's `symbol` and lines, the flow'
 
 **What the split controls**, and nothing more: (1) search, cards, and routing never cover code nodes; (2) change history logs architecture nodes in full and trace changes per flow.
 
-**Search is narrower than "all architecture nodes".** It covers the `:Searchable` nodes (Flow, Application, Space, Organization, Interface, Entity, Table: the ones that get cards) by name, plus **function names in every flow's trace**, which return the flow. Steps, schedules, data stores, external systems, and Kafka clusters aren't searchable, though `get_node` opens any node by name or ID. See [Retrieval §5](./retrieval-and-mcp.md#5-mcp-tools-decided).
+**Search is narrower than "all architecture nodes".** It covers the `:Searchable` nodes (Flow, Application, Space, Organization, Interface, Entity, Table, DataStore, ExternalSystem; D104) by name, plus **function names in every flow's trace**, which return the flow. Steps, schedules, and Kafka clusters aren't searchable, though `get_node` opens any node by name or ID. See [Retrieval §5](./retrieval-and-mcp.md#5-mcp-tools-decided).
 
 | | Architecture nodes | Code nodes |
 |---|---|---|
 | **Kinds** | Organization, Space, Application, Interface, Flow, Step, Entity, DataStore, Table, ExternalSystem, … | Repository, Module, File (functions live in flow traces) |
 | **Answers** | What exists, what it does, what it touches, flows step by step | Exactly what code runs at each step |
-| **Queried** | Search covers the searchable ones (flows, applications, spaces, organization, interfaces, entities, tables); every query starts here | Only after narrowing to one app or flow, through its steps and trace |
+| **Queried** | Search covers the searchable ones (flows, applications, spaces, organization, interfaces, entities, tables, data stores, external systems); every query starts here | Only after narrowing to one app or flow, through its steps and trace |
 | **Effects** | On the Step that performs them (`Step -WRITES_TO-> Table`), rolled up onto Flows | Listed on the trace entry of the function that performs them |
 | **Change history** | Every change logged | Trace changes logged per flow (functions added, removed, moved) |
 
@@ -198,7 +198,7 @@ Which Project introduced or changed a fact isn't a property. It's recorded later
 
 ### Card properties (searchable nodes only)
 
-**Not built yet:** the cards stage is skipped, so no node has a card today and search matches names only. Cards will exist **only** on node types that search covers: **Flow, Application, Space, Organization, Interface, Entity, Table**. Steps, traces, modules, files, and edges have no card. These nodes also carry the `:Searchable` label, so one vector index and one full-text index cover them all.
+**Not built yet:** the cards stage is skipped, so no node has a card today and search matches names only. Cards will exist **only** on node types that search covers: **Flow, Application, Space, Organization, Interface, Entity, Table** (data stores and external systems are searched by name, D104). Steps, traces, modules, files, and edges have no card. These nodes also carry the `:Searchable` label, so one vector index and one full-text index cover them all.
 
 | Property | Purpose |
 |---|---|

@@ -5,7 +5,7 @@ An organization-wide context engine for AI agents. It ingests repositories into 
 ## Start here
 
 - **`docs/` is the source of truth. Start at `docs/README.md`.** It has four sections, each with a hub page (`README.md`) that summarizes it and links deeper: `docs/purpose/` (what Steno is for, lead use cases, where it fits, integration contract), `docs/concepts/` (the graph, witnesses and facets, identity, trust), `docs/how-it-works/` (architecture, ingestion stage by stage, rules, resolvers, graph schema, MCP, storage, security), `docs/plan/` (roadmap, onboarding, decisions).
-- Every design point is marked **Decided**, **Proposed**, or **Open**, and scoped `POC`, `v1`, or `v2`. The decision log is `docs/plan/decisions.md` (D1–D98 and open questions). Follow Decided items; raise Proposed or Open items with the user before relying on them. Design choices belong to the user.
+- Every design point is marked **Decided**, **Proposed**, or **Open**, and scoped `POC`, `v1`, or `v2`. The decision log is `docs/plan/decisions.md` (D1–D108 and open questions). Follow Decided items; raise Proposed or Open items with the user before relying on them. Design choices belong to the user.
 - Reference pages: the node and edge vocabulary is `docs/how-it-works/graph-reference.md` (§3–4); the rule format is `docs/how-it-works/ingestion/rules-and-packs.md`; the Postgres tables are `docs/how-it-works/storage.md`.
 - `docs/next-steps.md` is a local, gitignored working list; never link it from tracked files. `docs/my_docs/` is the user's personal notes (gitignored).
 - Docs are Markdown only, layered: a short "In one minute" summary and a diagram at the top of each page, detail in linked sub-pages.
@@ -32,7 +32,7 @@ Run from the repo root (see `Makefile`): `make up`, `make migrate`, `make graph-
 
 ## Key decisions to keep in mind
 
-- **One Neo4j graph** with **architecture nodes** (what the software does: applications, interfaces, flows, steps, tables) and **code nodes** (how it's built: repository, module, file), joined by `BUILT_FROM`. Functions aren't nodes: each flow stores its trace (D60). Search covers the searchable architecture nodes (flows, applications, spaces, organization, interfaces, entities, tables) plus function names in traces; never code nodes.
+- **One Neo4j graph** with **architecture nodes** (what the software does: applications, interfaces, flows, steps, tables) and **code nodes** (how it's built: repository, module, file), joined by `BUILT_FROM`. Functions aren't nodes: each flow stores its trace (D60). Search covers the searchable architecture nodes (flows, applications, spaces, organization, interfaces, entities, tables, data stores, external systems; D104) plus function names in traces; never code nodes.
 - **Postgres** holds what Steno is told and what it did (connectors, jobs, change history, logs; planned: the identity registry and claim store). Neo4j must stay rebuildable from Postgres + git.
 - **Deterministic first:** rules produce facts; decisions rules can't make use stand-ins (Jev in `v2`); an LLM only writes text (flow purposes and narratives, cards).
 - **Witnesses and facets:** code is one witness among CODE, PLATFORM, DECLARED, ADMIN (OBSERVED in `v2`). Steno answers a fixed set of facets; providers per organization supply them; independent witnesses are compared (D76–D80).

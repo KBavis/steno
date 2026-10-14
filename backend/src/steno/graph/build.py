@@ -39,7 +39,10 @@ from steno.resolvers.base import Function, Invocation, Resolvers, UnresolvedCall
 from steno.rule_packs.packs import HttpSystem
 
 # Node types search will cover (they'll carry cards; graph-reference.md §3, Card properties)
-SEARCHABLE = {"Flow", "Application", "Space", "Organization", "Interface", "Entity", "Table"}
+SEARCHABLE = {
+    "Flow", "Application", "Space", "Organization", "Interface", "Entity", "Table", "DataStore",
+    "ExternalSystem",
+}  # fmt: skip
 # Shared nodes: several repositories can reference them, so a re-ingest never deletes them
 # outright. Messaging interfaces (topics, queues, org-defined channels) are marked `shared`.
 SHARED = {"Table", "DataStore", "ExternalSystem"}
@@ -416,7 +419,7 @@ class _Builder:
         applications in one space don't appear to share a database."""
         sid = self.plan.node(
             ids.datastore_id("unknown", "unresolved", f"repo-{self.ctx.repo}"),
-            ["DataStore", "Relational"],
+            ["DataStore", "Relational", "Searchable"],
             name=f"{self.ctx.repo} relational store (not identified yet)",
             vendor="unknown",
             stub=True,
@@ -437,7 +440,7 @@ class _Builder:
         host_key = host if host and host != UNRESOLVED_TEXT else f"unresolved-{self.ctx.repo}"
         sid = self.plan.node(
             ids.datastore_id(vendor, host_key, db),
-            [lbl for lbl in labels if lbl != "Searchable"],
+            [*(lbl for lbl in labels if lbl != "Searchable"), "Searchable"],
             name=f"{vendor} @ {host or '?'}",
             shared=True,
             **{k: v for k, v in props.items() if isinstance(v, (str, int))},
@@ -458,7 +461,7 @@ class _Builder:
         key = key or host or name or UNRESOLVED_SYSTEM
         eid = self.plan.node(
             ids.external_system_id(key),
-            ["ExternalSystem"],
+            ["ExternalSystem", "Searchable"],
             host=host,
             name=name or host or "Unresolved HTTP target",
             stub=key == UNRESOLVED_SYSTEM or props.pop("stub", False),

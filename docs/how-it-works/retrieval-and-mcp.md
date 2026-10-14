@@ -207,7 +207,7 @@ Built: `search`, `get_node`. Not built: `glossary`.
 
 | Tool | Purpose | Returns | Serves use cases |
 |---|---|---|---|
-| `search(query, scope?, limit?, max_tokens?)` | **Built:** full-text over the names of searchable nodes (flows, applications, spaces, organization, interfaces, entities, tables), plus function names in flow traces (a hit returns the flow). Steps, schedules, data stores, external systems, and code nodes aren't searched; open them with `get_node`. **End state:** the routed entry point. Jev classifies the question, then Steno searches one scope or fans out across spaces in parallel. Passing `scope` skips routing. | Ranked cards, anchors, the routing decision and its confidence | All |
+| `search(query, scope?, limit?, max_tokens?)` | **Built:** full-text over the names of searchable nodes (flows, applications, spaces, organization, interfaces, entities, tables, data stores, external systems; D104), plus function names in flow traces (a hit returns the flow). A query is split the way names are (`budgeting-app` → `budgeting`, `app`), and exact words rank first. Steps, schedules, and code nodes aren't searched; open them with `get_node`. **End state:** the routed entry point. Jev classifies the question, then Steno searches one scope or fans out across spaces in parallel. Passing `scope` skips routing. | Ranked cards, anchors, the routing decision and its confidence | All |
 | `get_node(id \| name, include_children?)` | Progressive disclosure: a node's card plus **a view that depends on its layer** (below) | Card + layer view + next-step hints | Onboarding, planning |
 | `glossary(term, space?)` | Look up a term, nickname, or standard | Definition + where it's used | Onboarding |
 
