@@ -3,6 +3,9 @@ version: 0.1.0
 language: python
 source: core
 description: Reads and writes on Chroma made through LlamaIndex (ChromaVectorStore, VectorStoreIndex)
+# The library versions these rules are written and tested for (coverage reports others)
+versions:
+  llama-index-vector-stores-chroma: ">=0.1, <1"
 enabled_when:
   dependencies: [llama-index-vector-stores-chroma]
   imports: [llama_index.vector_stores.chroma]

@@ -1,0 +1,5 @@
+# Spring Boot 2: the same filter on javax.servlet
+interceptors:
+  - function: "com.x.JwtFilter#doFilterInternal(javax.servlet.http.HttpServletRequest,javax.servlet.http.HttpServletResponse,javax.servlet.FilterChain)"
+    kind: filter
+    applies_to: { http: true }

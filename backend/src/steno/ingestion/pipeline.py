@@ -48,6 +48,7 @@ from steno.graph.driver import database, get_driver
 from steno.graph.structure import detect as detect_structure
 from steno.graph.writer import write_plan
 from steno.rule_packs.packs import is_enabled, load_packs
+from steno.rule_packs.versions import dependencies
 
 log = logging.getLogger(__name__)
 
@@ -106,6 +107,9 @@ def parse(ctx: JobContext) -> dict[str, Any]:
     all_packs = load_packs(get_settings().rule_packs_dir)
     ctx.state["all_packs"] = all_packs  # coverage: which libraries any pack covers
     packs = [p for p in all_packs if is_enabled(p, ctx.workspace)]
+    ctx.state["packs"] = packs
+    # Library versions, checked against what each pack is tested on (coverage)
+    ctx.state["dependencies"] = deps = dependencies(ctx.workspace)
     engine = Engine(ctx.workspace, packs)
     engine.parse()
     ctx.state["engine"] = engine
@@ -113,6 +117,8 @@ def parse(ctx: JobContext) -> dict[str, Any]:
         "packs": [p.name for p in packs],
         "files": len(engine.files),
         "resolvers": engine.resolver.stats() if engine.resolver else {},
+        "libraries": len({d.name for d in deps}),
+        "versions_known": len({d.name for d in deps if d.version}),
         "errors": len(engine.out.errors),
     }
 
@@ -217,6 +223,8 @@ def coverage(ctx: JobContext) -> dict[str, Any]:
         ctx.state["plan"],
         ctx.state["all_packs"],
         _application_of(ctx),
+        enabled=ctx.state.get("packs"),
+        deps=ctx.state.get("dependencies"),
     )
     previous = _previous_triage(ctx)
     for it in report.items:

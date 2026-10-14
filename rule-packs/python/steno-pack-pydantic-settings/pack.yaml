@@ -3,6 +3,9 @@ version: 0.1.0
 language: python
 source: core
 description: Default values of pydantic-settings fields, so settings.X references resolve
+# The library versions these rules are written and tested for (coverage reports others)
+versions:
+  pydantic-settings: ">=2.0, <3"
 enabled_when:
   dependencies: [pydantic-settings]
   imports: [pydantic_settings]

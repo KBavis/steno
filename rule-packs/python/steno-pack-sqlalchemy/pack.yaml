@@ -3,6 +3,9 @@ version: 0.1.0
 language: python
 source: core
 description: SQLAlchemy models, the tables they map to, and the queries that read and write them
+# The library versions these rules are written and tested for (coverage reports others)
+versions:
+  sqlalchemy: ">=1.4, <3"
 enabled_when:
   dependencies: [sqlalchemy]
   imports: [sqlalchemy]

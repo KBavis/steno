@@ -3,6 +3,9 @@ version: 0.1.0
 language: java
 source: core
 description: Bean Validation (Jakarta / javax) - custom ConstraintValidators run in front of the entry points whose parameters they validate, by type, @Valid / @Validated groups, and @Valid cascades
+# The library versions these rules are written and tested for (coverage reports others)
+versions:
+  org.springframework.boot: ">=2.0, <4"
 enabled_when:
   dependencies:
     - org.springframework.boot:spring-boot-starter-validation

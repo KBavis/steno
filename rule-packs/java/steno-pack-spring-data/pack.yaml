@@ -3,6 +3,9 @@ version: 0.1.0
 language: java
 source: core
 description: Spring Data repositories (reads and writes on their entity's table), MongoDB documents, and Spring Data JDBC / R2DBC tables
+# The library versions these rules are written and tested for (coverage reports others)
+versions:
+  org.springframework.boot: ">=2.0, <4"
 enabled_when:
   dependencies:
     - org.springframework.boot:spring-boot-starter-data-jpa

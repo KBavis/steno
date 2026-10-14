@@ -5,14 +5,14 @@ when any of its `enabled_when` conditions holds (D49).
 """
 
 import re
-import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from steno.source.files import source_files
+from steno.rule_packs.versions import dependencies
+from steno.source.files import is_test_file, source_files
 
 # Language → file extensions the pack's code rules run on
 EXTENSIONS = {"python": (".py",), "java": (".java",)}
@@ -58,6 +58,10 @@ class Pack:
     # integration point (never a gap)
     io: list[str] = field(default_factory=list)
     harmless: list[str] = field(default_factory=list)
+    # The library versions its rules are written and tested for, as ranges
+    # (`{"org.springframework.boot": ">=2.7, <4"}`). A repository on another version, or one
+    # whose version isn't known, is a coverage item; the rules still run
+    versions: dict[str, str] = field(default_factory=dict)
 
 
 def load_pack(path: Path) -> Pack:
@@ -93,6 +97,7 @@ def load_pack(path: Path) -> Pack:
         http_systems=_http_systems(path / "http.yaml"),
         io=list((meta.get("library") or {}).get("io") or []),
         harmless=list((meta.get("library") or {}).get("harmless") or []),
+        versions={str(k): str(v) for k, v in (meta.get("versions") or {}).items()},
     )
 
 
@@ -125,45 +130,11 @@ def _norm(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-# `implementation 'group:artifact:version'`, `api("group:artifact")`
-_GRADLE_COORDS = re.compile(r"""['"]([\w.\-]+):([\w.\-]+)(?::[^'"]*)?['"]""")
-# `implementation group: 'g', name: 'a'`
-_GRADLE_NAMED = re.compile(
-    r"""group\s*[:=]\s*['"]([\w.\-]+)['"]\s*,\s*name\s*[:=]\s*['"]([\w.\-]+)['"]"""
-)
-_MAVEN_DEP = re.compile(
-    r"<dependency>.*?<groupId>\s*([\w.\-]+)\s*</groupId>.*?<artifactId>\s*([\w.\-]+)\s*</artifactId>",
-    re.DOTALL,
-)
-
-
 def declared_dependencies(repo: Path) -> set[str]:
-    """Dependency names from requirements*.txt, pyproject.toml, build.gradle(.kts), and pom.xml
-    anywhere in the repository. Java dependencies are `group:artifact`."""
-    names: set[str] = set()
-    for f in source_files(repo):
-        if f.name in ("build.gradle", "build.gradle.kts"):
-            text = f.read_text(errors="replace")
-            for pattern in (_GRADLE_COORDS, _GRADLE_NAMED):
-                names |= {_norm(f"{g}:{a}") for g, a in pattern.findall(text)}
-            continue
-        if f.name == "pom.xml":
-            text = f.read_text(errors="replace")
-            names |= {_norm(f"{g}:{a}") for g, a in _MAVEN_DEP.findall(text)}
-            continue
-        if re.fullmatch(r"requirements.*\.txt", f.name):
-            for line in f.read_text(errors="replace").splitlines():
-                line = line.split("#", 1)[0].strip()
-                if line and not line.startswith("-"):
-                    names.add(_norm(re.split(r"[\s<>=!~;\[]", line, maxsplit=1)[0]))
-        elif f.name == "pyproject.toml":
-            try:
-                data = tomllib.loads(f.read_text())
-            except tomllib.TOMLDecodeError:
-                continue
-            for dep in data.get("project", {}).get("dependencies", []):
-                names.add(_norm(re.split(r"[\s<>=!~;\[]", dep, maxsplit=1)[0]))
-    return names
+    """Dependency names the repository's build files declare (rule_packs/versions.py): Gradle
+    scripts and catalogs, Maven POMs, Python requirements and pyproject files. Java dependencies
+    are `group:artifact`. Lock files are left out: they list what other libraries pull in too."""
+    return {_norm(d.name) for d in dependencies(repo) if not d.file.endswith(".lock")}
 
 
 def _has_language(language: str, repo: Path) -> bool:
@@ -182,4 +153,8 @@ def _imports_any(language: str, repo: Path, modules: list[str]) -> bool:
     else:
         return False
     exts = EXTENSIONS.get(language, ())
-    return any(pattern.search(f.read_text(errors="replace")) for f in source_files(repo, exts))
+    return any(
+        pattern.search(f.read_text(errors="replace"))
+        for f in source_files(repo, exts)
+        if not is_test_file(f.relative_to(repo))
+    )

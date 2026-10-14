@@ -1,0 +1,4 @@
+# Spring Boot 2: the same case on javax (Java EE) instead of jakarta
+# cache.get(...) is a Map, not a repository
+edges:
+  - READS_FROM: { from: "com.x.OrderService#cancel(java.lang.Long)", to: orders, operation: select }

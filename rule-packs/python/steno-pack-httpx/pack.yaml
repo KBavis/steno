@@ -3,6 +3,9 @@ version: 0.1.0
 language: python
 source: core
 description: Outbound HTTP calls made with httpx clients
+# The library versions these rules are written and tested for (coverage reports others)
+versions:
+  httpx: ">=0.23, <1"
 enabled_when:
   dependencies: [httpx]
   imports: [httpx]

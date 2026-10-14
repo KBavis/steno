@@ -288,13 +288,29 @@ version: 0.1.0
 language: python
 source: core                    # core | org
 description: FastAPI routers, endpoints, and dependencies
+versions:                       # the versions these rules are written and tested for (D106)
+  fastapi: ">=0.100, <1"
 enabled_when:                   # any one of these turns the pack on
-  dependencies: [fastapi]       # declared in requirements.txt, pyproject.toml, pom.xml, build.gradle, package.json
+  dependencies: [fastapi]       # declared in requirements.txt, pyproject.toml, pom.xml, any Gradle script or version catalog
   imports: [fastapi]            # imported by any source file (catches libraries that arrive indirectly)
   # always: true                # for a language's standard library (asyncio, java.util.concurrent)
 ```
 
-A pack is **auto-enabled** when any `enabled_when` condition holds (D25). Checking imports as well as declared dependencies matters: a library often arrives indirectly (Contextualized uses `requests` without listing it).
+A pack is **auto-enabled** when any `enabled_when` condition holds (D25). Checking imports as well as declared dependencies matters: a library often arrives indirectly (Contextualized uses `requests` without listing it). Dependencies are read from every build file the build loads: Gradle scripts applied from others (`apply from: "dependencies.gradle"`), version catalogs (`libs.versions.toml`), Maven POMs, Python requirements and pyproject files. Lock files don't enable packs (they list what other libraries pull in), and neither does test code.
+
+### Versions (Decided, D106)
+
+Framework syntax changes between versions (`javax` → `jakarta`, `antMatchers` → `requestMatchers`, `WebSecurityConfigurerAdapter` → `SecurityFilterChain`), so a pack says which versions its rules are written and tested for. `versions` maps a library to a range:
+
+| Key | Matches | Example |
+|---|---|---|
+| `group:artifact` | that Java dependency | `org.apache.kafka:kafka-clients: ">=2.0, <5"` |
+| a group or plugin id | the Boot plugin, parent POM, or BOM, and any dependency in the group | `org.springframework.boot: ">=2.0, <4"` |
+| a distribution name | that Python package | `sqlalchemy: ">=1.4, <3"` |
+
+- **Every range is backed by test cases written in that version's syntax.** The Spring packs have Boot 2 cases (`boot2-…`: `javax`, `antMatchers`) beside the Boot 3 ones. Widen a range only with a case that proves it.
+- **Steno reads the version in use** from the same build files, without building: a version written as a variable (`${springBootVersion}`, `versions.boot`, `version.ref`) is looked up in the Gradle scripts, `gradle.properties`, the catalog, or the POM's properties; Python versions come from pins (`==`) and lock files. A range (`>=0.27`) or a BOM-managed version isn't a version: unknown.
+- **The rules still run on any version.** Coverage reports `version_untested` (a stated version outside the range: "org.springframework.boot 4.0.1 · steno-pack-spring-web is tested on >=2.0, <4") and `version_unknown` (no build file states the version of any library the pack lists). An alternative library a pack also covers (HttpClient 4 beside 5) is checked only when the build names it.
 
 ### Interceptors and access (Decided, D103)
 

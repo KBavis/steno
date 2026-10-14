@@ -3,6 +3,9 @@ version: 0.1.0
 language: python
 source: core
 description: FastAPI routers, endpoints, and their URL prefixes
+# The library versions these rules are written and tested for (coverage reports others)
+versions:
+  fastapi: ">=0.100, <1"
 enabled_when:
   dependencies: [fastapi]
   imports: [fastapi]

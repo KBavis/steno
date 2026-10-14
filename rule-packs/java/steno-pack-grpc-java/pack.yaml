@@ -3,6 +3,9 @@ version: 0.1.0
 language: java
 source: core
 description: gRPC services implemented in Java (generated *ImplBase classes)
+# The library versions these rules are written and tested for (coverage reports others)
+versions:
+  io.grpc: ">=1.0, <2"
 enabled_when:
   dependencies:
     - io.grpc:grpc-stub

@@ -1,0 +1,5 @@
+# Spring Boot 2: the same case on javax (Java EE) instead of jakarta
+interceptors:
+  - function: "com.x.UniqueNameValidator#isValid(com.x.UserDto,javax.validation.ConstraintValidatorContext)"
+    kind: validation
+    applies_to: { validates: com.x.UniqueNameValidator }

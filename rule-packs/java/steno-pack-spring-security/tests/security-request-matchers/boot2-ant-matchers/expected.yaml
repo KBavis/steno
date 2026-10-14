@@ -1,0 +1,3 @@
+clues:
+  - access: { matchers: '/auth/login", ,, "/auth/register', rule: permitAll }
+  - access: { matchers: 'HttpMethod.POST, ,, "/admin/jobs"', rule: hasAuthority, value: ADMIN }

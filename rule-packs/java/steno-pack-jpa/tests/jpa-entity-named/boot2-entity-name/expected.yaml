@@ -1,0 +1,5 @@
+# Spring Boot 2: the same case on javax (Java EE) instead of jakarta
+# @Table without a name doesn't name the table; @Entity(name = "BudgetUser") does
+nodes:
+  - Entity: { name: com.x.User }
+  - Table: { name: budget_user }

@@ -3,6 +3,9 @@ version: 0.2.0
 language: java
 source: core
 description: JPA entities and the tables they map to (@Entity, @Table, Spring Boot's default snake_case names)
+# The library versions these rules are written and tested for (coverage reports others)
+versions:
+  org.springframework.boot: ">=2.0, <4"
 enabled_when:
   dependencies:
     - org.springframework.boot:spring-boot-starter-data-jpa

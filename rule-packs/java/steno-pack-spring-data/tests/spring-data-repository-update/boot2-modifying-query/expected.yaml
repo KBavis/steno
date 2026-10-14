@@ -1,0 +1,3 @@
+# Spring Boot 2: the same case on javax (Java EE) instead of jakarta
+edges:
+  - WRITES_TO: { from: "com.x.OrderService#cancel(java.lang.Long)", to: orders, operation: update }

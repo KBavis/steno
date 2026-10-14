@@ -3,6 +3,9 @@ version: 0.1.0
 language: python
 source: core
 description: Chroma vector database clients, collections, and the reads and writes made through them
+# The library versions these rules are written and tested for (coverage reports others)
+versions:
+  chromadb: ">=0.4, <2"
 enabled_when:
   dependencies: [chromadb]
   imports: [chromadb]

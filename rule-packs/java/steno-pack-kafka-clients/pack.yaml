@@ -3,6 +3,9 @@ version: 0.1.0
 language: java
 source: core
 description: The plain Kafka client - ProducerRecords and consumer subscriptions
+# The library versions these rules are written and tested for (coverage reports others)
+versions:
+  org.apache.kafka:kafka-clients: ">=2.0, <5"
 enabled_when:
   dependencies: [org.apache.kafka:kafka-clients, org.springframework.kafka:spring-kafka]
   imports: [org.apache.kafka.clients]

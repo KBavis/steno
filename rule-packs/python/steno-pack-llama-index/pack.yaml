@@ -3,6 +3,9 @@ version: 0.1.0
 language: python
 source: core
 description: LlamaIndex LLM and embedding clients, as calls to the model providers behind them
+# The library versions these rules are written and tested for (coverage reports others)
+versions:
+  llama-index-core: ">=0.10, <1"
 enabled_when:
   dependencies: [llama-index-core, llama-index]
   imports: [llama_index]

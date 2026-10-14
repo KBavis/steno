@@ -3,6 +3,9 @@ version: 0.1.0
 language: java
 source: core
 description: OkHttp requests built with Request.Builder
+# The library versions these rules are written and tested for (coverage reports others)
+versions:
+  com.squareup.okhttp3:okhttp: ">=3.0, <6"
 enabled_when:
   dependencies: [com.squareup.okhttp3:okhttp]
   imports: [okhttp3]

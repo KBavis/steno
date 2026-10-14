@@ -3,6 +3,9 @@ version: 0.1.0
 language: python
 source: core
 description: Outbound HTTP calls made with the requests module
+# The library versions these rules are written and tested for (coverage reports others)
+versions:
+  requests: ">=2.0, <3"
 enabled_when:
   dependencies: [requests]
   imports: [requests]

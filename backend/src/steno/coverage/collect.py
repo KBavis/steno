@@ -20,6 +20,7 @@ from steno.extraction.facts import Extraction
 from steno.graph.build import GraphPlan
 from steno.resolvers.base import Function, Resolvers
 from steno.rule_packs.packs import Pack
+from steno.rule_packs.versions import Dependency, in_range, versions_of
 
 SAMPLES = 5
 
@@ -77,9 +78,12 @@ def collect(
     plan: GraphPlan,
     all_packs: list[Pack],
     app_of: Callable[[str | None], str] | None = None,
+    enabled: list[Pack] | None = None,
+    deps: list[Dependency] | None = None,
 ) -> Report:
     """`app_of`: the application a file belongs to (its service module's), so items and
-    numbers can be shown per application, not just per repository."""
+    numbers can be shown per application, not just per repository. `enabled`: the packs that
+    ran, checked against `deps`, the versions the build files declare."""
     items: dict[tuple[str, str], Item] = {}
     where = app_of or (lambda _file: "")
 
@@ -104,6 +108,7 @@ def collect(
     _config(x, item)
     if resolver:
         _libraries(resolver, all_packs, items, item)
+    _versions(enabled or [], deps or [], item)
     gaps = _unresolved_types(resolver) if resolver else 0
 
     stats = plan.stats
@@ -114,6 +119,8 @@ def collect(
         "external_call",
         "config_unset",
         "library",
+        "version_untested",
+        "version_unknown",
         "unresolved_type",
         "inferred_entry",
         "unreachable_effect",
@@ -319,6 +326,37 @@ def _libraries(r: Resolvers, packs: list[Pack], items: dict[Any, Item], item: An
         it = item("library", "library", lib, lib)
         for f in sorted(where):
             it.add({"file": f, "detail": f"imports {lib}"})
+
+
+def _versions(packs: list[Pack], deps: list[Dependency], item: Any) -> None:
+    """Packs that ran on a library version they aren't tested on, or where no build file
+    states the version of any library they're tested against: their rules ran, but nothing
+    says the syntax they match is what this version uses."""
+    for pack in packs:
+        if not pack.versions:
+            continue
+        found = [
+            (key, spec, d) for key, spec in pack.versions.items() for d in versions_of(deps, key)
+        ]
+        if not found:
+            keys = ", ".join(f"{k} {s}" for k, s in pack.versions.items())
+            it = item(
+                "library",
+                "version_unknown",
+                f"{pack.name} · version",
+                f"Version not stated · {pack.name} is tested on {keys}",
+            )
+            it.add({"detail": "no build file in the repository states the library's version"})
+        for key, spec, d in found:
+            if in_range(d.version or "", spec):
+                continue
+            it = item(
+                "library",
+                "version_untested",
+                f"{pack.name} · {key} {d.version}",
+                f"{key} {d.version} · {pack.name} is tested on {spec}",
+            )
+            it.add({"file": d.file, "detail": f"{d.name} {d.version}"})
 
 
 # ---------------------------------------------------------------- helpers

@@ -3,6 +3,9 @@ version: 0.2.0
 language: java
 source: core
 description: Spring Kafka listeners and producers (@KafkaListener, @KafkaHandler, @SendTo, KafkaTemplate)
+# The library versions these rules are written and tested for (coverage reports others)
+versions:
+  org.springframework.boot: ">=2.0, <4"
 enabled_when:
   dependencies: [org.springframework.kafka:spring-kafka]
   imports: [org.springframework.kafka]

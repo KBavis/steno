@@ -3,6 +3,9 @@ version: 0.1.0
 language: java
 source: core
 description: Spring Security - request filters (interceptors in front of every HTTP entry point), who may call which endpoint (request matchers, method annotations), and authentication calls into the application
+# The library versions these rules are written and tested for (coverage reports others)
+versions:
+  org.springframework.boot: ">=2.0, <4"
 enabled_when:
   dependencies: [org.springframework.boot:spring-boot-starter-security, org.springframework.security:spring-security-core]
   imports: [org.springframework.security]

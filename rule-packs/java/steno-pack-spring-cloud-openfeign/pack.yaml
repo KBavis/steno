@@ -3,6 +3,9 @@ version: 0.1.0
 language: java
 source: core
 description: Feign clients (Spring Cloud OpenFeign and plain Feign) - each interface method is an HTTP call
+# The library versions these rules are written and tested for (coverage reports others)
+versions:
+  org.springframework.boot: ">=2.0, <4"
 enabled_when:
   dependencies:
     - org.springframework.cloud:spring-cloud-starter-openfeign
