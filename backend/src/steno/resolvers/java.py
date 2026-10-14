@@ -40,7 +40,15 @@ log = logging.getLogger(__name__)
 # Bean Validation's default group: what `@Valid` and constraints without `groups` use
 DEFAULT_GROUP = "jakarta.validation.groups.Default"
 # JDK packages that reach the network or a database; the rest of the JDK isn't a library to cover
-JDK_IO = {"java.net", "java.sql", "java.nio", "java.io", "javax.net", "javax.sql", "javax.jms"}
+JDK_IO = {"java.net", "java.sql", "java.nio", "java.io", "javax.net", "javax.sql"}
+# The `javax` packages the JDK ships (17+). The rest (`javax.servlet`, `javax.persistence`,
+# `javax.validation`, `javax.jms`) are Java EE libraries: Spring Boot 2 code imports them
+JDK_JAVAX = {
+    "javax.accessibility", "javax.annotation", "javax.crypto", "javax.imageio", "javax.lang",
+    "javax.management", "javax.naming", "javax.net", "javax.print", "javax.rmi", "javax.script",
+    "javax.security", "javax.smartcardio", "javax.sound", "javax.sql", "javax.swing",
+    "javax.tools", "javax.xml",
+}  # fmt: skip
 _PROPERTY = re.compile(r"\$\{([^}:]+)(?::([^}]*))?\}")
 _DOMAINS = {"com", "org", "io", "net", "dev", "de", "uk", "co", "me", "ch", "fr", "nl", "app"}
 
@@ -650,7 +658,7 @@ class JavaResolver:
                 if self._first_party(name):
                     continue
                 library = library_of(name)
-                if library and not library.startswith(("java.", "javax.")) and library != "java":
+                if library and not is_jdk(library):
                     files.setdefault(library, []).append(file)
         return files
 
@@ -722,8 +730,13 @@ def library_of(fqn: str) -> str | None:
     return ".".join(pkg[:n])
 
 
+def is_jdk(library: str) -> bool:
+    """`java.util`, `javax.crypto`: the JDK. `javax.persistence` isn't (Java EE)."""
+    return library == "java" or library.startswith("java.") or library in JDK_JAVAX
+
+
 def _jdk_without_io(library: str) -> bool:
-    return library.startswith(("java.", "javax.")) and library not in JDK_IO
+    return is_jdk(library) and library not in JDK_IO
 
 
 def _literal(text: str) -> Any:

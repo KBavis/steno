@@ -35,6 +35,7 @@ IO_PACKAGES = {
     "socket", "sqlalchemy", "urllib", "urllib3", "websockets",
     # Java, by package (resolvers/java.py, library_of)
     "com.amazonaws", "com.datastax.oss", "com.rabbitmq", "feign", "io.grpc", "io.lettuce",
+    "jakarta.jms", "javax.jms",
     "okhttp3", "org.apache.kafka", "org.apache.http", "org.mongodb", "org.springframework.amqp",
     "org.springframework.data", "org.springframework.jdbc", "org.springframework.jms",
     "org.springframework.kafka", "org.springframework.web", "redis.clients", "software.amazon",

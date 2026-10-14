@@ -1553,7 +1553,8 @@ final class Analyzer {
                         return cand + rest;
                     }
                     String imported = imp.getNameAsString();
-                    if (!imported.startsWith("java.") && !imported.startsWith("javax.")
+                    // `javax.servlet`, `javax.persistence`: libraries, not the JDK (Java EE left it)
+                    if (!imported.startsWith("java.") && !jdkPackage(imported)
                             && !types.containsKey(imported)) {
                         libraryPackages.add(imported);
                     }
@@ -1569,6 +1570,13 @@ final class Analyzer {
             return name; // already fully qualified
         }
         return null;
+    }
+
+    private static final Set<String> JDK_PACKAGES = ModuleLayer.boot().modules().stream()
+            .flatMap(m -> m.getPackages().stream()).collect(java.util.stream.Collectors.toSet());
+
+    private static boolean jdkPackage(String pkg) {
+        return JDK_PACKAGES.contains(pkg);
     }
 
     private boolean jdkHas(String fqn) {
