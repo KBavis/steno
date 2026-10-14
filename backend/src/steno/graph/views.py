@@ -677,7 +677,9 @@ class GraphViews:
         words = search_words(text)
         if not words:
             return []
-        query = " AND ".join(f"{_escape(w)}*" for w in words)
+        # A prefix match scores the same for every hit; the exact word, boosted, ranks whole-name
+        # matches (the `transaction` table) above names that merely start with it
+        query = " AND ".join(f"({_escape(w)}^4 OR {_escape(w)}*)" for w in words)
         out = []
         for row in self._read(
             "CALL db.index.fulltext.queryNodes('searchable_text', $q) YIELD node, score "
