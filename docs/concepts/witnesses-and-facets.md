@@ -82,15 +82,15 @@ A **facet** is one fixed question with a fixed answer shape, defined once by Ste
 | **Behavior** | What happens when something is triggered, step by step | `Flow`, `Step`, traces, `LEADS_TO` | Evidence (code only) | `POC` |
 | **Structure** | Which spaces exist; where each repository belongs | `Space`, `BELONGS_TO` | Authority | `POC` (admin) |
 | **Components** | Which deployables exist; their kind, canonical name, aliases | `Application` + kind labels, `ExternalSystem` | Authority for names; evidence for existence | `POC` |
-| **Artifacts** | Which repository builds which library or image; who depends on it | `DEPENDS_ON` across repositories; image → repository | Evidence | `POC` (A1 link); A2 later |
+| **Artifacts** | Which repository builds which library or image; who depends on it, and how: builds against it, or uses its shared models (D108) | `DEPENDS_ON` across repositories; image → repository | Evidence | `POC` (A1 link); A2 and shared models `v1` |
 | **Interfaces** | Endpoints, RPC methods, payloads | `HttpEndpoint`, `GrpcMethod`, `USES_ENTITY` | Evidence | `POC` |
 | **Messaging** | Topics, clusters, who may produce and consume | `KafkaTopic`, `PRODUCES`, `CONSUMES` | Evidence | `POC` |
 | **Routing** | How a request reaches a service: gateway routes, hosts, env values | Completes `CALLS` joins; marks public endpoints | Evidence | `POC` |
 | **Data** | Data stores, tables, owners, access | `DataStore`, `Table`, `READS_FROM`, `WRITES_TO` | Evidence | `POC` (V2 schemas later) |
 | **Schedules** | What runs on a timer, when, and what it runs | `Schedule`, `STARTS` | Evidence | `POC` |
 | Ownership | Which team owns each component | `Team` | Authority | `v2` |
-| Environments | What's deployed where, on which servers, with what resources | `Environment` | Evidence | `v2` |
-| Feature flags, access policy | Which paths are on; who may call what | Flags on steps; auth on interfaces | Evidence | `v2` |
+| Environments | What's deployed where, on which servers, with what resources; flows per environment (D107) | `Environment` | Evidence | `v2` |
+| Feature flags, access policy | Which paths are on (D107); who may call what (code-level access is built, D103) | Flags on steps; auth on interfaces | Evidence | `v2` |
 
 **Is the list complete?** It can't be proven, but one rule keeps it honest: every node and edge type in the graph must be fed by at least one facet, and a facet is added only when the graph models what it would feed. A facet that feeds nothing would be a CMDB in disguise.
 
