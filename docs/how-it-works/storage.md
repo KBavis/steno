@@ -87,7 +87,7 @@ erDiagram
 | Table | Holds | Design |
 |---|---|---|
 | `application_identity`, `application_alias`, `application_link`, `unmatched_name` | The identity registry: Steno IDs, names and their sources, lifecycle, admin renames, names no application matched | [Identify and reconcile §2](./ingestion/identify-and-reconcile.md#2-identify-decided) |
-| claim store (name to decide) | Non-CODE claims per facet and subject, with witness, provider, source, and as-of time | [Identify and reconcile §3](./ingestion/identify-and-reconcile.md#3-reconcile-open-technical-design-before-stage-b) (Open) |
+| `claim` | Non-CODE claims per facet and subject, with witness, provider, source, and as-of jobs (D109) | [Claims and reconcile](./ingestion/claims-and-reconcile.md) (Proposed) |
 | setup sheet (name to decide) | Per organization: providers per facet, their witness types and precedence, naming patterns | [Onboarding](../plan/onboarding.md) |
 
 ### Columns

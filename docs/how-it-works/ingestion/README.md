@@ -6,7 +6,7 @@ How Steno turns repositories into graph facts: deterministically, idempotently, 
 > - A worker claims a queued job, clones the repository, and runs stages in order. Only **write** touches Neo4j; every stage records a row in Postgres.
 > - **Parse** reads the code once. **Extract** runs every rule of every enabled rule pack over every file. **Assemble** fills in facts whose pieces were in different files. **Flows** builds the call graph in memory and derives every flow. **Write** compares with the graph by stable ID and writes only differences. **Coverage** reports what no rule explained.
 > - Each night, every repository whose main branch moved is re-analyzed in full; only changes are written. Re-ingesting the same commit writes nothing.
-> - Planned additions: an **identify** step (application identity) and a **reconcile** step (combining witnesses). See [identify and reconcile](./identify-and-reconcile.md).
+> - Planned additions: an **identify** step (application identity) and a **reconcile** step (combining witnesses). See [identify and reconcile](./identify-and-reconcile.md) and the proposed design for [claims and reconcile](./claims-and-reconcile.md).
 
 ---
 

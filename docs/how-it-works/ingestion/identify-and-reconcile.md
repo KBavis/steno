@@ -4,7 +4,7 @@ Two planned additions to the pipeline. **Identify** gives every application a pe
 
 > **In one minute**
 > - **Identify** (Decided; `POC` stage A) runs after structure detection. It looks each deployable up in a Postgres **identity registry** by canonical name or by repository + module path, reuses or assigns a Steno ID, and marks unseen applications removed. Everything under an application is then keyed by its Steno ID.
-> - **Reconcile** (direction Decided, design **Open**; before stage B) handles the fact that witnesses for one subject come from **different repositories ingested on different nights**: the XLD repo describes a topic; a consumer's code lives elsewhere. Each run stores its claims; reconcile recomputes only the subjects a run touched, from every stored claim about them.
+> - **Reconcile** (direction Decided, design **Proposed**: [claims and reconcile](./claims-and-reconcile.md)) handles the fact that witnesses for one subject come from **different repositories ingested on different nights**: the XLD repo describes a topic; a consumer's code lives elsewhere. Each run stores its claims; reconcile recomputes only the subjects a run touched, from every stored claim about them.
 >
 > Neither is built yet.
 
@@ -56,37 +56,6 @@ flowchart LR
 
 **Proving it** (stage B): scripted rename, move, rename-and-move, split, removal, restoration, and two repositories claiming one name; after each, re-ingest and check no duplicates, no dead flows, expected IDs.
 
-## 3. Reconcile (Open: technical design before stage B)
+## 3. Reconcile
 
-What's decided:
-
-- **Every provider produces claims** in its facet's shape, tagged with witness type, provider, and source location (D76, D87).
-- **CODE facts stay in the graph** as today. **Non-CODE claims** (PLATFORM, DECLARED, ADMIN) are stored in a **claim store in Postgres** with an as-of time, because they don't all come from git and Neo4j must stay rebuildable (D36).
-- **Reconcile recomputes only touched subjects.** A subject is the thing a claim is about: a topic, an application, an endpoint, a table. When the XLD repository changes tonight, only the topics it mentions are recomputed; when an application's code changes, only its subjects are.
-- **Evidence facets** get an agreement state per fact (`confirmed` / `code only` / `declared only`); **authority facets** resolve by precedence (D80).
-- **The same system read two ways is one witness** (D78): merged before comparison; differences are drift.
-- **Admin overrides** are claims like any other, with who, when, and why, and are still compared with code.
-
-Open questions for the design:
-
-- [ ] Claim shape per facet and the emit syntax in packs
-- [ ] How "declared only" facts appear in the graph (a node or edge marked `declared_only`, or only in the claim store and the agreement view)
-- [ ] Where agreement states live: properties on graph facts, or a side table
-- [ ] Subject keys for each facet, so claims from different repositories line up (largely the same natural keys as the graph)
-- [ ] How removals propagate: a claim that disappears (a grant removed from XLD) recomputes its subject
-- [ ] Ordering across repositories in one nightly run (reconcile after all jobs of the night, or per job)
-
-```mermaid
-sequenceDiagram
-    participant XR as Job: XLD repository
-    participant CR as Job: recon-svc code
-    participant CS as Claim store (Postgres)
-    participant G as Graph (Neo4j)
-    XR->>CS: PLATFORM claims: payment.settled consumers = [recon-svc, ledger-svc]
-    XR->>XR: reconcile subjects touched: topic payment.settled
-    CS-->>XR: all claims for payment.settled
-    G-->>XR: CODE facts for payment.settled (recon-svc consumes)
-    XR->>G: recon-svc: confirmed · ledger-svc: declared only
-    CR->>G: write code facts (recon-svc listener unchanged)
-    CR->>CR: reconcile subjects touched: nothing changed for payment.settled
-```
+The design is on its own page: **[Claims and reconcile](./claims-and-reconcile.md)** (Proposed, for review). In short: packs that read deploy definitions, ACL files, and manifests emit **claims**, stored in Postgres (D109); after each job, reconcile lines up every claim and code fact about the subjects the job touched and writes agreement states, citations per witness, and declared-only edges into the graph. Its open choices (how declared-only facts appear, where agreement lives, what counts as checked, when reconcile runs) are listed there with recommendations.
