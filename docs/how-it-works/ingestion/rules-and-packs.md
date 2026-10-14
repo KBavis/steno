@@ -457,7 +457,7 @@ Rules over files that describe the system (manifests, deploy definitions, ACL fi
 # pack.yaml for an org pack reading the XLD repository (illustrative)
 name: acme-xld
 source: org
-witness: PLATFORM            # CODE | PLATFORM | DECLARED
+witness_type: PLATFORM       # CODE | PLATFORM | DECLARED
 facets: [Messaging, Components]
 ```
 

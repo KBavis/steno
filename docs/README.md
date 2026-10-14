@@ -79,9 +79,9 @@ Decisions are numbered (`D61`) and listed in the [decision log](./plan/decisions
 | **Rule / Rule pack** | "When you see this pattern, emit this fact", in YAML; a versioned bundle of rules for one framework or org |
 | **Symbol resolver** | Per-language code that answers *what is this?*: which symbol a name is, a value's type, a constant's value |
 | **Clue / Assembler** | A partial fact a rule emits (a router's URL prefix); the code that combines clues into complete facts |
-| **Witness** | A kind of evidence: CODE, PLATFORM, DECLARED, ADMIN, OBSERVED |
+| **Witness** | One concrete source of statements about the system at one organization: an application's code, the XLD repository, `component_manifest.yaml`, an admin |
+| **Witness type** | A witness's kind: CODE, PLATFORM, DECLARED, ADMIN, OBSERVED |
 | **Facet** | One fixed question Steno answers about every organization (Components, Messaging, Schedules, …) |
-| **Provider** | One concrete source for a facet at one organization (the XLD repo, `component_manifest.yaml`) |
 | **Steno ID / canonical name** | An application's permanent internal ID, and the name it's deployed as |
 | **Join / join rate** | A send matched to its receiver by a shared key; the share of sends that join |
 | **Stub** | A placeholder for a target not ingested yet; it merges with the real node by stable ID |
@@ -90,7 +90,7 @@ Decisions are numbered (`D61`) and listed in the [decision log](./plan/decisions
 | **Delta** | The facts added, removed, or changed by one ingestion run (`fact_change`) |
 | **Connector** | Access to a source: where it is and a reference to its credentials |
 | **Rule engine** | Runs every enabled rule pack over every file in the extract stage |
-| **Claim** | One provider's answer for a facet, tagged with its witness and source; claims are combined into facts |
+| **Claim** | One witness's statement for a facet, tagged with its witness type and citation; claims are combined into facts |
 | **Coverage report** | What no rule explained, ranked by how many applications one fix would help |
 | **Card** | A fixed-size summary of a node used for search: deterministic facts plus, for flows and applications, LLM-written purpose |
 | **Citation** | Where a claim comes from: space, app, repo, file, lines, commit, and a link |

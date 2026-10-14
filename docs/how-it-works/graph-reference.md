@@ -175,7 +175,7 @@ A flow's **trace** (L3) is the ordered list of every first-party function it run
 | `source_file`, `source_line` | Where it was found: citations |
 | `confidence` | 0–1. Rules and pipeline steps produce 1.0; inferred flows (D74) are 0.5; decisions (stand-ins now, Jev in `v2`) carry their own. Levels by how a fact was found are Open. |
 | `first_seen`, `last_seen` | When it first and last appeared |
-| *(planned)* `sources` | The witnesses behind the fact: `[{witness: CODE, rule, file, line}, {witness: PLATFORM, provider: acme-xld, file, line}]` (D76, D87) |
+| *(planned)* `sources` | The witnesses behind the fact: `[{witness_type: CODE, rule, file, line}, {witness_type: PLATFORM, witness: acme-xld, file, line}]` (D76, D87) |
 | *(planned)* `agreement` | `confirmed` / `code_only` / `declared_only`, for facts in evidence facets (D80) |
 
 **ID examples (today):**
@@ -241,7 +241,7 @@ A topic is shared infrastructure, so no Application owns it. It `BELONGS_TO` exa
 2. The **producer's Space**, by convention.
 3. The **Organization**, if neither is known.
 
-*Today:* the space of the first repository whose run wrote the topic (producer or consumer), else the organization. The declared-space rule arrives with the Messaging facet's PLATFORM provider (POC stage B).
+*Today:* the space of the first repository whose run wrote the topic (producer or consumer), else the organization. The declared-space rule arrives with the Messaging facet's PLATFORM witness (POC stage B).
 
 `(:KafkaTopic)-[:HOSTED_ON]->(:KafkaCluster)` is **not** an ownership edge.
 

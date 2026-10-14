@@ -29,7 +29,7 @@ How those pieces combine into an agent-first SDLC (planning, implementation, tes
 
 ## 2. Boundaries (Decided)
 
-- **Only providers write to Steno:** code, files about the system, other systems' data, and admins. Workflows that use Steno record their own work elsewhere and link by ID. After a merge, Steno works the architecture out again from the code (D11, D75).
+- **Only witnesses write to Steno:** code, files about the system, other systems' data, and admins. Workflows that use Steno record their own work elsewhere and link by ID. After a merge, Steno works the architecture out again from the code (D11, D75).
 - **Steno is not a system of record.** It isn't a CMDB or a service catalog. It reads those where an organization has them and checks them against the code (D96).
 - **Steno never asks an organization to change its repositories.** It reads what's already there.
 - **Not Steno's job:** standards, constraints, SLAs, test conventions, ADRs, project plans, and the tools and workflows built on top (review bots, test generators, planning workflows, incident copilots).
@@ -42,7 +42,7 @@ How those pieces combine into an agent-first SDLC (planning, implementation, tes
 | 2 | **Complete, or says what's missing.** An impact answer that silently leaves out a consumer is worse than no answer. | [Trust](../concepts/trust.md): agreement between witnesses, completeness signals, gaps never silent |
 | 3 | **Every claim cited** to a file, line, and commit, or to the system it came from. | Citations on every MCP result |
 | 4 | **Current.** | Nightly runs for every repository whose main branch moved |
-| 5 | **Works at any organization** without rebuilding Steno. | Fixed [facets](../concepts/witnesses-and-facets.md), swappable providers, shared rule packs |
+| 5 | **Works at any organization** without rebuilding Steno. | Fixed [facets](../concepts/witnesses-and-facets.md), swappable witnesses, shared rule packs |
 
 ## 4. Why not just give an agent every repository?
 

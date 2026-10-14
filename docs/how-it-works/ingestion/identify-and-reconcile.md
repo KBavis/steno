@@ -14,7 +14,7 @@ Two planned additions to the pipeline. **Identify** gives every application a pe
 
 ```mermaid
 flowchart LR
-    X["extract<br/>code rules + file rules<br/>(claims tagged by witness)"] --> A["assemble"]
+    X["extract<br/>code rules + file rules<br/>(claims tagged by witness type)"] --> A["assemble"]
     A --> ST["structure"]
     ST --> ID["<b>identify</b><br/>registry lookup"]
     ID --> FL["flows"]
@@ -48,7 +48,7 @@ flowchart LR
 | Table | Columns |
 |---|---|
 | `application_identity` | `steno_id`, `canonical_name`, `display_name`, `repository_id`, `module_path`, `state` (active / removed / deprecated), `first_seen_job`, `last_seen_job`, `removed_job` |
-| `application_alias` | `steno_id`, `name`, `source` (witness + provider + file/line), `slot` (ladder slot), `is_past_name` |
+| `application_alias` | `steno_id`, `name`, `source` (witness type + witness + file/line), `slot` (ladder slot), `is_past_name` |
 | `application_link` | `from_steno_id`, `to_steno_id` or `pending_name`, `kind` (rename / same), `by`, `at`, `reason` |
 | `unmatched_name` | `name`, `source`, `first_seen`, `status` (open / mapped / ignored), `mapped_to` |
 

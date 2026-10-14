@@ -16,7 +16,7 @@ How Steno turns repositories into graph facts: deterministically, idempotently, 
 |---|---|
 | **Build bottom-up.** Applications first; space and organization views are rollups. | Decided |
 | **Deterministic first.** Rules extract facts. A decision model decides only what rules can't. An LLM only writes prose. | Decided |
-| **Agnostic core, organization-specific rules.** The core defines fact types and facets; rule packs and providers are what organizations extend. | Decided |
+| **Agnostic core, organization-specific rules.** The core defines fact types and facets; rule packs and witnesses are what organizations extend. | Decided |
 | **Passive.** Nothing is required of an organization's repositories. No OpenTelemetry, Terraform, or annotations. | Decided |
 | **Idempotent.** Re-running any ingestion yields the same graph. | Decided |
 | **Whole repository, nightly.** A repository that changed is re-analyzed in full; only differences are written (D59). | Decided |

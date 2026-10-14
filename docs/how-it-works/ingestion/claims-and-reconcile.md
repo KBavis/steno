@@ -3,7 +3,7 @@
 How what other sources say about the system (deploy definitions, ACL files, manifests, admin entries) is stored, compared with the code, and shown to agents. Part of [Ingestion](./README.md); the ideas are in [Witnesses and facets](../../concepts/witnesses-and-facets.md) and [Trust](../../concepts/trust.md#3-agreement-between-witnesses). It replaces the open design list in [identify and reconcile §3](./identify-and-reconcile.md#3-reconcile).
 
 > **In one minute**
-> - A **claim** is one source's statement about the system: "the XLD repository grants `ledger-svc` consume on `payment.settled`". Packs produce claims the way they produce facts; the pack says which **witness** it is (`PLATFORM`, `DECLARED`).
+> - A **claim** is one source's statement about the system: "the XLD repository grants `ledger-svc` consume on `payment.settled`". A **witness** is the source making it (here, the XLD repository); its **witness type** is its kind (`PLATFORM`, `DECLARED`). Packs produce claims the way they produce facts, and say which witness type they read.
 > - Claims are rows in a **claim store in Postgres** (D109). Code facts stay in the graph as today.
 > - After each job writes the graph, **reconcile** recomputes only the subjects that job touched (a topic, an application): it lines up every stored claim and every code fact about the subject and writes the result **into Neo4j**: an agreement state (`confirmed`, `code only`, `declared only`) and one citation per witness. Agents read only the graph.
 > - Claims are tied to **subjects**, not spaces: one XLD file can describe topics and applications in any space, and reconcile finds them wherever they live.
@@ -12,10 +12,10 @@ How what other sources say about the system (deploy definitions, ACL files, mani
 ```mermaid
 flowchart LR
     subgraph JobX["Job: XLD repository (Bitbucket)"]
-      XF["file rules<br/>witness: PLATFORM"] --> XC["claims"]
+      XF["file rules<br/>witness type: PLATFORM"] --> XC["claims"]
     end
     subgraph JobA["Job: ledger-svc code"]
-      AF["code rules<br/>witness: CODE"] --> AG["graph facts"]
+      AF["code rules<br/>witness type: CODE"] --> AG["graph facts"]
     end
     XC --> CS[("Claim store<br/>Postgres")]
     AG --> G[("Graph<br/>Neo4j")]
@@ -29,13 +29,13 @@ flowchart LR
 
 ## 1. What's decided
 
-- **Every provider produces claims** in its facet's shape, tagged with witness type, provider, and source location (D76, D87).
+- **Every witness produces claims** in its facet's shape, tagged with its witness type, the witness, and a citation (D76, D87, D112).
 - **Code facts stay in the graph; other witnesses' claims go to a claim store in Postgres** with an as-of time (D109, option A). Reconcile writes its results into Neo4j, so MCP reads only the graph and the graph stays rebuildable from Postgres + git (D36).
 - **Evidence facets** get an agreement state per fact; **authority facets** resolve by precedence (D80).
 - **The same system read two ways is one witness** (D78): the XLD repository and the XLD server merge; a difference is drift.
 - **Admin overrides are claims like any other**, with who, when, and why, still compared with the code.
 - **In the POC, platform files come from git** through the existing connectors: the XLD definitions in Bitbucket. API connectors (the XLD server, Kafka admin, Artifactory) are `v1` (D77, D110).
-- **Claims are packs' output, not a new kind of pack.** A pack declares its witness; code packs are CODE by default.
+- **Claims are packs' output, not a new kind of pack.** A pack declares its witness type; code packs are CODE by default.
 
 ## 2. A worked example
 
@@ -84,7 +84,7 @@ A claim is a row with a fixed shape. Its **type** comes from a small set owned b
 # pack.yaml
 name: acme-xld
 source: org
-witness: PLATFORM              # CODE (default) | PLATFORM | DECLARED
+witness_type: PLATFORM         # CODE (default) | PLATFORM | DECLARED
 facets: [Messaging, Components]
 ```
 
@@ -104,7 +104,7 @@ emit:
     channel: { KafkaTopic: $.name }
 ```
 
-- **XML** (XL Deploy's `deployit-manifest.xml`) is flattened like YAML, so the same rules read it. Other formats are added when a provider needs them.
+- **XML** (XL Deploy's `deployit-manifest.xml`) is flattened like YAML, so the same rules read it. Other formats are added when a witness needs them.
 - **Tests** work as for any rule: an `expected.yaml` lists the `claims:` a case must produce.
 - **Generated sources** (an OpenAPI spec built from the code) are marked `generated: true` in the pack and never count as a second witness.
 - **Secrets** are skipped as in every config rule.
@@ -117,12 +117,12 @@ emit:
 | `claim_type`, `facet` | From §3 |
 | `fields` (json) | The claim's fields as written: `{"application": "ledger-svc-prod", "channel": {"KafkaTopic": "payment.settled"}}` |
 | `subjects` (text[]) | The subject keys it's about, for "every claim about topic X" (§6) |
-| `witness`, `provider` | `PLATFORM`, `acme-xld` |
+| `witness_type`, `witness` | `PLATFORM`, `acme-xld`: the pack that read it, which with `repository_id` names the witness (the XLD repository); `admin` for admin entries |
 | `repository_id`, `commit`, `file`, `line` | Its citation |
 | `generated` | Not an independent witness |
 | `first_seen_job`, `last_seen_job`, `removed_job` | Its life, like the identity registry's |
 
-**Each run replaces its own claims.** A job's claims for its repository and provider replace the previous run's: unchanged ones keep their row, new ones are added, and ones no longer found get `removed_job` (kept for history, never compared). That's how a grant deleted from XLD stops counting, and re-ingesting the same commit changes no rows. Admin claims (`provider: admin`, with who and why) are kept until an admin removes them; API snapshots (`v1`) replace per provider the same way.
+**Each run replaces its own claims.** A job's claims for its repository and witness replace the previous run's: unchanged ones keep their row, new ones are added, and ones no longer found get `removed_job` (kept for history, never compared). That's how a grant deleted from XLD stops counting, and re-ingesting the same commit changes no rows. Admin claims (`witness: admin`, with who and why) are kept until an admin removes them; API snapshots (`v1`) replace per provider the same way.
 
 ## 6. Subjects and names
 
@@ -150,14 +150,14 @@ A **subject** is what a claim is about, keyed the way the graph keys it, so clai
 
 | Result | In the graph |
 |---|---|
-| An application produces or consumes a channel | An application-level edge, `(:Application)-[:PRODUCES\|CONSUMES]->(:KafkaTopic)`, with `agreement` and `sources` (one entry per witness: rule or provider, file, line). App-level edges were already planned as rollups ([graph reference §4](../graph-reference.md#4-relationship-types)); reconcile materializes them for messaging. |
+| An application produces or consumes a channel | An application-level edge, `(:Application)-[:PRODUCES\|CONSUMES]->(:KafkaTopic)`, with `agreement` and `sources` (one entry per witness: its type, the rule or pack, file, line). App-level edges were already planned as rollups ([graph reference §4](../graph-reference.md#4-relationship-types)); reconcile materializes them for messaging. |
 | Declared only | The same edge, `agreement: declared_only`, with no flow behind it |
 | A channel a platform source declares | The topic `BELONGS_TO` the declaring space |
 | Names | Through identify: canonical name and aliases |
 
 Step- and flow-level edges keep their code citations and get no agreement of their own: the question "does XLD agree?" is about the application, and the answer sits on the application's edge.
 
-**Only checked subjects get an agreement state.** A topic no platform source mentions isn't `code only`; nothing checked it, and the edge simply has no `agreement` property. A provider covers the subjects it mentions; the [setup sheet](../../plan/onboarding.md) can declare wider coverage ("the XLD repository lists every topic on cluster X"), and then a topic missing from it is `code only` too.
+**Only checked subjects get an agreement state.** A topic no platform source mentions isn't `code only`; nothing checked it, and the edge simply has no `agreement` property. A witness covers the subjects it mentions; the [setup sheet](../../plan/onboarding.md) can declare wider coverage ("the XLD repository lists every topic on cluster X"), and then a topic missing from it is `code only` too.
 
 **Removals:** a claim marked removed recomputes its subjects; a declared-only edge with no claims left is deleted; an agreement falls back to none or `code only`.
 
@@ -176,7 +176,7 @@ Step- and flow-level edges keep their code citations and get no agreement of the
 |---|---|---|---|
 | 1 | How declared-only facts appear | **As graph edges** marked `declared_only`, so agents see them | Only in the claim store and the agreement view |
 | 2 | Where agreement lives | **On new application-level edges** | On every step-level edge (noisy: one ACL fact copied onto many steps) |
-| 3 | What counts as checked | **Subjects a provider mentions**, widened by the setup sheet | Every subject in the provider's facet (`code only` floods where a provider is partial) |
+| 3 | What counts as checked | **Subjects a witness mentions**, widened by the setup sheet | Every subject in the witness's facet (`code only` floods where a witness is partial) |
 | 4 | When reconcile runs | **In every job**, touched subjects, one lock | Once per night after all jobs (stale between runs; nothing reconciles on a manual run) |
 | 5 | Who defines claim types | **Steno, a fixed set** like clue types | Packs define their own (no shared comparison logic) |
 | 6 | List-of-records files | **`each` in config rules**, XML flattened like YAML | A new rule kind |
@@ -185,7 +185,7 @@ Step- and flow-level edges keep their code citations and get no agreement of the
 ## 10. Build order
 
 1. **Identity first** (stage A): Steno IDs, the registry, aliases; names in claims resolve through it.
-2. **Claims:** the `claim` table, `witness` and `facets` in `pack.yaml`, `each` and XML in config rules, the `claim` emit, and `claims:` in test cases.
+2. **Claims:** the `claim` table, `witness_type` and `facets` in `pack.yaml`, `each` and XML in config rules, the `claim` emit, and `claims:` in test cases.
 3. **Reconcile:** the stage, Messaging first, then Components (names feed identify) and Schedules.
 4. **MCP and coverage:** agreement and sources in answers, the disagreements signal.
 5. **Prove it on the stub organization** (stage B): generic files (a topic and ACL file, a Kubernetes CronJob, a manifest) with deliberate mismatches, checked against the known correct graph.

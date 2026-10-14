@@ -4,13 +4,13 @@ The ideas Steno is built on, without implementation detail. Read these to unders
 
 > **In one minute**
 > - **The graph:** an organization is modeled as Organization → Space → Application, with interfaces, flows, and tables. Facts are stored at the application level; everything above is rolled up.
-> - **Witnesses and facets:** code is one source of evidence among several. Steno asks a fixed set of questions (facets) about every organization, and each organization says where the answers live (providers).
+> - **Witnesses and facets:** code is one source of evidence among several. Steno asks a fixed set of questions (facets) about every organization, and each organization says where the answers live (its witnesses: the XLD repository, a manifest).
 > - **Identity:** every application gets a permanent Steno ID and the name the organization actually deploys it as, so renames, moves, and removals never create duplicates or dead flows.
 > - **Trust:** an answer is either correct or says what it couldn't see. Independent witnesses are compared, gaps are never silent, and every claim is cited.
 
 ```mermaid
 flowchart LR
-    W["<b>Witnesses</b><br/>CODE · PLATFORM · DECLARED<br/>ADMIN · OBSERVED"] --> F["<b>Facets</b><br/>fixed questions:<br/>Components, Messaging,<br/>Schedules, …"]
+    W["<b>Witness types</b><br/>CODE · PLATFORM · DECLARED<br/>ADMIN · OBSERVED"] --> F["<b>Facets</b><br/>fixed questions:<br/>Components, Messaging,<br/>Schedules, …"]
     F --> ID["<b>Identity</b><br/>Steno ID, canonical name,<br/>aliases, lifecycle"]
     ID --> G[("<b>The graph</b><br/>layers, interfaces,<br/>flows, tables")]
     G --> T["<b>Trust</b><br/>citations, agreement,<br/>completeness"]
@@ -31,7 +31,7 @@ flowchart LR
 |---|---|
 | **Deterministic first.** Rules extract facts. Decisions rules can't make go to a decision model (stand-ins in the POC, Jev later). An LLM only writes text. | Decided |
 | **Built bottom-up, searched top-down.** Applications are ingested first; spaces and the organization are rollups. Queries start at the highest layer a question needs. | Decided |
-| **Agnostic core, organization-specific rules.** The graph schema and facets never change per organization. Rule packs and providers do. | Decided |
+| **Agnostic core, organization-specific rules.** The graph schema and facets never change per organization. Rule packs and witnesses do. | Decided |
 | **Passive.** Nothing is required of an organization's repositories. Steno reads what already exists. | Decided |
 | **Gaps are visible, never silent.** | Decided |
 | **No file contents stored.** Code is read from the git host at the ingested commit. | Decided |

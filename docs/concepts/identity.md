@@ -40,7 +40,7 @@ One deployable can easily have seven names:
 
 Steno defines **slots** for name sources, ordered by witness type. Packs fill the slots for their ecosystem; an organization can reorder them.
 
-| Priority | Source (examples) | Witness |
+| Priority | Source (examples) | Witness type |
 |---|---|---|
 | 1 | Admin override | ADMIN |
 | 2 | Deploy unit name: XLD deployable, Helm release, Kubernetes Deployment | PLATFORM |

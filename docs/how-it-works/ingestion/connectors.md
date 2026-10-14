@@ -42,7 +42,7 @@ Placement rules map the host's own structure onto spaces, so an organization wit
 
 A connector answers *where is it stored*. That's separate from *how it's read* (a rule) and *what kind of claim it is* (the witness type). See [Witnesses and facets](../../concepts/witnesses-and-facets.md#1-three-separate-questions-about-any-piece-of-information).
 
-| Source | Connector | Witness |
+| Source | Connector | Witness type |
 |---|---|---|
 | Application source, its config, its build files | Git | CODE |
 | Config repositories: Helm values, Kubernetes manifests, gateway routes, CronJobs | Git | PLATFORM |
@@ -91,7 +91,7 @@ Config files become facts in the graph, plus a property map for the symbol resol
 | Every property, per profile | `property` clues for `${placeholder}` resolution, re-read every job (nothing stored) |
 | Secrets | **Never read.** Keys that look like secrets are skipped by every config rule. |
 
-**Deployment values (Proposed, later).** Admins can supply the values code reads at runtime (`SYNC_REL_DB_URL`), per repository or application, so stores resolve to their real host and applications sharing a database share one `DataStore`. Order: admin values → committed config (`.env.sample`, compose, `application.yml`) → code defaults. Credentials are never kept: URLs are stripped of `user:password@`, credential-like keys are refused, values never reach an LLM. Read-only connectors to deployment config (Helm values, ConfigMaps, Terraform outputs) can supply them later; this is the Routing facet's PLATFORM provider.
+**Deployment values (Proposed, later).** Admins can supply the values code reads at runtime (`SYNC_REL_DB_URL`), per repository or application, so stores resolve to their real host and applications sharing a database share one `DataStore`. Order: admin values → committed config (`.env.sample`, compose, `application.yml`) → code defaults. Credentials are never kept: URLs are stripped of `user:password@`, credential-like keys are refused, values never reach an LLM. Read-only connectors to deployment config (Helm values, ConfigMaps, Terraform outputs) can supply them later; this is a PLATFORM witness for the Routing facet.
 
 ## 5. What admins declare
 

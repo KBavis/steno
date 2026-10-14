@@ -132,7 +132,7 @@ What each one needs:
 | # | Use case | Needs | What it enables |
 |---|---|---|---|
 | 21 | **Reachability for CVEs** | Graph+ | A vulnerable library matters only if a flow reaches the vulnerable function. Cuts false positives. Needs calls to third-party symbols recorded as references. |
-| 22 | **ACL drift** | Graph + a PLATFORM provider (ACL definitions) | Grants compared with actual produce/consume in code: unused grants to remove, and usage nobody declared. |
+| 22 | **ACL drift** | Graph + a PLATFORM witness (ACL definitions) | Grants compared with actual produce/consume in code: unused grants to remove, and usage nobody declared. |
 | 23 | **Third-party inventory** | Graph | Every `ExternalSystem` call and the flows that make it, for vendor risk reviews. |
 | 24 | **PII and data lineage** | Schemas | Which flows read a sensitive column, and where the data goes next. |
 
@@ -160,4 +160,4 @@ Steno supplies **grounded, current, attributable context** through MCP. The gene
 
 - **Access control:** a contractor should see less than a full-time employee. How are scopes enforced on MCP results?
 - **Showing confidence:** a low-confidence or inferred edge must never look as certain as a deterministic one.
-- **Positioning next to catalogs** (Backstage, Cortex): settled by D96. Catalogs record what people *declare*; Steno captures what's *actually in the code*, and reads catalogs as providers.
+- **Positioning next to catalogs** (Backstage, Cortex): settled by D96. Catalogs record what people *declare*; Steno captures what's *actually in the code*, and reads catalogs as witnesses.

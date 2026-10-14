@@ -1,12 +1,12 @@
 # Witnesses and facets
 
-How Steno learns an organization without being rebuilt for each one: a fixed set of questions (**facets**), several kinds of evidence (**witnesses**), and per-organization sources (**providers**).
+How Steno learns an organization without being rebuilt for each one: a fixed set of questions (**facets**), kinds of evidence (**witness types**), and the concrete sources at each organization (**witnesses**).
 
 > **In one minute**
 > - **Code is one witness.** Much of an architecture is recorded elsewhere: deploy tools, Kafka permission files, artifact repositories, schedulers, manifests.
 > - A **witness type** is the kind of claim, decided by **what consumes the information**: the running app (CODE), the infrastructure (PLATFORM), nobody, it only describes (DECLARED), an admin in Steno (ADMIN), or seen at runtime (OBSERVED, `v2`).
 > - A **facet** is a fixed question Steno answers about every organization: Behavior, Structure, Components, Artifacts, Interfaces, Messaging, Routing, Data, Schedules.
-> - A **provider** is one concrete source for a facet at one organization (the XLD repo, `component_manifest.yaml`). Facets never change; providers do, and most are shared.
+> - A **witness** is one concrete source for a facet at one organization (the XLD repo, `component_manifest.yaml`); its **witness type** is its kind (PLATFORM, DECLARED). Facets never change; witnesses do, and most are shared.
 > - When two independent witnesses answer the same question, Steno **compares** them. Agreement raises confidence; disagreement points at a missed rule, a stale declaration, or a name mismatch.
 >
 > Status: the model is **Decided**. How claims are stored and combined (reconcile) is **Open**: its technical design comes before POC stage B. See [identify and reconcile](../how-it-works/ingestion/identify-and-reconcile.md).
@@ -37,7 +37,7 @@ flowchart TD
     Q -- "it was seen happening" --> OBSERVED["<b>OBSERVED</b> (v2)<br/>traces, logs,<br/>broker client IDs"]
 ```
 
-| Witness | Strong at | Weak at |
+| Witness type | Strong at | Weak at |
 |---|---|---|
 | **CODE** | What actually happens: flows, calls, effects. Precise to the line. Always matches main. | Names people use, intent, timing set elsewhere, anything configured outside the code, reflection |
 | **PLATFORM** | What's actually set up: topics and permissions, schedules, published artifacts, routes. Disagreeing with CODE often means a real production problem. | One adapter per tool; names differ from code |
@@ -49,7 +49,7 @@ The types **fail differently**, which is why comparing them is worth something: 
 
 ### Classifying real files
 
-| Source | Witness | Read by | Stored in |
+| Source | Witness type | Read by | Stored in |
 |---|---|---|---|
 | Java and Python source | CODE | Code rules + symbol resolver | Git |
 | The app's own `application.yml` | CODE (the app reads it) | Config rules | Git |
@@ -65,13 +65,13 @@ The types **fail differently**, which is why comparing them is worth something: 
 | CODEOWNERS | DECLARED | File rules | Git |
 | An alias or rename an admin enters | ADMIN | — | Steno (Postgres) |
 
-A file that looks like a build file but that the build never loads is DECLARED. **Each provider states its witness type explicitly** in its pack; Steno doesn't guess. Edge cases exist (Helm values set environment variables the app reads; Steno calls them PLATFORM), and the pack author decides.
+A file that looks like a build file but that the build never loads is DECLARED. **Each pack states the witness type it reads explicitly**; Steno doesn't guess. Edge cases exist (Helm values set environment variables the app reads; Steno calls them PLATFORM), and the pack author decides.
 
 **Anything stored in a repository needs no new connector.** The git connector reads it. New connectors are only for systems reached through an API (`v1`).
 
 ### One system, two copies: the XLD case
 
-The XLD repository (desired state, at a commit) and the XLD server (what was applied) are **the same witness: PLATFORM**. They never count as two votes. If both are connected, they merge into one claim; a difference between them is **drift** (a failed or hand-edited deploy), reported on its own, not as evidence for or against the code. The POC reads the XLD repository through git: no new credentials, every claim cites a file and line. (Decided)
+The XLD repository (desired state, at a commit) and the XLD server (what was applied) are **one witness** (type PLATFORM). They never count as two votes. If both are connected, they merge into one claim; a difference between them is **drift** (a failed or hand-edited deploy), reported on its own, not as evidence for or against the code. The POC reads the XLD repository through git: no new credentials, every claim cites a file and line. (Decided)
 
 ## 3. Facets
 
@@ -94,11 +94,11 @@ A **facet** is one fixed question with a fixed answer shape, defined once by Ste
 
 **Is the list complete?** It can't be proven, but one rule keeps it honest: every node and edge type in the graph must be fed by at least one facet, and a facet is added only when the graph models what it would feed. A facet that feeds nothing would be a CMDB in disguise.
 
-**Frameworks aren't a facet.** An organization's in-house frameworks don't describe the architecture; they're how the CODE witness learns to read the organization. An internal messaging library is taught with a sender rule, a receiver rule, and its shared key (D61), in an org rule pack.
+**Frameworks aren't a facet.** An organization's in-house frameworks don't describe the architecture; they're how Steno learns to read the organization's code. An internal messaging library is taught with a sender rule, a receiver rule, and its shared key (D61), in an org rule pack.
 
 **Constraints and standards aren't facets.** Facets describe what *is*; constraints describe what *should be*. They live in other systems, which attach them to Steno's scopes by ID ([Where Steno fits](../purpose/where-steno-fits.md)).
 
-## 4. Which witness answers which facet
+## 4. Which witness type answers which facet
 
 | Facet | CODE | PLATFORM | DECLARED | ADMIN | OBSERVED (`v2`) |
 |---|---|---|---|---|---|
@@ -116,7 +116,7 @@ A **facet** is one fixed question with a fixed answer shape, defined once by Ste
 
 ## 5. Combining claims
 
-Every provider produces **claims** in its facet's shape, tagged with its witness type and source. Claims are combined per facet, in one of two ways (Decided):
+Every witness produces **claims** in its facet's shape, tagged with its witness type and a citation. Claims are combined per facet, in one of two ways (Decided):
 
 | Kind | Question | How claims combine |
 |---|---|---|
@@ -132,25 +132,25 @@ Every provider produces **claims** in its facet's shape, tagged with its witness
 
 ```mermaid
 flowchart LR
-    subgraph P["Providers (per organization)"]
+    subgraph P["Witnesses (per organization)"]
       direction TB
       CR["CODE: code + config + build rules"]
       PF["PLATFORM: deploy, ACL, route files<br/>(API adapters in v1)"]
       DC["DECLARED: manifests, catalogs"]
       AD["ADMIN: entries in Steno"]
     end
-    CR & PF & DC & AD --> CL["Claims<br/>tagged with witness + source"]
+    CR & PF & DC & AD --> CL["Claims<br/>tagged with witness type + citation"]
     CL --> RC{"Reconcile<br/>per facet"}
     RC -- "evidence: compare" --> AG["Facts with sources<br/>+ agreement state"]
     RC -- "authority: precedence" --> AU["Winner + aliases"]
     AG & AU --> G[("Graph")]
 ```
 
-## 6. Providers and setup
+## 6. Witnesses and setup
 
-A provider is a small adapter in a pack, with tests, like a rule. Onboarding an organization means filling in a **setup sheet**: for each facet, which providers it uses and in what precedence. See [Onboarding](../plan/onboarding.md).
+A witness is read by a pack (or, in `v1`, an API adapter), with tests, like any rule. Onboarding an organization means filling in a **setup sheet**: for each facet, which witnesses it uses and in what precedence. See [Onboarding](../plan/onboarding.md).
 
-| Facet | Providers at our organization (illustrative, to verify against real files) |
+| Facet | Witnesses at our organization (illustrative, to verify against real files) |
 |---|---|
 | Behavior | Spring and Kafka packs; org packs for in-house frameworks |
 | Structure | Admin entry now; Bitbucket project convention later |
@@ -162,7 +162,7 @@ A provider is a small adapter in a pack, with tests, like a rule. Onboarding an 
 | Data | JPA rules; migrations |
 | Schedules | `@Scheduled` (CODE) + the organization's scheduler (PLATFORM) |
 
-**Catalogs as providers.** Where an organization already uses a catalog (Backstage, Cortex), it's a DECLARED provider for Components, Structure, and later Ownership. Steno reads it and never competes with it (`v1`). See [decision D96](../plan/decisions.md).
+**Catalogs as witnesses.** Where an organization already uses a catalog (Backstage, Cortex), it's a DECLARED witness for Components, Structure, and later Ownership. Steno reads it and never competes with it (`v1`). See [decision D96](../plan/decisions.md).
 
 ## 7. When each facet arrives
 
@@ -174,5 +174,5 @@ Each facet comes in at the POC stage whose target needs it and where the result 
 | Artifacts A1 (dependency link by coordinate), Schedules (CronJob), Data ownership, Messaging agreement (an ACL file) | Stage B (stub organization) |
 | Routing (Spring Cloud Gateway, Eureka `lb://` names), Components names | Stage C (petclinic-microservices) |
 | `component_manifest.yaml`, the XLD repository, Artifacts A2 (flows into library code) | Stage D (our organization) |
-| API-reached systems, catalogs as providers | `v1` |
+| API-reached systems, catalogs as witnesses | `v1` |
 | OBSERVED, Ownership, Environments, Data V2 | `v2` |

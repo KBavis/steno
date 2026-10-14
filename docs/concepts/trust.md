@@ -52,7 +52,7 @@ When two independent witnesses answer the same question (see [Witnesses and face
 
 A disagreement means **look here**, not "the rules are wrong". Each one is triaged like a coverage item. The pattern across many says which: many in one direction for one framework means a missing rule; scattered across applications means stale declarations.
 
-**Independence matters.** A source generated from the code (an OpenAPI spec built from the controllers) always agrees with it and confirms nothing. Providers mark generated sources so they don't count as a second witness.
+**Independence matters.** A source generated from the code (an OpenAPI spec built from the controllers) always agrees with it and confirms nothing. Packs mark generated sources so they don't count as a second witness.
 
 ## 4. Every signal that something is incomplete
 
@@ -64,7 +64,7 @@ A disagreement means **look here**, not "the rules are wrong". Each one is triag
 | **Disagreements** | Code-only or declared-only facts | Agreement view; answers |
 | **Unmatched names** | A name from another source that matches no application | Identity review list |
 | **Unknown triggers** | Work nothing in the code starts (D74) | Coverage report |
-| **Stale providers** | A source that failed or whose data is old | Answers ("XLD as of …"); setup |
+| **Stale witnesses** | A source that failed or whose data is old | Answers ("XLD as of …"); setup |
 
 **The join rate** is the share of sends that join a known receiver (or a known external system). It's the main number for how connected an organization's graph is: the value of cross-service answers grows with it. Orphan receivers catch misses from the other side, without knowing in advance what was missed.
 
@@ -104,4 +104,4 @@ The exit criteria built on these are in the [roadmap](../plan/roadmap.md#3-poc-e
 
 ## 7. What static analysis can't see
 
-Behavior that leaves no trace in code or config (reflection, routing chosen entirely by runtime data, a customer's own Jira host stored in a database row) can be marked unknown but not filled in. PLATFORM providers close part of that gap; runtime evidence (OBSERVED, `v2`) closes most of the rest.
+Behavior that leaves no trace in code or config (reflection, routing chosen entirely by runtime data, a customer's own Jira host stored in a database row) can be marked unknown but not filled in. PLATFORM witnesses close part of that gap; runtime evidence (OBSERVED, `v2`) closes most of the rest.

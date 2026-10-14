@@ -21,7 +21,7 @@ What Steno provides to other systems that build on it: project history tools lik
 | **Scopes** | The organization, spaces, and applications, with stable IDs, for other systems to attach rules, constraints, or ownership to | Built (spaces, organization); applications with stage A |
 | **Change history** | Every run's added, removed, and changed facts with before and after (`fact_change`) | Built |
 | **Commits → PRs** | Each run's commit range mapped to PRs (`job_commit`), so a change can be attributed | `v1` |
-| **Attribution hook** | `(:Project)-[:CHANGED {kind, pr, commit}]->(element)` edges on the facts a project changed, supplied by a project system as a provider | Designed; with the integration |
+| **Attribution hook** | `(:Project)-[:CHANGED {kind, pr, commit}]->(element)` edges on the facts a project changed, supplied by a project system as a witness | Designed; with the integration |
 | **Read interface** | MCP tools with citations and completeness | Built (5 tools); more planned |
 
 ## 2. Division of work with Contextualized (Decided, D11)

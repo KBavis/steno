@@ -16,7 +16,7 @@ flowchart TD
     S4 --> S5["5 · Setup sheet"]
     S5 --> S6["6 · Pilot ingestion<br/>(one space)"]
     S6 --> S7["7 · Guided coverage and<br/>agreement review"]
-    S7 -- "targets not met:<br/>add rules, providers, aliases" --> S3
+    S7 -- "targets not met:<br/>add rules, witnesses, aliases" --> S3
     S7 -- "targets met" --> S8["8 · Readiness check<br/>(question set over MCP)"]
     S8 --> S9["9 · Full organization,<br/>nightly runs"]
 ```
@@ -30,8 +30,8 @@ flowchart TD
 | 1 | **Organization and connectors** | Name and description; git hosts with credentials references; later, systems reached through an API (deploy tools, artifact repositories, schedulers, catalogs) | `organization`, `connector` rows | `POC` (git); `v1` (others) |
 | 2 | **Repositories and spaces** | Declare spaces (how the organization divides itself); select repositories and place each in a space. At scale: discovery plus placement rules (Bitbucket project → space) | `space`, `repository` rows; the Structure facet | `POC` (by hand); `v1` (discovery, rules) |
 | 3 | **Discovery scan** | A quick, deterministic scan before ingestion: languages, build tools, frameworks found in dependencies, existing descriptors (`component_manifest.yaml`, `catalog-info.yaml`, OpenAPI, Helm, CronJobs, gateway configs), config repositories, which shared packs will turn on, and which facets have no source yet | A discovery report | `POC` (basic) |
-| 4 | **AI suggestions** | An LLM reads samples and drafts what's missing: "40 repositories have `component_manifest.yaml` with these fields; map them to Components?", "`acme-messaging` is used by 60 repositories and looks like a messaging framework; here are draft sender and receiver rules." **A person approves every suggestion; every rule ships with tests. The AI drafts; it never decides facts.** | Draft rules and provider mappings | `v1` (the `rule-pack-author` skill, by hand, in the POC) |
-| 5 | **Setup sheet** | Confirm, for each facet, its providers and their witness types, the name-ladder order, and naming patterns ("deploy name = `org-svc-{module}`"). Existing catalogs are connected here as DECLARED providers. | The organization's setup | `POC` (a file in the org pack); `v1` (UI) |
+| 4 | **AI suggestions** | An LLM reads samples and drafts what's missing: "40 repositories have `component_manifest.yaml` with these fields; map them to Components?", "`acme-messaging` is used by 60 repositories and looks like a messaging framework; here are draft sender and receiver rules." **A person approves every suggestion; every rule ships with tests. The AI drafts; it never decides facts.** | Draft rules and witness mappings | `v1` (the `rule-pack-author` skill, by hand, in the POC) |
+| 5 | **Setup sheet** | Confirm, for each facet, its witnesses and their witness types, the name-ladder order, and naming patterns ("deploy name = `org-svc-{module}`"). Existing catalogs are connected here as DECLARED witnesses. | The organization's setup | `POC` (a file in the org pack); `v1` (UI) |
 | 6 | **Pilot ingestion** | One representative space, not the whole organization | A graph for that space | `POC` |
 | 7 | **Guided coverage and agreement review** | Walk through every item, with what it means and how to fix it: unknown hosts (declare the service), unexplained calls and libraries with no pack (write a rule), unknown triggers (name the trigger), unmatched names (add an alias), disagreements (fix a rule or a stale declaration), identity conflicts and possible renames (link or separate). Ignore what's noise; triage persists. | Rules in the org pack, aliases, overrides; a shrinking open count | `POC` (the Coverage page); `v1` (guided) |
 | 8 | **Readiness check** | The organization supplies a question set; Steno answers it through MCP. Targets: question accuracy, join rate, open coverage items, unknown triggers. | A readiness report | `POC` |
@@ -66,4 +66,4 @@ flowchart TD
 
 ## Our organization (POC stage D)
 
-Onboarding steps 1–8 run on our own organization as a dry run: connectors for Bitbucket; the application's space; a discovery scan; `component_manifest.yaml` and the XLD repository as providers; the Spring and Kafka packs plus an org pack for in-house frameworks; a pilot ingestion; the coverage and agreement review; and a question set written by the team.
+Onboarding steps 1–8 run on our own organization as a dry run: connectors for Bitbucket; the application's space; a discovery scan; `component_manifest.yaml` and the XLD repository as witnesses; the Spring and Kafka packs plus an org pack for in-house frameworks; a pilot ingestion; the coverage and agreement review; and a question set written by the team.

@@ -5,7 +5,7 @@ Where Steno is going and where each piece stops: the **proof of concept** (stage
 > **In one minute**
 > - **POC:** prove Steno answers accurately, first on one application, then on a stub organization we wrote (so the correct graph is known), then on real multi-service code, then on our own organization's application.
 > - **Accuracy is the bar.** Every stage is measured with a question set and against an agent working without Steno.
-> - **v1** adds what a client deployment needs: connectors to systems reached through an API, catalogs as providers, AI suggestions in onboarding, a guided onboarding UI, MCP authentication.
+> - **v1** adds what a client deployment needs: connectors to systems reached through an API, catalogs as witnesses, AI suggestions in onboarding, a guided onboarding UI, MCP authentication.
 > - **v2** holds Jev, runtime evidence, frontends, data store schemas, ownership, and environments.
 
 ```mermaid
@@ -25,7 +25,7 @@ flowchart LR
 |---|---|
 | Onboarding UI and Admin API; organization and spaces projected into Neo4j | Identity registry and the identify step |
 | Job queue (Postgres), worker, per-stage records, nightly runs, write-only-changes, `fact_change` | Reconcile (claims, agreement states) |
-| Python packs (9) and Java packs (13), every rule with tests; HTTP signatures | File rules tagged by witness; PLATFORM and DECLARED providers |
+| Python packs (9) and Java packs (13), every rule with tests; HTTP signatures | File rules tagged by witness type; PLATFORM and DECLARED witnesses |
 | Python resolver; Java resolver with the JVM helper (source and JDK, Lombok) | Dependency JARs; Artifacts link across repositories |
 | Rule engine, assemblers, structure, call graph, flows, traces, steps, inferred flows (D74) | Application kinds; Routing joins |
 | Coverage report (eight signals, triage, org-wide view by scope) | Agreement view; cross-application inconsistencies |
@@ -78,8 +78,8 @@ For our organization's application and its neighbors:
 ## 5. v1: first delivery to a client
 
 - **Connectors to systems reached through an API:** XLD server (drift), Kafka admin API, artifact repository, scheduler
-- **Catalogs as providers:** Backstage, Cortex (DECLARED) (D96)
-- **AI suggestions in onboarding:** an LLM drafts missing rules and provider mappings from samples; a person approves each (D93)
+- **Catalogs as witnesses:** Backstage, Cortex (DECLARED) (D96)
+- **AI suggestions in onboarding:** an LLM drafts missing rules and witness mappings from samples; a person approves each (D93)
 - **The onboarding UI:** setup sheet, guided coverage and agreement review
 - **Repository discovery** and placement rules
 - **MCP authentication** and scoping by space or role; deployment model for client environments
@@ -102,15 +102,15 @@ See [Later](./later/README.md): Jev, runtime evidence (OBSERVED), frontends, dat
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Static call graphs miss DI, reflection, and dynamic dispatch | Missing or wrong flow steps | Symbol resolvers, DI rules, candidates marked `ambiguous`, the coverage report; PLATFORM providers; runtime evidence later |
+| Static call graphs miss DI, reflection, and dynamic dispatch | Missing or wrong flow steps | Symbol resolvers, DI rules, candidates marked `ambiguous`, the coverage report; PLATFORM witnesses; runtime evidence later |
 | Java resolved without dependency JARs (D69) | Flows stop partway through library chains (fluent clients, Reactor) | Unresolved calls stay visible and are counted per library (D71); JARs added in the order the counts justify |
 | A rule misses something and nobody notices | An impact answer leaves out a consumer | Second witnesses and the agreement view; join rate and orphan receivers; completeness block in answers |
 | Joins that aren't in code (gateways, env values, discovery, schedulers) | Unjoined calls; missing triggers | The Routing and Schedules facets (PLATFORM) |
 | Application names don't match what the organization uses | Inference everywhere; duplicates on rename | The identity registry and name ladder (D81–D84) |
 | Flows can't be found from business-language questions | Search misses the right flow | LLM flow cards, several retrieval signals, verification, measured with the question set |
 | Rules overfit to our organization | Not agnostic | Fixed facets, shared packs, a public second target |
-| Too many providers of uneven quality; credentials for many systems | Maintenance and security cost | Providers in packs with tests; read-only connectors with narrow scopes; `v1` only |
-| Steno drifts into being a catalog or CMDB | Wasted effort | Facets only for what the graph models (D79); catalogs are providers (D96) |
+| Too many witnesses of uneven quality; credentials for many systems | Maintenance and security cost | Witnesses read by packs with tests; read-only connectors with narrow scopes; `v1` only |
+| Steno drifts into being a catalog or CMDB | Wasted effort | Facets only for what the graph models (D79); catalogs are witnesses (D96) |
 | A catalog vendor adds code analysis | Competition | Effort goes into what's hard: flows, joins across services, completeness |
 | Enterprise scale | Slow ingestion and queries | Traces instead of function nodes, nightly runs only for changed repositories, per-file caches, materialized rollups, measured early |
 | Data egress policy | Blocks LLM cards or a decision model | Confirm early; deterministic first means Steno is useful with LLM cards off |
