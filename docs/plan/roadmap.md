@@ -77,7 +77,7 @@ For our organization's application and its neighbors:
 
 ## 5. v1: first delivery to a client
 
-- **Connectors to systems reached through an API:** XLD server (drift), Kafka admin API, artifact repository, scheduler
+- **Connectors to systems reached through an API:** XLD server, Kafka admin API, artifact repository, scheduler
 - **Catalogs as witnesses:** Backstage, Cortex (DECLARED) (D96)
 - **AI suggestions in onboarding:** an LLM drafts missing rules and witness mappings from samples; a person approves each (D93)
 - **The onboarding UI:** setup sheet, guided coverage and agreement review

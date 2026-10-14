@@ -49,7 +49,7 @@ flowchart TD
 | Level | What the organization does | What Steno gets | Scope |
 |---|---|---|---|
 | **Passive** (default) | Grants read access | Repositories, config, deploy definitions, manifests already in git | `POC` |
-| **Connect** (optional) | Grants read access to systems reached through an API: deploy tools, artifact repositories, schedulers, catalogs | PLATFORM and DECLARED witnesses beyond git, drift detection | `v1` |
+| **Connect** (optional) | Grants read access to systems reached through an API: deploy tools, artifact repositories, schedulers, catalogs | PLATFORM and DECLARED witnesses beyond git | `v1` |
 | **Annotate** (optional) | Admins enter overrides, aliases, and renames in Steno (or, where a team prefers, a small `steno.yaml` in a repository) | Corrections where rules get something wrong | `POC` (Steno), `v1` (UI) |
 | **Instrument** (optional) | Exposes OpenTelemetry or logs | OBSERVED: runtime-confirmed edges | `v2` |
 

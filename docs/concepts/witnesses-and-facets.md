@@ -21,7 +21,7 @@ How Steno learns an organization without being rebuilt for each one: a fixed set
 | **How is it read?** | A **rule or adapter** | An ast-grep code rule; a YAML path rule; an API adapter |
 | **What kind of claim is it?** | The **witness type** | "The software does this"; "the platform has this set up"; "someone says this" |
 
-These are independent. The same repository can hold all three witness types, and one system read two ways is still one witness. (Decided)
+These are independent. The same repository can hold all three witness types. (Decided)
 
 ## 2. The five witness types (Decided)
 
@@ -68,10 +68,6 @@ The types **fail differently**, which is why comparing them is worth something: 
 A file that looks like a build file but that the build never loads is DECLARED. **Each pack states the witness type it reads explicitly**; Steno doesn't guess. Edge cases exist (Helm values set environment variables the app reads; Steno calls them PLATFORM), and the pack author decides.
 
 **Anything stored in a repository needs no new connector.** The git connector reads it. New connectors are only for systems reached through an API (`v1`).
-
-### One system, two copies: the XLD case
-
-The XLD repository (desired state, at a commit) and the XLD server (what was applied) are **one witness** (type PLATFORM). They never count as two votes. If both are connected, they merge into one claim; a difference between them is **drift** (a failed or hand-edited deploy), reported on its own, not as evidence for or against the code. The POC reads the XLD repository through git: no new credentials, every claim cites a file and line. (Decided)
 
 ## 3. Facets
 

@@ -32,7 +32,6 @@ flowchart LR
 - **Every witness produces claims** in its facet's shape, tagged with its witness type, the witness, and a citation (D76, D87, D112).
 - **Code facts stay in the graph; other witnesses' claims go to a claim store in Postgres** with an as-of time (D109, option A). Reconcile writes its results into Neo4j, so MCP reads only the graph and the graph stays rebuildable from Postgres + git (D36).
 - **Evidence facets** get an agreement state per fact; **authority facets** resolve by precedence (D80).
-- **The same system read two ways is one witness** (D78): the XLD repository and the XLD server merge; a difference is drift.
 - **Admin overrides are claims like any other**, with who, when, and why, still compared with the code.
 - **In the POC, platform files come from git** through the existing connectors: the XLD definitions in Bitbucket. API connectors (the XLD server, Kafka admin, Artifactory) are `v1` (D77, D110).
 - **Claims are packs' output, not a new kind of pack.** A pack declares its witness type; code packs are CODE by default.
@@ -160,8 +159,6 @@ Step- and flow-level edges keep their code citations and get no agreement of the
 **Only checked subjects get an agreement state.** A topic no platform source mentions isn't `code only`; nothing checked it, and the edge simply has no `agreement` property. A witness covers the subjects it mentions; the [setup sheet](../../plan/onboarding.md) can declare wider coverage ("the XLD repository lists every topic on cluster X"), and then a topic missing from it is `code only` too.
 
 **Removals:** a claim marked removed recomputes its subjects; a declared-only edge with no claims left is deleted; an agreement falls back to none or `code only`.
-
-**Drift** (`v1`): when the XLD repository and the XLD server are both connected, their claims merge as one PLATFORM witness first; where they differ, that's drift, reported on its own, not as a vote for or against the code.
 
 ## 8. What agents and admins see
 
