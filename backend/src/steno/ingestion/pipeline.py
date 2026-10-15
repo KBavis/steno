@@ -20,6 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from steno.assemblers.assemble import assemble as run_assemblers
+from steno.claims.store import store_claims
 from steno.config import get_settings
 from steno.connectors.git import clone as git_clone
 from steno.coverage.collect import collect as collect_coverage
@@ -47,6 +48,10 @@ from steno.graph.delta import changes
 from steno.graph.driver import database, get_driver
 from steno.graph.structure import detect as detect_structure
 from steno.graph.writer import write_plan
+from steno.identity.identify import deployables
+from steno.identity.identify import identify as run_identify
+from steno.identity.registry import SqlRegistry
+from steno.reconcile.run import reconcile as run_reconcile
 from steno.rule_packs.packs import is_enabled, load_packs
 from steno.rule_packs.versions import dependencies
 
@@ -153,13 +158,42 @@ def assemble(ctx: JobContext) -> dict[str, Any]:
     }
 
 
+def identify(ctx: JobContext) -> dict[str, Any]:
+    """Find the deployables (structure) and give each its permanent Steno ID and real name
+    (docs/concepts/identity.md): its names from this run and from other witnesses, the name
+    ladder, then the registry by location or canonical name. Applications no longer seen are
+    tombstoned after the graph is written, so a failed run removes nothing."""
+    engine: Engine = ctx.state["engine"]
+    x = engine.out
+    assert ctx.workspace is not None
+    structure = detect_structure(ctx.workspace, {ep.origin.file for ep in x.entry_points})
+    ctx.state["structure"] = structure
+    found = deployables(ctx.workspace, ctx.repository.name, structure, x.claims)
+    identities, report = run_identify(
+        SqlRegistry(ctx.session, x.claims), ctx.repository.id, found, ctx.job.id, remove=False
+    )
+    ctx.state["identities"] = identities
+    ctx.state["identity_report"] = report
+    return {
+        "applications": {
+            i.canonical: {
+                "steno_id": i.steno_id,
+                **({"aliases": i.aliases} if i.aliases else {}),
+                **({"provisional": True} if i.provisional else {}),
+            }
+            for i in identities.values()
+        },
+        **report.as_dict(),
+    }
+
+
 def flows(ctx: JobContext) -> dict[str, Any]:
     """Build the call graph in memory, walk it from every entry point, and plan the graph:
     architecture nodes, code nodes, each flow's trace and steps, and flow rollups. The call
     graph itself isn't kept (D60)."""
     engine: Engine = ctx.state["engine"]
     x = engine.out
-    structure = detect_structure(ctx.workspace, {ep.origin.file for ep in x.entry_points})  # type: ignore[arg-type]
+    structure = ctx.state["structure"]
     org = ctx.session.get(Organization, 1)
     plan = build_graph(
         x,
@@ -171,12 +205,12 @@ def flows(ctx: JobContext) -> dict[str, Any]:
             org_id=ids.organization_id(org.id) if org else None,
             job_id=ctx.job.id,
             commit=ctx.job.to_sha,
+            identities=ctx.state.get("identities", {}),
         ),
         http_systems=[s for p in engine.packs for s in p.http_systems],
         packs=ctx.state["all_packs"],  # the ledger's I/O and harmless lists (D101)
     )
     ctx.state["plan"] = plan
-    ctx.state["structure"] = structure
     flow_nodes = [n for n in plan.nodes.values() if n.labels[0] == "Flow"]
     return {
         "modules": {m.path: sorted(m.roles) for m in structure.modules},
@@ -209,7 +243,43 @@ def write(ctx: JobContext) -> dict[str, Any]:
         for r in rows
     )
     ctx.repository.last_ingested_sha = ctx.job.to_sha
-    return {**plan.counts(), "delta": delta.counts(), "fact_changes": len(rows)}
+    # The run succeeded: applications it no longer found are removed (identity tombstones)
+    report = ctx.state.get("identity_report")
+    registry = SqlRegistry(ctx.session)
+    for steno_id in report.removed_ids if report else []:
+        registry.remove(steno_id, ctx.job.id)
+    # What other witnesses say (PLATFORM, DECLARED): this run's claims replace the last run's
+    engine: Engine = ctx.state["engine"]
+    stored = store_claims(
+        ctx.session, ctx.repository.id, ctx.job.id, ctx.job.to_sha, engine.out.claims
+    )
+    ctx.state["stored_claims"] = stored
+    return {
+        **plan.counts(),
+        "delta": delta.counts(),
+        "fact_changes": len(rows),
+        "claims": {"added": stored.added, "removed": stored.removed, "kept": stored.kept},
+    }
+
+
+def reconcile(ctx: JobContext) -> dict[str, Any]:
+    """Compare the code with other witnesses for every subject this job touched, and write
+    agreement states, citations per witness, and declared-only edges into the graph
+    (docs/how-it-works/ingestion/claims-and-reconcile.md §7)."""
+    stored = ctx.state.get("stored_claims")
+    identities = ctx.state.get("identities", {})
+    applications = {
+        ids.application_id(i.steno_id): {n.name for n in i.names} for i in identities.values()
+    }
+    summary = run_reconcile(
+        ctx.session,
+        get_driver(),
+        database(),
+        stored.touched if stored else set(),
+        applications,
+    )
+    ctx.state["reconcile"] = summary
+    return summary.counts()
 
 
 def coverage(ctx: JobContext) -> dict[str, Any]:
@@ -225,6 +295,7 @@ def coverage(ctx: JobContext) -> dict[str, Any]:
         _application_of(ctx),
         enabled=ctx.state.get("packs"),
         deps=ctx.state.get("dependencies"),
+        **_agreement_items(ctx),
     )
     previous = _previous_triage(ctx)
     for it in report.items:
@@ -255,17 +326,41 @@ def _application_of(ctx: JobContext) -> Any:
     exactly one, and to none otherwise: it's still in the repository's items, but it isn't an
     application of its own."""
     structure = ctx.state["structure"]
+    identities = ctx.state.get("identities", {})
     repo = ctx.repository.name
+
+    def name(module: Any) -> str:
+        identity = identities.get(module.path)
+        return identity.canonical if identity else str(structure.application_name(repo, module))
+
     services = [m for m in structure.modules if "Service" in m.roles]
-    only = str(structure.application_name(repo, services[0])) if len(services) == 1 else ""
+    only = name(services[0]) if len(services) == 1 else ""
 
     def app_of(file: str | None) -> str:
         module = structure.module_of(file) if file else None
         if module is not None and "Service" in module.roles:
-            return str(structure.application_name(repo, module))
+            return name(module)
         return only
 
     return app_of
+
+
+def _agreement_items(ctx: JobContext) -> dict[str, Any]:
+    """This repository's share of reconcile's findings: disagreements about its applications
+    or its own claims, and names its claims use that match no application."""
+    summary = ctx.state.get("reconcile")
+    if summary is None:
+        return {}
+    repo = ctx.repository.name
+    apps = {ids.application_id(i.steno_id) for i in ctx.state.get("identities", {}).values()}
+    disagreements = [
+        r
+        for r in summary.results
+        if r["agreement"] != "confirmed"
+        and (r["app"] in apps or any(s.get("repo") == repo for s in r["sources"]))
+    ]
+    unmatched = [u for u in summary.unmatched if u.get("repo") == repo]
+    return {"disagreements": disagreements, "unmatched": unmatched}
 
 
 def _previous_triage(ctx: JobContext) -> dict[tuple[str, str], CoverageStatus]:
@@ -292,8 +387,10 @@ STAGES: list[tuple[StageName, StageFn]] = [
     (StageName.PARSE, parse),
     (StageName.EXTRACT, extract),
     (StageName.ASSEMBLE, assemble),
+    (StageName.IDENTIFY, identify),
     (StageName.FLOWS, flows),
     (StageName.WRITE, write),
+    (StageName.RECONCILE, reconcile),
     (StageName.COVERAGE, coverage),
     (StageName.CARDS, cards),
 ]

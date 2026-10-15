@@ -6,7 +6,7 @@ After every ingestion, Steno reports **what no rule explained**, so gaps are mea
 > - Eight signals, each a place a fact could hide: unknown hosts, unexplained external calls, libraries with no pack, unknown triggers, unreachable code, matches Steno couldn't check, unparsed files, unresolved library types.
 > - Items are **aggregated across the organization** (one fix helps every repository that has the gap) and **ranked by reach**: applications, then spaces, then occurrences.
 > - Every item has a **triage state** (unexplained / ignored / explained) that persists, so the report converges instead of staying noisy.
-> - Planned: an **agreement view** next to it, listing every disagreement between witnesses (code only, declared only) and every unmatched name.
+> - Disagreements between witnesses (code only, declared only) and unmatched names are items like any other; a dedicated **agreement view** next to the report is planned.
 
 ```mermaid
 flowchart LR
@@ -39,6 +39,8 @@ UNEXPLAINED (org-wide, top 3)
 | Signal | What it catches | Built |
 |---|---|---|
 | **Unknown hosts** | HTTP calls whose host is runtime data (D64), one item per calling class, with each call's URL template. Listed first: they're the `Unknown host` nodes in the graph. | Yes |
+| **Disagreements** (D109) | Where the code and another witness disagree: an application uses a topic no ACL grants (`code only`), or a witness grants a use no code shows (`declared only`). Each goes to the repository that can fix it: the application's, or the platform repository's. See [claims and reconcile](./claims-and-reconcile.md#8-what-agents-and-admins-see). | Yes |
+| **Unmatched names** | A name a witness uses (an ACL's user, a manifest's component) that matches no application: not ingested, or named differently. Listed for the repository whose claims use it; resolved by a matching name, an exact alias, or an admin link. | Yes |
 | **Framework hooks no rule explains** (D101) | Code a framework runs without the code calling it: a class extending a framework type (`OncePerRequestFilter`, `ConstraintValidator`), a framework annotation or decorator (`@EnableWebSecurity`, `@mcp.tool()`). One item per framework type, so one rule (or a pack's `harmless` entry) settles all of them. Listed first: an unknown hook can touch anything. | Yes |
 | **Unexplained external calls** | Library calls that can do I/O, declared by core lists and packs' `library.io` (D101), where no rule matched the call and the library's pack recorded nothing in the same function. Grouped by the library function called. Constructors and exception types aren't I/O. | Yes |
 | **Config set outside the repository** (D101) | Config keys a fact needs (a topic, a host, a datasource) that no config file in the repository sets: set where the app runs. One item per key. | Yes |

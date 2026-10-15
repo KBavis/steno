@@ -1,0 +1,11 @@
+id: strimzi-topic-name
+description: A KafkaTopic resource naming its topic in spec.topicName (needed when the topic has characters a Kubernetes name can't, e.g. payment.settled)
+kind: config
+match:
+  each: "$"
+  when:
+    "$.kind": KafkaTopic
+    "$.spec.topicName": { exists: true }
+emit:
+  - claim: channel
+    channel: { KafkaTopic: $.spec.topicName }

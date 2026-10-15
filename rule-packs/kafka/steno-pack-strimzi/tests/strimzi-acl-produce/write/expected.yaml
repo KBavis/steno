@@ -1,0 +1,2 @@
+claims:
+  - may_produce: { application: recon-svc, channel: { KafkaTopic: recon.results }, line: 18 }

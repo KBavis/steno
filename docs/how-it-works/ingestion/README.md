@@ -6,7 +6,7 @@ How Steno turns repositories into graph facts: deterministically, idempotently, 
 > - A worker claims a queued job, clones the repository, and runs stages in order. Only **write** touches Neo4j; every stage records a row in Postgres.
 > - **Parse** reads the code once. **Extract** runs every rule of every enabled rule pack over every file. **Assemble** fills in facts whose pieces were in different files. **Flows** builds the call graph in memory and derives every flow. **Write** compares with the graph by stable ID and writes only differences. **Coverage** reports what no rule explained.
 > - Each night, every repository whose main branch moved is re-analyzed in full; only changes are written. Re-ingesting the same commit writes nothing.
-> - Planned additions: an **identify** step (application identity) and a **reconcile** step (combining witnesses). See [identify and reconcile](./identify-and-reconcile.md) and the proposed design for [claims and reconcile](./claims-and-reconcile.md).
+> - **Identify** gives every application a permanent Steno ID and its real name; **reconcile** compares the code with other witnesses (deploy and ACL files, manifests). See [identify and reconcile](./identify-and-reconcile.md) and [claims and reconcile](./claims-and-reconcile.md).
 
 ---
 
@@ -31,11 +31,10 @@ flowchart LR
     DP --> P["parse<br/><i>files, symbol tables,<br/>syntax trees</i>"]
     P --> X["extract<br/><i>rule packs → facts,<br/>facts with blanks, clues</i>"]
     X --> A["assemble<br/><i>clues → complete facts</i>"]
-    A --> ST["structure<br/><i>modules, applications</i>"]
-    ST --> ID["identify<br/><i>Steno IDs, names</i><br/>(planned)"]
+    A --> ID["identify<br/><i>structure, Steno IDs,<br/>names</i>"]
     ID --> FL["flows<br/><i>call graph → flows,<br/>traces, steps</i>"]
-    FL --> W["write<br/><i>only differences</i>"]
-    W --> RC["reconcile<br/><i>combine witnesses</i><br/>(planned)"]
+    FL --> W["write<br/><i>only differences;<br/>claims</i>"]
+    W --> RC["reconcile<br/><i>combine witnesses</i>"]
     RC --> CV["coverage<br/><i>what no rule explained</i>"]
     CV --> CD["cards<br/><i>LLM text</i><br/>(not built)"]
     SR["symbol resolvers<br/>(one per language)"] -. answers .-> X & A & FL
@@ -48,11 +47,10 @@ flowchart LR
 | **parse** | Which rule packs apply, and what's in the code? | File list, symbol tables, syntax trees | Built |
 | **extract** | What does each code shape mean? | Facts, facts with blanks, clues | Built |
 | **assemble** | What goes in each blank? | Completed facts; the facts JSON | Built |
-| **structure** | Which modules and deployables exist? | Modules, applications | Built (inside the flows stage today) |
-| **identify** | Is this the same application as last night, and what's it called? | Steno IDs, canonical names, lifecycle | Designed, `POC` stage A |
+| **identify** | Which deployables exist, is each the same application as last time, and what's it called? | Structure (modules, applications); Steno IDs, canonical names, aliases, lifecycle | Built |
 | **flows** | What does each entry point reach? | A graph plan: nodes and edges with stable IDs | Built |
-| **write** | What does Neo4j need to change? | The updated graph; `fact_change` | Built |
-| **reconcile** | Do independent witnesses agree? | Agreement states | **Open** design, before stage B |
+| **write** | What does Neo4j need to change? | The updated graph; `fact_change`; this run's claims in the claim store | Built |
+| **reconcile** | Do independent witnesses agree? | Application-level edges with agreement and sources; stubs for unmatched names | Built (Messaging, Components names) |
 | **coverage** | What did no rule explain? | `coverage_item` rows; completeness numbers | Built |
 | **cards** | What does each flow do, in words? | LLM purposes and narratives | Not built |
 
@@ -162,4 +160,5 @@ Measured runs, for scale:
 | [Symbol resolvers](./resolvers.md) | Python and Java resolution, DI, config values, hosts |
 | [Joins across applications](./joins.md) | How applications connect |
 | [Identify and reconcile](./identify-and-reconcile.md) | Application identity; combining witnesses |
+| [Claims and reconcile](./claims-and-reconcile.md) | What other witnesses say, the claim store, and agreement with the code |
 | [Coverage report](./coverage-report.md) | What no rule explained, and agreement between witnesses |

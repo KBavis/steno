@@ -72,10 +72,11 @@ def _write_all(tx: Any, plan: GraphPlan, repo: str) -> Delta:
 
     # 2. New and changed nodes, then edges
     before = {nid: b for nid, b, _ in delta.nodes}
+    after = {nid: a for nid, _, a in delta.nodes if a is not None}
     nodes: dict[tuple[str, ...], list[dict[str, Any]]] = defaultdict(list)
     for nid in delta.nodes_to_write():
         node = plan.nodes[nid]
-        props = _clean(node.props)
+        props = _clean(after[nid])  # the plan's, keeping a shared node's first writer
         nodes[tuple(node.labels)].append(
             {"id": nid, "props": {**props, **nulls_for(before[nid], props)}}
         )

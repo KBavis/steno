@@ -230,7 +230,8 @@ class GraphViews:
 
     def _links(self) -> "_Links":
         """How applications communicate, counted per pair: calls to another application's
-        interfaces or an external system, and reads and writes of a data store's tables."""
+        interfaces or an external system, reads and writes of a data store's tables, and
+        messages through topics and queues (counted by channel)."""
         links = _Links()
         for row in self._read(
             """
@@ -251,6 +252,12 @@ class GraphViews:
             UNION ALL
             MATCH (a:Application)<-[:BELONGS_TO]-(:Flow)-[r:READS_FROM|WRITES_TO]->(d:DataStore)
             RETURN a.id AS src, d.id AS dst, 'datastore' AS dst_kind, type(r) AS type, 1 AS n
+            UNION ALL
+            MATCH (a:Application)<-[:BELONGS_TO]-(:Flow)-[:PRODUCES]->(c:Interface)
+                  -[:STARTS]->(:Flow)-[:BELONGS_TO]->(b:Application)
+            WHERE a <> b
+            RETURN a.id AS src, b.id AS dst, 'application' AS dst_kind, 'PRODUCES' AS type,
+                   count(DISTINCT c) AS n
             """
         ):
             links.append(row.data())

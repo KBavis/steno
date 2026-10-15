@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from steno.api.links import source_url
+from steno.claims.store import active
 from steno.connectors.source import SourceError, read_file, slice_lines
 from steno.db.models import Connector, Repository
 from steno.extraction.facts import split_url
@@ -38,6 +39,14 @@ VIA = {
     "http": {"CALLS"},
     "messaging": {"PRODUCES", "CONSUMES"},
     "data": {"READS_FROM", "WRITES_TO"},
+}
+# What each agreement state means, for the agent (claims-and-reconcile.md §2)
+AGREEMENT = {
+    "confirmed": "the code and another witness both say so",
+    "code_only": "in the code; no other witness states it (e.g. no ACL grants it): likely to "
+    "fail where it's deployed, or the declaration is missing",
+    "declared_only": "another witness states it; no code doing it was found: an unused "
+    "grant, an application not ingested, or a rule that missed it",
 }
 CHARS_PER_TOKEN = 4
 OUTLINE = 25  # steps a flow's outline aims for, before folding deeper levels
@@ -155,16 +164,80 @@ class Tools:
 
     # ----------------------------------------------------------------- get_node
 
-    def get_node(self, ref: str) -> dict[str, Any]:
+    def get_node(self, ref: str, claims: bool = False) -> dict[str, Any]:
         node = self._resolve(ref)
         kind = kind_of(list(node.labels))
         if kind == "flow":
-            return self.get_flow(node["id"], detail="significant", expand="none", summary=True)
+            out = self.get_flow(node["id"], detail="significant", expand="none", summary=True)
+        elif kind == "application":
+            out = self._application(node)
+        elif kind in ("organization", "space"):
+            out = self._level(node, kind)
+        else:
+            out = self._other(node, kind)
+        if claims:
+            out["claims"] = self._claims(node)
+        return out
+
+    # ------------------------------------------------- witnesses (D109, claims)
+
+    def _uses(self, node_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Reconciled uses of channels by applications (an application's, or a channel's):
+        each with its agreement and one citation per witness."""
+        uses, citations = [], []
+        for r in self._read(
+            "MATCH (a:Application)-[r]->(c:Interface) WHERE r.repo = 'reconcile' "
+            "AND (a.id = $id OR c.id = $id) "
+            "RETURN a.id AS app_id, a.name AS app, a.stub AS stub, type(r) AS type, "
+            "c.id AS channel_id, c.name AS channel, r.agreement AS agreement, "
+            "r.sources AS sources ORDER BY channel, app",
+            id=node_id,
+        ):
+            role = "produces to" if r["type"] == "PRODUCES" else "consumes from"
+            sources = json.loads(r["sources"] or "[]")
+            uses.append(
+                {
+                    "application": r["app"],
+                    **({"application_ingested": False} if r["stub"] else {}),
+                    "role": role,
+                    "channel": r["channel"],
+                    "agreement": r["agreement"],
+                    "witnesses": sorted({_witness(s) for s in sources}),
+                }
+            )
+            for s in sources:
+                citations.append(
+                    self._cite(
+                        f"{r['app']} {role} {r['channel']}: {s['witness_type']}",
+                        s.get("repo"),
+                        s.get("commit"),
+                        s.get("file"),
+                        s.get("line"),
+                    )
+                )
+        return uses, citations
+
+    def _claims(self, node: Any) -> list[dict[str, Any]]:
+        """The raw claims behind a node: what other witnesses state about it."""
+        kind = kind_of(list(node.labels))
         if kind == "application":
-            return self._application(node)
-        if kind in ("organization", "space"):
-            return self._level(node, kind)
-        return self._other(node, kind)
+            names = {node.get("name"), *(node.get("aliases") or [])} - {None}
+            subjects = {f"application:{n}" for n in names}
+        else:
+            subjects = {f"channel:{node['id']}"}
+        repos = {r.id: r.name for r in self.session.scalars(select(Repository))}
+        return [
+            {
+                "claim": c.claim_type,
+                **c.fields,
+                "witness_type": c.witness_type,
+                "witness": c.witness,
+                "citation": self._cite(
+                    c.claim_type, repos.get(c.repository_id), c.commit, c.file, c.line
+                ),
+            }
+            for c in active(self.session, subjects)
+        ]
 
     def _application(self, app: Any) -> dict[str, Any]:
         app_id = app["id"]
@@ -222,12 +295,34 @@ class Tools:
                 "MATCH (:Application {id: $id})-[:BUILT_FROM]->(m:Module) RETURN m", id=app_id
             )
         ]
+        uses, use_citations = self._uses(app_id)
+        citations += use_citations
+        names = {
+            k: v
+            for k, v in {
+                "display": app.get("display_name"),
+                "aliases": app.get("aliases"),
+                # Named only by its folder: nothing states a real name yet
+                "provisional": app.get("provisional_name"),
+            }.items()
+            if v and v != app.get("name")
+        }
         return {
             "id": app_id,
             "kind": "application",
             "name": app.get("name"),
+            **({"names": names} if names else {}),
+            **(
+                {
+                    "ingested": False,
+                    "note": app.get("note") or "known only from another witness",
+                }
+                if app.get("stub")
+                else {}
+            ),
             **self._where(app_id),
             "flows": flows,
+            **({"messaging": uses, "agreement_means": _meanings(uses)} if uses else {}),
             "data": {k: sorted(v) for k, v in data.items()},
             "outbound": {k: sorted(v) for k, v in outbound.items()},
             "modules": modules,
@@ -288,24 +383,39 @@ class Tools:
             label = n["type"].lower() if n["dir"] == "out" else f"{n['type'].lower()} (in)"
             edges[label].append(f"{n['node']['label']} [{n['node']['id']}]")
         prov = detail["provenance"]
+        channel = kind == "interface" and not ({"HttpEndpoint", "GrpcMethod"} & set(node.labels))
+        uses, use_citations = self._uses(node["id"]) if channel else ([], [])
         return {
             "id": node["id"],
             "kind": kind,
             "name": detail["label"],
             **self._where(node["id"]),
             "properties": detail["properties"],
+            **(
+                {"uses": uses, "agreement_means": _meanings(uses)}
+                if uses
+                else {
+                    "agreement": "not checked: no platform or declared witness mentions this "
+                    "channel, so its producers and consumers come from the code alone"
+                }
+                if channel
+                else {}
+            ),
             "edges": {k: sorted(v)[:40] for k, v in edges.items()},
-            "citations": [
-                self._cite(
-                    f"{detail['label']} is defined here",
-                    prov.get("repo"),
-                    prov.get("commit"),
-                    prov.get("source_file"),
-                    prov.get("source_line"),
-                )
-            ]
-            if prov.get("source_file")
-            else [],
+            "citations": (
+                [
+                    self._cite(
+                        f"{detail['label']} is defined here",
+                        prov.get("repo"),
+                        prov.get("commit"),
+                        prov.get("source_file"),
+                        prov.get("source_line"),
+                    )
+                ]
+                if prov.get("source_file")
+                else []
+            )
+            + use_citations,
             "next": ["find_dependents(id) for everything that uses this"],
         }
 
@@ -674,6 +784,22 @@ class Tools:
             "citations": _unique(citations),
             "next": ["get_flow(flow id) for how a dependent uses it"],
         }
+        if direction == "upstream" and kind == "interface":
+            # What other witnesses say about who uses this channel (D109): agreement for each
+            # application, and the ones only a witness states (no code found)
+            uses, use_citations = self._uses(start)
+            if uses:
+                out["agreement"] = uses
+                out["agreement_means"] = _meanings(uses)
+                out["citations"] = _unique(out["citations"] + use_citations)
+                declared = [u for u in uses if u["agreement"] == "declared_only"]
+                if declared:
+                    out["completeness"]["declared_only"] = (
+                        f"{len(declared)} application{'s' if len(declared) != 1 else ''} "
+                        "another witness says use this, with no code found doing it (see "
+                        "`agreement`): not ingested, an unused grant, or a missed rule"
+                    )
+                    out["completeness"]["complete"] = False
         if direction == "downstream":
             out["touches"] = sorted(
                 (f"{v['how']} {v['name']}" for v in touched.values()), key=str.lower
@@ -912,6 +1038,17 @@ class Tools:
                 groups.items(), key=lambda kv: min(f["hops"] for f in kv[1])
             )
         ]
+
+
+def _witness(source: dict[str, Any]) -> str:
+    """`PLATFORM: platform-config (steno-pack-strimzi)`: the witness type, the repository it
+    came from, and the rule or pack that read it."""
+    where = " ".join(x for x in (source.get("repo"), f"({source['witness']})") if x)
+    return f"{source['witness_type']}: {where}"
+
+
+def _meanings(uses: list[dict[str, Any]]) -> dict[str, str]:
+    return {a: AGREEMENT[a] for a in sorted({u["agreement"] for u in uses}) if a in AGREEMENT}
 
 
 def _hooks_note(hooks: list[str]) -> dict[str, Any]:

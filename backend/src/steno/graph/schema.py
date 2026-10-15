@@ -35,6 +35,8 @@ CODE_LABELS = (
 SEARCHABLE = "Searchable"
 
 FULLTEXT_INDEX = "searchable_text"
+# What full-text search reads: names, other names (an application's aliases, D104), and cards
+FULLTEXT_PROPERTIES = ("name", "alias_text", "card")
 VECTOR_INDEX = "searchable_card_embedding"
 
 
@@ -43,17 +45,24 @@ def _statements() -> list[str]:
         f"CREATE CONSTRAINT {label.lower()}_id IF NOT EXISTS FOR (n:{label}) REQUIRE n.id IS UNIQUE"
         for label in (*ARCHITECTURE_LABELS, *CODE_LABELS)
     ]
+    on = ", ".join(f"n.{p}" for p in FULLTEXT_PROPERTIES)
     stmts.append(
-        f"CREATE FULLTEXT INDEX {FULLTEXT_INDEX} IF NOT EXISTS "
-        f"FOR (n:{SEARCHABLE}) ON EACH [n.name, n.card]"
+        f"CREATE FULLTEXT INDEX {FULLTEXT_INDEX} IF NOT EXISTS FOR (n:{SEARCHABLE}) ON EACH [{on}]"
     )
     return stmts
 
 
 def apply_schema(driver: Driver, database: str) -> list[str]:
-    """Create constraints and indexes. Idempotent."""
+    """Create constraints and indexes. Idempotent. A full-text index over other properties
+    than today's is dropped first (CREATE … IF NOT EXISTS wouldn't change it)."""
     stmts = _statements()
     with driver.session(database=database) as session:
+        row = session.run(
+            "SHOW FULLTEXT INDEXES YIELD name, properties WHERE name = $name RETURN properties",
+            name=FULLTEXT_INDEX,
+        ).single()
+        if row is not None and sorted(row["properties"]) != sorted(FULLTEXT_PROPERTIES):
+            session.run(f"DROP INDEX {FULLTEXT_INDEX}").consume()
         for stmt in stmts:
             session.run(stmt).consume()
     return stmts

@@ -1,0 +1,3 @@
+# The group ACL isn't a topic; the prefix ACL names a family of topics, not one
+claims:
+  - may_consume: { application: recon-svc, channel: { KafkaTopic: payment.settled }, line: 13 }

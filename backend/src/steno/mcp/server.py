@@ -58,12 +58,17 @@ def search(
 
 
 @mcp.tool()
-def get_node(ref: str, ctx: Context, max_tokens: int = 4000) -> dict[str, Any]:
+def get_node(
+    ref: str, ctx: Context, claims: bool = False, max_tokens: int = 4000
+) -> dict[str, Any]:
     """Describe a node by ID or name, at its level: the organization or a space (what it
     contains and how its parts communicate), an application (its flows, data, outbound calls,
-    modules), a flow (its steps), or anything else (its properties and connections). Start
-    with `get_node("organization")`-level names from `search`, or an ID from another result."""
-    return _run(ctx, "get_node", locals(), max_tokens, lambda t: t.get_node(ref))
+    modules, names, and the topics it uses with each one's `agreement`), a flow (its steps),
+    or anything else (its properties and connections). Agreement compares the code with other
+    witnesses (deploy and ACL files, manifests): `confirmed`, `code_only`, or `declared_only`.
+    `claims=true` also lists the raw statements other witnesses make about it. Start with
+    `get_node("organization")`-level names from `search`, or an ID from another result."""
+    return _run(ctx, "get_node", locals(), max_tokens, lambda t: t.get_node(ref, claims=claims))
 
 
 @mcp.tool()

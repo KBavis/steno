@@ -1,0 +1,4 @@
+# No title: the display name is left out, not empty
+claims:
+  - deployable: { application: billing, kind: service }
+  - name: { application: billing, name: billing, slot: manifest }

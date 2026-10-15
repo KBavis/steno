@@ -1,0 +1,10 @@
+name: steno-pack-backstage
+version: 0.1.0
+language: any
+source: core
+description: Backstage catalog files (catalog-info.yaml) - a Component declares a deployable, its name, kind, and title
+# Only describes: nothing runs or applies these files
+witness_type: DECLARED
+facets: [Components]
+enabled_when:
+  files: ["**/catalog-info.yaml", "**/catalog-info.yml"]

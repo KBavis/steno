@@ -186,6 +186,10 @@ class Context:
     org_id: str | None
     job_id: int
     commit: str | None
+    # Each deployable's identity from identify (module path → AppIdentity): its Steno ID keys
+    # the application and everything under it (D81). Without it (tests, `steno extract`), the
+    # path-derived name does
+    identities: dict[str, Any] = field(default_factory=dict)
 
 
 def build(
@@ -219,6 +223,7 @@ class _Builder:
         self.plan.ledger = self.ledger
         self.now = datetime.now(UTC).isoformat()
         self.apps: dict[str, str] = {}  # module path → application node id
+        self.app_keys: dict[str, str] = {}  # application node id → key for child IDs
         self.functions: dict[str, Function] = {f.symbol: f for f in r.functions()} if r else {}
         # Names of first-party functions: an unresolved call by one of these names may be a
         # flow step that's missing (D71)
@@ -287,17 +292,39 @@ class _Builder:
                 self._application(m, mid)
 
     def _application(self, m: Module, module_node: str) -> None:
-        name = self.s.application_name(self.ctx.repo, m)
+        identity = self.ctx.identities.get(m.path)
+        if identity is None:
+            key = name = self.s.application_name(self.ctx.repo, m)
+            props: dict[str, Any] = {"name": name}
+        else:
+            key, name = identity.steno_id, identity.canonical
+            props = {
+                "name": name,
+                "steno_id": identity.steno_id,
+                "display_name": identity.display,
+                "aliases": identity.aliases or None,
+                # Full-text search reads text, not lists: old and other names find it too
+                "alias_text": " ".join(identity.aliases) or None,
+                # Named only by its folder: nothing states a real name yet
+                "provisional_name": identity.provisional or None,
+                "conflict_with": identity.conflict_with,
+            }
         app = self.plan.node(
-            ids.application_id(name),
+            ids.application_id(key),
             ["Application", "Searchable"],
-            name=name,
+            **{k: v for k, v in props.items() if v is not None},
             **self._prov("structure"),
         )
         self.apps[m.path] = app
+        self.app_keys[app] = key
         self.plan.edge("BUILT_FROM", app, module_node, **self._prov("structure"))
         if self.ctx.space_id:
             self.plan.edge("BELONGS_TO", app, self.ctx.space_id, **self._prov("structure"))
+
+    def _key_of(self, app: str | None) -> str:
+        """What child IDs are built on: the application's Steno ID (or, without identify, its
+        path-derived name), or the repository for facts outside every application."""
+        return self.app_keys.get(app, self.ctx.repo) if app else self.ctx.repo
 
     def _app_for(self, rel_file: str) -> str | None:
         m = self.s.module_of(rel_file)
@@ -324,7 +351,7 @@ class _Builder:
         p, o, label = self.plan, n.origin, n.label
         prov = self._prov(o.rule, o.file, o.line)
         app = self._app_for(o.file)
-        app_name = self.plan.nodes[app].props["name"] if app else self.ctx.repo
+        app_key = self._key_of(app)
         labels = [*n.labels, *(["Searchable"] if SEARCHABLE & set(n.labels) else [])]
         props = {
             k: v for k, v in n.props.items() if not isinstance(v, (dict, list)) or k == "fields"
@@ -333,7 +360,7 @@ class _Builder:
             if "access" not in props:
                 props.update(self._access(n, app))
             nid = p.node(
-                ids.http_endpoint_id(app_name, n.props["method"], n.props["path"]),
+                ids.http_endpoint_id(app_key, n.props["method"], n.props["path"]),
                 labels,
                 name=f"{n.props['method']} {n.props['path']}",
                 **props,
@@ -343,7 +370,7 @@ class _Builder:
                 p.edge("BELONGS_TO", nid, app, **prov)
         elif label == "Entity":
             nid = p.node(
-                ids.entity_id(app_name, n.props["name"]),
+                ids.entity_id(app_key, n.props["name"]),
                 labels,
                 short_name=n.props["name"].rsplit(".", 1)[-1],
                 **props,
@@ -363,7 +390,7 @@ class _Builder:
         elif label == "Schedule":
             kind, expression = n.props.get("kind", "schedule"), n.props.get("expression", "")
             nid = p.node(
-                f"schedule:{app_name}:{kind}:{expression}",
+                f"schedule:{app_key}:{kind}:{expression}",
                 labels,
                 name=f"{kind} {expression}".strip(),
                 **props,
@@ -372,7 +399,7 @@ class _Builder:
             if app:
                 p.edge("BELONGS_TO", nid, app, **prov)
         else:
-            nid = p.node(f"{label.lower()}:{app_name}:{n.ref().props}", labels, **props, **prov)
+            nid = p.node(f"{label.lower()}:{app_key}:{n.ref().props}", labels, **props, **prov)
         self.fact_ids[id(n)] = nid
         return nid
 
@@ -840,7 +867,7 @@ class _Builder:
             if trigger is None or entry is None:
                 continue
             app = self._app_for(ep.origin.file)
-            app_name = self.plan.nodes[app].props["name"] if app else self.ctx.repo
+            app_key = self._key_of(app)
             trigger_node = self.plan.nodes[trigger]
             trigger_name = trigger_node.props.get("name", trigger)
             trigger_kind = next(
@@ -853,7 +880,7 @@ class _Builder:
                 if trigger_kind == "schedule"
                 else trigger_name
             )
-            flow = ids.flow_id(app_name, name)
+            flow = ids.flow_id(app_key, name)
             before = self._interceptors_for(entry_symbol, trigger_node.labels, app)
             trace = self._cascades_touched(self._trace(flow, (entry_symbol, None), before))
             stops = sum(len(t.get("unresolved", [])) for t in trace)
@@ -896,7 +923,7 @@ class _Builder:
         start, end = fn.span
         prov = {**self._prov("inferred-entry", rel, start), "confidence": 0.5}
         app = self._app_for(rel)
-        app_name = self.plan.nodes[app].props["name"] if app else self.ctx.repo
+        app_key = self._key_of(app)
         where = f"{fn.container.rsplit('.', 1)[-1]}.{fn.name}"
         hook = self.ledger.callback_entries().get(key[0])
         marks = [hook.target] if hook else self.ledger.marks(key[0])
@@ -906,7 +933,7 @@ class _Builder:
             if marks
             else f"Background work · {where}"
         )
-        flow = ids.flow_id(app_name, name)
+        flow = ids.flow_id(app_key, name)
         trace = self._cascades_touched(self._trace(flow, key))
         stops = sum(len(t.get("unresolved", [])) for t in trace)
         self.plan.node(

@@ -1,0 +1,14 @@
+id: strimzi-acl-produce
+description: A KafkaUser ACL granting Write (or All) on a topic - the user's application may produce to it. Prefix ACLs are left out
+kind: config
+match:
+  each: "spec.authorization.acls[*]"
+  when:
+    "$doc.kind": KafkaUser
+    "$.resource.type": topic
+    "$.resource.patternType": { not_in: [prefix] }
+    "$.operations": { in: [Write, All] }
+emit:
+  - claim: may_produce
+    application: $doc.metadata.name
+    channel: { KafkaTopic: $.resource.name }

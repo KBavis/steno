@@ -27,7 +27,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 NAMING_CONVENTION = {
@@ -118,7 +118,9 @@ class StageName(StrEnum):
     ASSEMBLE = "assemble"
     FLOWS = "flows"
     WRITE = "write"
+    IDENTIFY = "identify"
     COVERAGE = "coverage"
+    RECONCILE = "reconcile"
     CARDS = "cards"
 
 
@@ -320,6 +322,7 @@ class CoverageItem(Base):
     """What no rule explained but looks like it matters."""
 
     __tablename__ = "coverage_item"
+    __table_args__ = (Index("ix_coverage_item_key", "repository_id", "kind", "target_symbol"),)
 
     id: Mapped[int] = _pk()
     job_id: Mapped[int] = mapped_column(ForeignKey("ingestion_job.id", ondelete="CASCADE"))
@@ -339,6 +342,148 @@ class CoverageItem(Base):
     status: Mapped[CoverageStatus] = mapped_column(
         _enum(CoverageStatus, "coverage_status"), default=CoverageStatus.UNEXPLAINED
     )
+
+
+# ---------------------------------------------------------------------------
+# Identity and claims: what can't be rebuilt from git (D36, D81, D109)
+# ---------------------------------------------------------------------------
+
+
+class IdentityState(StrEnum):
+    ACTIVE = "active"
+    REMOVED = "removed"  # a tombstone: not seen in a successful run; restored if it comes back
+    DEPRECATED = "deprecated"
+
+
+class ApplicationIdentity(Base):
+    """An application's permanent Steno ID, its anchors, and its lifecycle (D81–D84;
+    docs/how-it-works/ingestion/identify-and-reconcile.md §2)."""
+
+    __tablename__ = "application_identity"
+    __table_args__ = (
+        Index("ix_application_identity_location", "repository_id", "module_path"),
+        Index("ix_application_identity_canonical", "canonical_name"),
+    )
+
+    steno_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    canonical_name: Mapped[str] = mapped_column(Text)
+    display_name: Mapped[str] = mapped_column(Text)
+    # Where it's built: the anchor that survives a rename
+    repository_id: Mapped[int | None] = mapped_column(
+        ForeignKey("repository.id", ondelete="SET NULL")
+    )
+    module_path: Mapped[str | None] = mapped_column(Text)
+    state: Mapped[IdentityState] = mapped_column(
+        _enum(IdentityState, "identity_state"), default=IdentityState.ACTIVE
+    )
+    # Two deployables claiming one canonical name: flagged, never merged (identity.md §3)
+    conflict_with: Mapped[str | None] = mapped_column(String(32))
+    first_seen_job: Mapped[int | None] = mapped_column(BigInteger)
+    last_seen_job: Mapped[int | None] = mapped_column(BigInteger)
+    removed_job: Mapped[int | None] = mapped_column(BigInteger)
+
+
+class ApplicationAlias(Base):
+    """Every name an application goes by, with the witness that states it and its slot on the
+    name ladder; past canonical names are kept."""
+
+    __tablename__ = "application_alias"
+    __table_args__ = (
+        UniqueConstraint("steno_id", "name", "slot"),
+        Index("ix_application_alias_name", "name"),
+    )
+
+    id: Mapped[int] = _pk()
+    steno_id: Mapped[str] = mapped_column(
+        ForeignKey("application_identity.steno_id", ondelete="CASCADE")
+    )
+    name: Mapped[str] = mapped_column(Text)
+    slot: Mapped[str] = mapped_column(String(32))
+    witness_type: Mapped[str] = mapped_column(String(16))
+    # The witness and citation: {witness, file, line}
+    source: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    is_past_name: Mapped[bool] = mapped_column(Boolean, default=False)
+    first_seen_job: Mapped[int | None] = mapped_column(BigInteger)
+    last_seen_job: Mapped[int | None] = mapped_column(BigInteger)
+
+
+class LinkKind(StrEnum):
+    RENAME = "rename"  # the old application continues as the new one
+    SAME = "same"  # a name that means this application
+
+
+class ApplicationLink(Base):
+    """An admin's statement that two names or applications are one (identity.md §6): after the
+    fact (link a removed application to a new one) or ahead of time (a pending name)."""
+
+    __tablename__ = "application_link"
+
+    id: Mapped[int] = _pk()
+    from_steno_id: Mapped[str | None] = mapped_column(String(32))
+    to_steno_id: Mapped[str | None] = mapped_column(String(32))
+    pending_name: Mapped[str | None] = mapped_column(Text)
+    kind: Mapped[LinkKind] = mapped_column(_enum(LinkKind, "link_kind"))
+    by: Mapped[str] = mapped_column(String(200))
+    reason: Mapped[str | None] = mapped_column(Text)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=_now)
+    applied_job: Mapped[int | None] = mapped_column(BigInteger)
+
+
+class UnmatchedStatus(StrEnum):
+    OPEN = "open"
+    MAPPED = "mapped"
+    IGNORED = "ignored"
+
+
+class UnmatchedName(Base):
+    """A name a witness uses that matches no application: listed for someone to resolve,
+    never guessed (identity.md §3)."""
+
+    __tablename__ = "unmatched_name"
+
+    id: Mapped[int] = _pk()
+    name: Mapped[str] = mapped_column(Text, unique=True)
+    # Where it was seen: [{witness_type, witness, repository_id, file, line}]
+    sources: Mapped[list[Any]] = mapped_column(default=list)
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=_now)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=_now)
+    status: Mapped[UnmatchedStatus] = mapped_column(
+        _enum(UnmatchedStatus, "unmatched_status"), default=UnmatchedStatus.OPEN
+    )
+    mapped_to: Mapped[str | None] = mapped_column(String(32))
+
+
+class Claim(Base):
+    """One witness's statement about the system (D109;
+    docs/how-it-works/ingestion/claims-and-reconcile.md §5). Each run replaces its own claims:
+    one no longer found gets `removed_job`, kept for history, never compared."""
+
+    __tablename__ = "claim"
+    __table_args__ = (
+        UniqueConstraint("repository_id", "witness", "key"),
+        Index("ix_claim_subjects", "subjects", postgresql_using="gin"),
+    )
+
+    id: Mapped[int] = _pk()
+    claim_type: Mapped[str] = mapped_column(String(32))
+    facet: Mapped[str] = mapped_column(String(32))
+    fields: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    subjects: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
+    witness_type: Mapped[str] = mapped_column(String(16))
+    # The pack that read it (with the repository, that names the witness) or `admin`
+    witness: Mapped[str] = mapped_column(String(200))
+    repository_id: Mapped[int | None] = mapped_column(
+        ForeignKey("repository.id", ondelete="CASCADE"), index=True
+    )
+    commit: Mapped[str | None] = mapped_column(String(64))
+    file: Mapped[str | None] = mapped_column(Text)
+    line: Mapped[int | None] = mapped_column(Integer)
+    generated: Mapped[bool] = mapped_column(Boolean, default=False)
+    # What makes it the same claim next run: its type, fields, and file (not its line)
+    key: Mapped[str] = mapped_column(String(64))
+    first_seen_job: Mapped[int | None] = mapped_column(BigInteger)
+    last_seen_job: Mapped[int | None] = mapped_column(BigInteger)
+    removed_job: Mapped[int | None] = mapped_column(BigInteger)
 
 
 # ---------------------------------------------------------------------------

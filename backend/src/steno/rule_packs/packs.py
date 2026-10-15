@@ -4,6 +4,7 @@ The format is defined in docs/how-it-works/ingestion/rules-and-packs.md §6; a p
 when any of its `enabled_when` conditions holds (D49).
 """
 
+import fnmatch
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -62,6 +63,13 @@ class Pack:
     # (`{"org.springframework.boot": ">=2.7, <4"}`). A repository on another version, or one
     # whose version isn't known, is a coverage item; the rules still run
     versions: dict[str, str] = field(default_factory=dict)
+    # What kind of witness the pack reads (D76, D112): CODE (default), PLATFORM, or DECLARED.
+    # One pack, one witness type; its claims carry it
+    witness_type: str = "CODE"
+    facets: list[str] = field(default_factory=list)
+    # A source generated from the code (an OpenAPI spec built from controllers): its claims
+    # never count as an independent witness
+    generated: bool = False
 
 
 def load_pack(path: Path) -> Pack:
@@ -98,7 +106,17 @@ def load_pack(path: Path) -> Pack:
         io=list((meta.get("library") or {}).get("io") or []),
         harmless=list((meta.get("library") or {}).get("harmless") or []),
         versions={str(k): str(v) for k, v in (meta.get("versions") or {}).items()},
+        witness_type=_witness_type(meta, path),
+        facets=list(meta.get("facets") or []),
+        generated=bool(meta.get("generated", False)),
     )
+
+
+def _witness_type(meta: dict[str, Any], path: Path) -> str:
+    witness_type = str(meta.get("witness_type", "CODE")).upper()
+    if witness_type not in ("CODE", "PLATFORM", "DECLARED"):
+        raise ValueError(f"{path}: witness_type must be CODE, PLATFORM, or DECLARED")
+    return witness_type
 
 
 def _http_systems(file: Path) -> list[HttpSystem]:
@@ -119,6 +137,9 @@ def is_enabled(pack: Pack, repo: Path) -> bool:
     cond = pack.enabled_when
     if cond.get("always"):
         return _has_language(pack.language, repo)
+    # Platform and declared packs read files, not code: on when such a file exists
+    if cond.get("files") and _has_files(repo, cond["files"], cond.get("content")):
+        return True
     deps = {_norm(d) for d in cond.get("dependencies", [])}
     if deps & declared_dependencies(repo):
         return True
@@ -135,6 +156,24 @@ def declared_dependencies(repo: Path) -> set[str]:
     scripts and catalogs, Maven POMs, Python requirements and pyproject files. Java dependencies
     are `group:artifact`. Lock files are left out: they list what other libraries pull in too."""
     return {_norm(d.name) for d in dependencies(repo) if not d.file.endswith(".lock")}
+
+
+def _has_files(repo: Path, globs: list[str], content: str | None = None) -> bool:
+    """A file matching one of the globs, and, with `content`, one whose text matches that
+    regex (`kafka.strimzi.io`: a YAML file that's a Strimzi resource, not any YAML file)."""
+    pattern = re.compile(content) if content else None
+    for f in source_files(repo):
+        rel = f.relative_to(repo)
+        if is_test_file(rel):
+            continue
+        if not any(
+            fnmatch.fnmatch(rel.as_posix(), g) or fnmatch.fnmatch(f.name, g.rsplit("/", 1)[-1])
+            for g in globs
+        ):
+            continue
+        if pattern is None or pattern.search(f.read_text(errors="replace")):
+            return True
+    return False
 
 
 def _has_language(language: str, repo: Path) -> bool:

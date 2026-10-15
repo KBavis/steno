@@ -23,7 +23,7 @@ flowchart LR
 |---|---|
 | [Roadmap](./roadmap.md) | The POC stages with scope and exit criteria, how accuracy is measured, v1, v2, and risks |
 | [Onboarding](./onboarding.md) | The nine-step flow every organization goes through, and what the UI is for |
-| [Decisions](./decisions.md) | Every numbered decision (D1–D113) and the open questions |
+| [Decisions](./decisions.md) | Every numbered decision (D1–D114) and the open questions |
 | [Later](./later/README.md) | Parked designs: Jev, runtime evidence, frontends, data schemas, the UI's long-term vision |
 
 ## Stage A, in order

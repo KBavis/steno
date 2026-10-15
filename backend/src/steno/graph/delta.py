@@ -85,10 +85,15 @@ def diff(plan: GraphPlan, existing: Existing) -> Delta:
     for nid, node in plan.nodes.items():
         delta.labels[nid] = node.labels
         old = existing.nodes.get(nid)
+        after = node.props
+        if old is not None and _owned_elsewhere(nid, node.labels, old[1], existing):
+            # A shared node another repository wrote first (a topic its producer and consumer
+            # both name): the first writer keeps it, so two repositories don't take turns
+            after = {**after, **{k: old[1][k] for k in OWNER if k in old[1]}}
         if old is None:
-            delta.nodes.append((nid, None, node.props))
-        elif _comparable(old[1]) != _comparable(node.props) or not set(node.labels) <= set(old[0]):
-            delta.nodes.append((nid, old[1], node.props))
+            delta.nodes.append((nid, None, after))
+        elif _comparable(old[1]) != _comparable(after) or not set(node.labels) <= set(old[0]):
+            delta.nodes.append((nid, old[1], after))
     for nid in sorted(existing.repo_nodes - set(plan.nodes)):
         labels, props = existing.nodes[nid]
         if SHARED & set(labels) or props.get("shared"):
@@ -108,6 +113,20 @@ def diff(plan: GraphPlan, existing: Existing) -> Delta:
             continue  # goes with its node
         delta.edges.append((key, existing.edges[key], None))
     return delta
+
+
+# Who wrote a node: kept by the first repository to write a shared node
+OWNER = ("repo", "extracted_by")
+# What reconcile writes (stubs it creates) belongs to no repository: the first one whose code
+# names it takes it over (reconcile/run.py)
+RECONCILE = "reconcile"
+
+
+def _owned_elsewhere(
+    nid: str, labels: list[str], props: dict[str, Any], existing: Existing
+) -> bool:
+    shared = bool(SHARED & set(labels)) or bool(props.get("shared"))
+    return shared and nid not in existing.repo_nodes and props.get("repo") not in (None, RECONCILE)
 
 
 def nulls_for(before: dict[str, Any] | None, after: dict[str, Any]) -> dict[str, None]:

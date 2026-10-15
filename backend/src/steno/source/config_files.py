@@ -10,6 +10,8 @@ from pathlib import Path
 
 import yaml
 
+from steno.source import records
+
 # The files read when a config rule doesn't name its own (** means "in any folder")
 DEFAULT_GLOBS = ["**/*.yml", "**/*.yaml", "**/*.properties", "**/.env*"]
 
@@ -50,6 +52,9 @@ def read(path: Path) -> dict[str, str]:
     YAML files are nested, so they're flattened (see `_flatten`). .properties and .env files
     are already flat: one `key=value` (or `key: value`) per line.
     """
+    # XML reads like YAML: elements nest, attributes are keys
+    if path.suffix in records.XML_SUFFIXES:
+        return _flatten(records.plain(records.load(path)[0]))
     text = path.read_text(errors="replace")
     if path.suffix in (".yml", ".yaml"):
         flat: dict[str, str] = {}
@@ -66,6 +71,16 @@ def read(path: Path) -> dict[str, str]:
         if m := re.match(r"^(?:export\s+)?([^=:\s]+)\s*[=:]\s*(.*)$", line):
             pairs[m[1]] = m[2].strip().strip("\"'")  # drop surrounding quotes
     return pairs
+
+
+def lines(path: Path) -> dict[str, int]:
+    """The line each flat key is set on, for citations (YAML and XML; other files: none)."""
+    if path.suffix not in (*records.YAML_SUFFIXES, *records.XML_SUFFIXES):
+        return {}
+    out: dict[str, int] = {}
+    for doc in records.load(path):
+        out |= records.flat_lines(doc)
+    return out
 
 
 def _flatten(data: object, prefix: str = "") -> dict[str, str]:

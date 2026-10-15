@@ -1,0 +1,11 @@
+id: strimzi-topic
+description: A KafkaTopic resource whose topic is its resource name, e.g. kind KafkaTopic, metadata.name payment-settled
+kind: config
+match:
+  each: "$"
+  when:
+    "$.kind": KafkaTopic
+    "$.spec.topicName": { exists: false }
+emit:
+  - claim: channel
+    channel: { KafkaTopic: $.metadata.name }

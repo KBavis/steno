@@ -23,15 +23,17 @@ flowchart LR
 
 | Built | Not built |
 |---|---|
-| Onboarding UI and Admin API; organization and spaces projected into Neo4j | Identity registry and the identify step |
-| Job queue (Postgres), worker, per-stage records, nightly runs, write-only-changes, `fact_change` | Reconcile (claims, agreement states) |
-| Python packs (9) and Java packs (13), every rule with tests; HTTP signatures | File rules tagged by witness type; PLATFORM and DECLARED witnesses |
-| Python resolver; Java resolver with the JVM helper (source and JDK, Lombok) | Dependency JARs; Artifacts link across repositories |
-| Rule engine, assemblers, structure, call graph, flows, traces, steps, inferred flows (D74) | Application kinds; Routing joins |
-| Coverage report (eight signals, triage, org-wide view by scope) | Agreement view; cross-application inconsistencies |
-| MCP: `search`, `get_node`, `get_flow`, `view_flow_code`, `find_dependents`, all logged | Completeness block; confidence levels; LLM cards; commits → PRs |
+| Onboarding UI and Admin API; organization and spaces projected into Neo4j | Bulk onboarding and repository roles in the UI (`v1`, D111) |
+| Job queue (Postgres), worker, per-stage records, nightly runs, write-only-changes, `fact_change`; re-ingesting the same commit writes nothing | Removing a deleted repository's facts |
+| **Identity** (D81–D84): registry, identify stage, Steno IDs keying every child ID, names from build files, `spring.application.name`, and other witnesses; conflicts, tombstones, restores | Naming patterns; admin links through an API or UI; application kinds |
+| **Claims and reconcile** (D109, D114): pack witness types, record rules (`each`, `when`, XML), the claim store, reconcile for Messaging, agreement and sources on application-level edges, stubs for unmatched names | Schedules reconciliation; declared topic placement; the setup sheet |
+| Packs: Python (9), Java (13), Strimzi (PLATFORM), Backstage (DECLARED); every rule with tests, including Spring Boot 2 cases; HTTP signatures; versions each pack is tested on (D106) | Organization packs (XLD repository, `component_manifest.yaml`) |
+| Python resolver; Java resolver with the JVM helper (source and JDK, Lombok, the repository's Java level) | Dependency JARs; Artifacts link across repositories |
+| Rule engine, assemblers, call graph, flows, traces, steps, inferred flows (D74), interceptors and access (D103), ORM effects (D102), the ledger of I/O and hooks (D101) | Routing joins |
+| Coverage report (signals including disagreements, unmatched names, untested versions; triage; org-wide view by scope) | Agreement view; cross-application inconsistencies |
+| MCP: `search` (with data stores, external systems, aliases), `get_node` (names, agreement, `claims`), `get_flow`, `view_flow_code`, `find_dependents`, a completeness block in answers, all logged | Confidence levels; LLM cards; commits → PRs |
 
-Contextualized (Python) and budgeting-app (Java) ingest end to end. Current stage: **A**.
+Contextualized (Python) and budgeting-app (Java) ingest end to end, and a three-repository stub organization (a producer, a consumer, and a platform repository with Strimzi topics and ACLs) proves claims and reconcile. Current stage: **A**.
 
 ## 2. POC stages
 

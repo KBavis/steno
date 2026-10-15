@@ -16,27 +16,32 @@ The full format is in **[Rules and rule packs](../docs/how-it-works/ingestion/ru
 
 ## Layout
 
-Packs are grouped by ecosystem, meaning a language plus its config files:
+Packs are grouped by ecosystem, meaning a language plus its config files, or a file format's world. A pack's `witness_type` (in `pack.yaml`) says what kind of witness it reads: CODE (the default), PLATFORM (files infrastructure applies), or DECLARED (files that only describe). `steno rules list` shows every pack's witness type.
 
 ```
 rule-packs/
-├─ java/                         Spring, JPA, Kafka, …
-├─ python/                       FastAPI, SQLAlchemy, …
-└─ org/                          your organization's own packs, any language
+├─ java/                         CODE: Spring, JPA, Kafka, …
+├─ python/                       CODE: FastAPI, SQLAlchemy, …
+├─ http/                         HTTP signatures for well-known services
+├─ kafka/                        PLATFORM: Strimzi topics and ACLs
+├─ catalog/                      DECLARED: Backstage catalog files
+└─ org/                          your organization's own packs, any language or witness type
 ```
+
+Code rules mostly produce **facts** (straight into the graph); rules over platform and declared files produce **claims**, which reconcile compares with the code. See `docs/how-it-works/ingestion/claims-and-reconcile.md`.
 
 Each pack:
 
 ```
 steno-pack-fastapi/
-├─ pack.yaml                     name, version, language, description, enabled_when
+├─ pack.yaml                     name, version, language, description, enabled_when, witness_type
 ├─ rules/
 │  └─ fastapi-endpoint.yaml      one rule per file; the file name is the rule id
 └─ tests/
    └─ fastapi-endpoint/          one folder per rule
       └─ nested-prefix/          one folder per test case
          ├─ input/               small copies of real code
-         └─ expected.yaml        the facts this case must produce
+         └─ expected.yaml        the facts (and claims) this case must produce
 ```
 
 ## What a rule looks like

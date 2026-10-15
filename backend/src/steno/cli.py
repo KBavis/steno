@@ -130,6 +130,20 @@ def job_nightly() -> None:
         typer.echo(f"{key}: {', '.join(result[key]) or '-'}")
 
 
+@rules_app.command("list")
+def rules_list() -> None:
+    """Every rule pack: its folder, witness type, facets, and rule count."""
+    from steno.rule_packs.packs import load_packs
+
+    root = get_settings().rule_packs_dir
+    for pack in load_packs(root):
+        folder = pack.path.relative_to(root).parts[0]
+        facets = f"  [{', '.join(pack.facets)}]" if pack.facets else ""
+        typer.echo(
+            f"{folder:8s} {pack.witness_type:9s} {pack.name:40s} {len(pack.rules):3d} rules{facets}"
+        )
+
+
 @rules_app.command("test")
 def rules_test(
     packs: list[str] = typer.Argument(None, help="Pack names; all packs if omitted"),

@@ -400,20 +400,22 @@ This is different from Steno *generating* rules on its own from the coverage rep
 
 ## 10. Pack catalog
 
-**What exists today** (about 60 rules across 23 packs, every rule with test cases):
+**What exists today** (about 65 rules across 25 packs, every rule with test cases). Every pack is CODE unless its folder says otherwise:
 
 | Ecosystem | Packs |
 |---|---|
 | `python/` (9 packs) | `steno-pack-fastapi`, `-sqlalchemy`, `-llama-index`, `-llama-index-chroma`, `-chromadb`, `-pydantic-settings`, `-httpx`, `-requests`, `-python-stdlib` |
 | `java/` (13 packs, built 2026-10-07) | See the table below |
 | `http/` | `steno-pack-saas-http`: HTTP signatures for well-known services |
+| `kafka/` (PLATFORM) | `steno-pack-strimzi`: `KafkaTopic` resources → `channel` claims; `KafkaUser` ACLs (Read / Write / All on literal topics) → `may_consume` / `may_produce` |
+| `catalog/` (DECLARED) | `steno-pack-backstage`: `catalog-info.yaml` Components → `deployable` (kind, title) and `name` (manifest slot) |
 | `org/` | Empty: organization packs go here |
 
 **Java packs:**
 
 | Pack | Rules |
 |---|---|
-| `steno-pack-spring-boot` | every `application*.yml` / `.properties` key as a `property` clue; `@Scheduled` cron, fixed-rate, fixed-delay → `Schedule` + entry point; `spring.datasource.url` / `spring.r2dbc.url` in the base config file → the application's `DataStore` (vendor, host, database; credentials dropped), which its tables belong to |
+| `steno-pack-spring-boot` | every `application*.yml` / `.properties` key as a `property` clue; `spring.application.name` → a `name` claim (runtime slot, for identity); `@Scheduled` cron, fixed-rate, fixed-delay → `Schedule` + entry point; `spring.datasource.url` / `spring.r2dbc.url` in the base config file → the application's `DataStore` (vendor, host, database; credentials dropped), which its tables belong to |
 | `steno-pack-spring-web` | class-level `@RequestMapping` prefix; `@Get/Post/Put/Patch/DeleteMapping` with and without a path; `@RequestMapping(method = …)`; endpoints declared on an API interface start their flow in its one implementation; `RestTemplate` (`getForObject` … `delete`, `exchange` with `HttpMethod`); `RestClient` / `WebClient` (`.post().uri(…)`); `@HttpExchange` interfaces |
 | `steno-pack-spring-cloud-openfeign` | `@FeignClient(url = …)` methods (base URL from config), `@FeignClient("service")` (the service name is the host), plain Feign `@RequestLine` |
 | `steno-pack-jpa` | `@Entity` + `@Table(name, schema)`; `@Entity` alone (snake_case table, Spring Boot's default); `@Entity(name = …)` |
@@ -449,19 +451,32 @@ Finding one before anyone writes its rules is the coverage report's job: receive
 
 **Default for internal libraries (Proposed):** a boundary rule (one rule fixes every repository and stays stable as the library changes). Following flows into the library's own code is Artifacts A2 (later).
 
-## 11. File rules and witness types (Decided; to build in POC stage B)
+## 11. Facts and claims; witness types (Decided, D114; built)
 
-Rules over files that describe the system (manifests, deploy definitions, ACL files, gateway routes, CronJobs, migrations) use the same config-rule mechanism (§5), with one addition: every pack states the **witness type** of what it reads, and its emits become **claims** for a facet rather than plain facts. See [Witnesses and facets](../../concepts/witnesses-and-facets.md).
+**Rules produce facts or claims.** Which one depends on what a rule emits, not on its pack's witness type:
+
+| A rule emits | It produces | Where it goes | Example |
+|---|---|---|---|
+| `node`, `edge`, `entry_point`, … | a **fact** | Straight into the graph | "this step writes the `transaction` table" |
+| `claim:` | a **claim** | The claim store; reconcile compares it with the code ([claims and reconcile](./claims-and-reconcile.md)) | "`ledger-svc` may consume `payment.settled`" |
+
+Code rules produce facts, as they always have; a few also produce claims, mainly names for identity (`spring.application.name`). Rules over files that describe the system (topic and ACL definitions, manifests, deploy descriptors, CronJobs) produce claims.
 
 ```yaml
-# pack.yaml for an org pack reading the XLD repository (illustrative)
-name: acme-xld
-source: org
-witness_type: PLATFORM       # CODE | PLATFORM | DECLARED
-facets: [Messaging, Components]
+# pack.yaml
+name: steno-pack-strimzi
+language: any
+witness_type: PLATFORM       # CODE (default) | PLATFORM | DECLARED
+facets: [Messaging]
+enabled_when:
+  files: ["**/*.yaml", "**/*.yml"]   # on when a matching file exists (not test code)
+  content: "kafka\\.strimzi\\.io/"  # …and its text matches this regex
+# generated: true            # a source generated from the code: never an independent witness
 ```
 
+- **One pack, one witness type.** It's a pack-level field, so every claim's witness type is unambiguous; a pack mixing code rules and platform rules is two packs.
 - **The witness type is declared, never guessed.** The test is what consumes the file: the running app (CODE), infrastructure (PLATFORM), or nothing (DECLARED).
-- **Generated sources** (an OpenAPI spec built from controllers) are marked `generated: true` and don't count as an independent witness.
-- **Name sources** fill slots in the name ladder ([Identity](../../concepts/identity.md#2-finding-the-canonical-name-the-name-ladder)): a pack can emit a `component_name` claim with its slot (deploy name, manifest ID, build artifact name, runtime self-name).
-- The exact emit syntax for claims is part of the reconcile design (**Open**, before stage B).
+- **Folders stay by ecosystem**, the file format's world, not by witness type: `kafka/` (Strimzi), `catalog/` (Backstage), beside `java/` and `python/`. `steno rules list` and the [pack catalog](#10-pack-catalog) show each pack's witness type.
+- **Claim types are a fixed set owned by Steno** (`channel`, `may_produce`, `may_consume`, `deployable`, `name`, `schedule`); a claim's fields are checked against its type. Record rules (`each`, `when`, `$.field`) and the claim emit are in [claims and reconcile §4](./claims-and-reconcile.md#4-writing-claims-in-a-pack).
+- **Name sources** fill slots in the name ladder ([Identity](../../concepts/identity.md#2-finding-the-canonical-name-the-name-ladder)): a `name` claim with its slot (`deploy`, `manifest`, `build_artifact`, `runtime`).
+- **Tests:** `expected.yaml` lists the `claims:` a case must produce.

@@ -1,0 +1,17 @@
+id: backstage-component
+description: A Backstage Component, e.g. kind Component, metadata.name users-service, spec.type service - a declared deployable and its manifest name
+kind: config
+files: ["**/catalog-info.yaml", "**/catalog-info.yml"]
+match:
+  each: "$"
+  when:
+    "$.kind": Component
+emit:
+  - claim: deployable
+    application: $.metadata.name
+    kind: $.spec.type
+    display_name: $.metadata.title
+  - claim: name
+    application: $.metadata.name
+    name: $.metadata.name
+    slot: manifest

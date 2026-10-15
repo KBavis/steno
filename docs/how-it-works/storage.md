@@ -3,7 +3,7 @@
 Where Steno keeps things: **Postgres holds what Steno is told and what it did; Neo4j holds what it knows.** Part of [How it works](./README.md).
 
 > **In one minute**
-> - **Postgres:** the organization, spaces, connectors, repositories; every job and stage; coverage items; change history; logs of LLM, decision, and tool calls. Also the work queue. Planned: the identity registry and the claim store.
+> - **Postgres:** the organization, spaces, connectors, repositories; every job and stage; coverage items; change history; logs of LLM, decision, and tool calls. Also the work queue. Also the identity registry and the claim store.
 > - **Neo4j:** the graph. Declared structure (organization, spaces) is projected into it from Postgres; everything else comes from ingestion.
 > - **Neo4j can always be rebuilt** from Postgres plus git, without re-spending on the LLM. Postgres is what must be backed up.
 > - No facts and no file contents are stored in Postgres.
@@ -36,7 +36,7 @@ flowchart LR
 | Which space a repository is in | `repository.space_id` | `Repository -BELONGS_TO-> Space`, written at ingestion |
 | Which job wrote a fact | `ingestion_job.id` | the `ingestion_job` property on every node and edge |
 | Which commit | `ingestion_job.to_sha` | the `commit` property |
-| *(planned)* Which application | `application_identity.steno_id` | the application's ID, and every child ID |
+| Which application | `application_identity.steno_id` | the application's ID, and every child ID |
 
 **Rebuilding Neo4j from scratch:** `steno graph init` (constraints, organization, spaces), then one ingestion job per repository. LLM text comes back from `llm_output` without new spend.
 
@@ -82,13 +82,14 @@ erDiagram
 ```
 
 
-**Planned tables** (stage A and B):
+**Identity and claims** (built 2026-10-14):
 
 | Table | Holds | Design |
 |---|---|---|
-| `application_identity`, `application_alias`, `application_link`, `unmatched_name` | The identity registry: Steno IDs, names and their sources, lifecycle, admin renames, names no application matched | [Identify and reconcile §2](./ingestion/identify-and-reconcile.md#2-identify-decided) |
-| `claim` | Non-CODE claims per facet and subject, with witness type, witness, citation, and as-of jobs (D109) | [Claims and reconcile](./ingestion/claims-and-reconcile.md) (Proposed) |
-| setup sheet (name to decide) | Per organization: witnesses per facet, their witness types and precedence, naming patterns | [Onboarding](../plan/onboarding.md) |
+| `application_identity`, `application_alias`, `application_link`, `unmatched_name` | The identity registry: Steno IDs, names and their sources, lifecycle, conflicts, admin renames, names no application matched | [Identify and reconcile §2](./ingestion/identify-and-reconcile.md#2-identify) |
+| `claim` | What PLATFORM, DECLARED, and ADMIN witnesses say, per facet and subject, with witness type, witness, citation, and as-of jobs (D109) | [Claims and reconcile §5](./ingestion/claims-and-reconcile.md#5-the-claim-store) |
+
+**Planned:** the setup sheet (per organization: witnesses per facet, their witness types and precedence, naming patterns; [Onboarding](../plan/onboarding.md)).
 
 ### Columns
 
@@ -102,7 +103,7 @@ erDiagram
 | `rule_pack` | `id`, `name`, `version`, `source` (core / org) |
 | `repository_rule_pack` | `repository_id`, `rule_pack_id`, `enabled`, `reason` (auto / manual) |
 | `ingestion_job` | `id`, `repository_id`, `trigger` (initial / nightly / manual), `mode` (full / dry_run), `from_sha`, `to_sha`, `status` (queued / running / succeeded / failed), `queued_at`, `started_at`, `finished_at`, `error`, `stats` (json) |
-| `ingestion_stage` | `id`, `job_id`, `stage` (clone / deps / parse / extract / assemble / flows / write / cards), `started_at`, `finished_at`, `status`, `metrics` (json), `llm_cost`, `jev_cost` |
+| `ingestion_stage` | `id`, `job_id`, `stage` (clone / deps / parse / extract / assemble / identify / flows / write / reconcile / coverage / cards), `started_at`, `finished_at`, `status`, `metrics` (json), `llm_cost`, `jev_cost` |
 | `coverage_item` | `id`, `job_id`, `repository_id`, `kind` (external call / library / unreachable / unmet join / inconsistency / config), `target_symbol`, `occurrences`, `samples` (json), `status` (unexplained / ignored / explained) |
 | `fact_change` | `id`, `job_id`, `fact_id`, `fact_type`, `change` (added / removed / modified), `before` (json), `after` (json), `commit_sha` |
 | `job_commit` | `job_id`, `commit_sha`, `pr_number`, `pr_url`, `merged_at` |
@@ -127,7 +128,7 @@ erDiagram
 | Table | Why |
 |---|---|
 | `ingestion_job` | Every job (`trigger`: initial / nightly / manual; `mode`: full / **dry_run**) and its status (**queued** / running / succeeded / failed). **It's also the work queue.** |
-| `ingestion_stage` | Per stage (clone, deps, parse, extract, assemble, flows, write, cards): timings, metrics (files, functions, flows), and **cost** (`llm_cost`, `jev_cost`, summed from the calls made in that stage). This is the dry-run report. |
+| `ingestion_stage` | Per stage (clone, deps, parse, extract, assemble, identify, flows, write, reconcile, coverage, cards): timings, metrics (files, functions, flows), and **cost** (`llm_cost`, `jev_cost`, summed from the calls made in that stage). This is the dry-run report. |
 | `coverage_item` | What **no rule explained** but looks like it matters (the coverage signals; see [Coverage report](./ingestion/coverage-report.md)), with occurrence counts and sample locations. `status` is unexplained / ignored / explained, so it's tracked across jobs, noise stays hidden once ignored, and open items measure how complete an app's graph is. The org-wide report groups items by `target_symbol` across repositories. |
 
 ### Change history

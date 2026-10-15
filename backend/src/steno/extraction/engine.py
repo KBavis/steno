@@ -18,10 +18,12 @@ from typing import Any
 
 from ast_grep_py import SgNode, SgRoot
 
+from steno.claims.types import InvalidClaim, validate
 from steno.extraction.facts import (
     IDENTITY,
     UNRESOLVED_TEXT,
     AppRef,
+    ClaimFact,
     ClueFact,
     EdgeFact,
     EntryPointFact,
@@ -40,7 +42,7 @@ from steno.extraction.facts import (
 from steno.resolvers import build_resolvers
 from steno.resolvers.base import UNRESOLVED, Function, Resolver, Resolvers
 from steno.rule_packs.packs import EXTENSIONS, Pack, Rule
-from steno.source import config_files
+from steno.source import config_files, records
 from steno.source.files import is_test_file, source_files
 
 log = logging.getLogger(__name__)
@@ -97,12 +99,16 @@ class Ctx:
     function: Function | None = None
     cls: str | None = None  # the enclosing class's symbol
     named: dict[str, NodeFact] = field(default_factory=dict)
+    # A config rule matching records (`each`): the record, and the document it's in
+    record: records.Node | None = None
+    doc: records.Node | None = None
 
 
 class Engine:
     def __init__(self, repo: Path, packs: list[Pack]):
         self.repo = repo
         self.packs = packs
+        self._pack = {p.name: p for p in packs}
         self.out = Extraction()
         # One symbol resolver per language the enabled packs read (D70)
         self.resolver: Resolvers | None = None
@@ -222,21 +228,30 @@ class Engine:
 
     # ---------------------------------------------------------- config rules
 
-    def _run_config(self, rule: Rule) -> None:
-        pattern = config_files.key_regex(rule.match.get("key", ""))
-        globs = rule.files or config_files.DEFAULT_GLOBS
+    def _config_files(self, rule: Rule, default: list[str]) -> list[tuple[Path, str]]:
+        globs = rule.files or default
+        out = []
         for path in self.files:
             rel = path.relative_to(self.repo).as_posix()
             # Test configuration (src/test/resources, test fixtures) describes no running app
             if is_test_file(path.relative_to(self.repo)):
                 continue
-            if not any(
+            if any(
                 fnmatch.fnmatch(rel, g) or fnmatch.fnmatch(path.name, g.rsplit("/", 1)[-1])
                 for g in globs
             ):
-                continue
+                out.append((path, rel))
+        return out
+
+    def _run_config(self, rule: Rule) -> None:
+        if "each" in rule.match:
+            self._run_records(rule)
+            return
+        pattern = config_files.key_regex(rule.match.get("key", ""))
+        for path, rel in self._config_files(rule, config_files.DEFAULT_GLOBS):
             try:
                 entries = config_files.read(path)
+                lines = config_files.lines(path)
             except Exception as exc:
                 self.out.errors.append(f"{rel}: {exc}")
                 continue
@@ -248,7 +263,25 @@ class Engine:
                     caps = {"KEY": Capture(key), "VALUE": Capture(value)} | {
                         k: Capture(v) for k, v in m.groupdict().items()
                     }
-                    self._emit(Ctx(rule, Origin(rule.id, rule.pack, rel, 0), caps))
+                    origin = Origin(rule.id, rule.pack, rel, lines.get(key, 0))
+                    self._emit(Ctx(rule, origin, caps))
+
+    def _run_records(self, rule: Rule) -> None:
+        """A config rule over records (`each: "topics[*]"`): one match per record, whose fields
+        the emits read as `$.name` (claims-and-reconcile.md §4)."""
+        each, when = str(rule.match["each"]), rule.match.get("when") or {}
+        for path, rel in self._config_files(rule, records.DEFAULT_GLOBS):
+            try:
+                docs = records.load(path)
+            except Exception as exc:
+                self.out.errors.append(f"{rel}: {exc}")
+                continue
+            for doc in docs:
+                for record in records.walk(doc, each):
+                    if not _when(record, doc, when):
+                        continue
+                    origin = Origin(rule.id, rule.pack, rel, record.line)
+                    self._emit(Ctx(rule, origin, {}, record=record, doc=doc))
 
     # ------------------------------------------------------------------ emit
 
@@ -265,6 +298,8 @@ class Engine:
                     self._emit_entry_point(ctx, item["entry_point"])
                 elif "interceptor" in item:
                     self._emit_interceptor(ctx, item["interceptor"])
+                elif "claim" in item:
+                    self._emit_claim(ctx, item)
                 else:
                     self.out.errors.append(f"{ctx.rule.id}: unknown emit {sorted(item)}")
             except _Drop as reason:
@@ -365,6 +400,72 @@ class Engine:
         self.out.interceptors.append(
             InterceptorFact(function, str(item.get("kind", "interceptor")), scope, ctx.origin)
         )
+
+    def _emit_claim(self, ctx: Ctx, item: dict[str, Any]) -> None:
+        """A claim (claims-and-reconcile.md §3): one per combination when a field names several
+        values (`application: $.consumers[*]`), each citing the line its values came from."""
+        kind = item["claim"]
+        pack = self._pack.get(ctx.rule.pack)
+        fields = [(k, self._claim_values(ctx, v)) for k, v in item.items() if k != "claim"]
+        fields = [(k, vals) for k, vals in fields if vals]
+        for combo in itertools.product(*(vals for _, vals in fields)):
+            values = {k: v for (k, _), (v, _) in zip(fields, combo, strict=True)}
+            lines = [line for _, line in combo if line]
+            origin = Origin(
+                ctx.origin.rule,
+                ctx.origin.pack,
+                ctx.origin.file,
+                max(lines, default=ctx.origin.line),
+            )
+            try:
+                if any("${" in str(v) for v in values.values()):
+                    raise InvalidClaim(f"{kind}: a value is an unresolved ${{placeholder}}")
+                validate(kind, values)
+            except InvalidClaim as exc:
+                self.out.dropped.append((origin, str(exc)))
+                continue
+            self.out.claims.append(
+                ClaimFact(
+                    kind,
+                    values,
+                    origin,
+                    pack.witness_type if pack else "CODE",
+                    ctx.rule.pack,
+                    pack.generated if pack else False,
+                )
+            )
+
+    def _claim_values(self, ctx: Ctx, spec: Any) -> list[tuple[Any, int | None]]:
+        """A claim field's possible values, each with the line it came from (None: the match's)."""
+        if isinstance(spec, dict):
+            parts = [(k, self._claim_values(ctx, v)) for k, v in spec.items()]
+            if any(not vals for _, vals in parts):
+                return []
+            return [
+                (
+                    {k: v for (k, _), (v, _) in zip(parts, combo, strict=True)},
+                    max((line for _, line in combo if line), default=None),
+                )
+                for combo in itertools.product(*(vals for _, vals in parts))
+            ]
+        if isinstance(spec, str) and spec.startswith(("$.", "$doc.")) and ctx.doc is not None:
+            base, path = (ctx.doc, spec[5:]) if spec.startswith("$doc.") else (ctx.record, spec[2:])
+            if base is None or SECRET_KEY.search(path.rsplit(".", 1)[-1]):
+                return []  # secret values are never ingested
+            out: list[tuple[Any, int | None]] = []
+            for node in records.walk(base, path):
+                items = node.value if isinstance(node.value, list) else [node]
+                for n in items:
+                    value = records.plain(n)
+                    if value not in (None, "") and not isinstance(value, (dict, list)):
+                        out.append((str(value), n.line))
+            return out
+        value = self._value(ctx, spec)
+        if value is _OMIT or value in (None, ""):
+            return []
+        if isinstance(value, list):
+            return [(v, None) for v in value if v not in (None, "")]
+        return [(value, None)]
 
     def _emit_entry_point(self, ctx: Ctx, item: dict[str, Any]) -> None:
         function = self._anchor(ctx, item["function"])
@@ -572,6 +673,33 @@ def _each(props: dict[str, Any]) -> list[dict[str, Any]]:
     keys = list(lists)
     combos = itertools.product(*lists.values())
     return [props | dict(zip(keys, combo, strict=True)) for combo in combos]
+
+
+def _when(record: records.Node, doc: records.Node, cond: dict[str, Any]) -> bool:
+    """A record's filter (`when: {"$.resource.type": topic, "$.operations": {contains: Read}}`):
+    every condition holds. A value equals, `contains` (in a list), `in` / `not_in` (one of),
+    `matches` (a regex), or `exists` (true or false)."""
+    for spec, want in cond.items():
+        base, path = (
+            (doc, spec[5:]) if spec.startswith("$doc.") else (record, spec.removeprefix("$."))
+        )
+        found = [records.plain(n) for n in records.walk(base, path)]
+        values = [v for f in found for v in (f if isinstance(f, list) else [f])]
+        values = [str(v) for v in values if v is not None]
+        if isinstance(want, dict):
+            if "exists" in want and bool(values) != bool(want["exists"]):
+                return False
+            if "contains" in want and str(want["contains"]) not in values:
+                return False
+            if "in" in want and not set(values) & {str(w) for w in want["in"]}:
+                return False
+            if "not_in" in want and set(values) & {str(w) for w in want["not_in"]}:
+                return False
+            if "matches" in want and not any(re.search(str(want["matches"]), v) for v in values):
+                return False
+        elif str(want) not in values:
+            return False
+    return True
 
 
 def _unknown_channel(labels: list[str], props: dict[str, Any]) -> bool:

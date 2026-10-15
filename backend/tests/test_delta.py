@@ -84,3 +84,27 @@ def test_facts_gone_from_the_code_are_removed_but_shared_ones_wait():
     assert delta.nodes_to_remove() == [STEP]
     assert delta.edges_to_remove() == []
     assert {r["fact_id"] for r in changes(delta)} == {STEP}
+
+
+def test_a_shared_node_another_repository_wrote_first_stays_with_it():
+    """A topic both a producer's and a consumer's repositories name: the first writer keeps
+    it, so the two runs don't take turns rewriting it (and the change history stays quiet)."""
+    prov = {"ingestion_job": 2, "commit": "c", "last_seen": "t"}
+    topic = "kafkatopic:payment.settled"
+    first = GraphPlan()
+    first.node(
+        topic, ["Interface", "KafkaTopic"], name="payment.settled", shared=True,
+        repo="payments", extracted_by="kafka-template-send", **prov,
+    )  # fmt: skip
+    second = GraphPlan()
+    second.node(
+        topic, ["Interface", "KafkaTopic"], name="payment.settled", shared=True,
+        repo="recon", extracted_by="kafka-listener", **prov,
+    )  # fmt: skip
+    graph = _graph_holding(first)
+    graph.repo_nodes.clear()  # read by id: the recon repository doesn't own it
+    assert diff(second, graph).nodes == []
+    # A real change is still written, keeping its first writer
+    second.nodes[topic].props["partitions"] = 6
+    ((_, _, after),) = diff(second, graph).nodes
+    assert (after["repo"], after["partitions"]) == ("payments", 6)

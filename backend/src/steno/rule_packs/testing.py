@@ -18,7 +18,7 @@ from steno.extraction.facts import AppRef, Extraction, HttpRef, NodeFact, NodeRe
 from steno.ingestion.local import run_folder
 from steno.rule_packs.packs import Pack, is_enabled
 
-SECTIONS = ("nodes", "edges", "clues", "entry_points", "interceptors")
+SECTIONS = ("nodes", "edges", "clues", "entry_points", "interceptors", "claims")
 
 
 @dataclass
@@ -80,6 +80,12 @@ def facts_of_rule(x: Extraction, rule_id: str) -> dict[str, list[Any]]:
             {"function": i.function, "kind": i.kind, "applies_to": i.scope}
             for i in x.interceptors
             if i.origin.rule == rule_id
+        ],
+        # Claims (claims-and-reconcile.md §3): their fields, plus where they came from
+        "claims": [
+            {c.claim_type: {**c.fields, "line": c.origin.line, "witness_type": c.witness_type}}
+            for c in x.claims
+            if c.origin.rule == rule_id
         ],
     }
 

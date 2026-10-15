@@ -80,6 +80,8 @@ def collect(
     app_of: Callable[[str | None], str] | None = None,
     enabled: list[Pack] | None = None,
     deps: list[Dependency] | None = None,
+    disagreements: list[dict[str, Any]] | None = None,
+    unmatched: list[dict[str, Any]] | None = None,
 ) -> Report:
     """`app_of`: the application a file belongs to (its service module's), so items and
     numbers can be shown per application, not just per repository. `enabled`: the packs that
@@ -109,6 +111,7 @@ def collect(
     if resolver:
         _libraries(resolver, all_packs, items, item)
     _versions(enabled or [], deps or [], item)
+    _agreement(disagreements or [], unmatched or [], item)
     gaps = _unresolved_types(resolver) if resolver else 0
 
     stats = plan.stats
@@ -116,6 +119,8 @@ def collect(
     order = [
         "unknown_hook",
         "unknown_host",
+        "disagreement",
+        "unmatched_name",
         "external_call",
         "config_unset",
         "library",
@@ -326,6 +331,49 @@ def _libraries(r: Resolvers, packs: list[Pack], items: dict[Any, Item], item: An
         it = item("library", "library", lib, lib)
         for f in sorted(where):
             it.add({"file": f, "detail": f"imports {lib}"})
+
+
+def _agreement(
+    disagreements: list[dict[str, Any]], unmatched: list[dict[str, Any]], item: Any
+) -> None:
+    """Where the code and another witness disagree (claims-and-reconcile.md §8), and names a
+    witness uses that match no application. Each is a "look here": a missing rule, a stale
+    declaration, a use nothing grants, or an application not ingested."""
+    for d in disagreements:
+        role = "produces to" if d["role"] == "produces" else "consumes from"
+        why = (
+            "code only: no other witness grants or states it"
+            if d["agreement"] == "code_only"
+            else "declared only: no code doing it was found"
+        )
+        it = item(
+            "inconsistency",
+            "disagreement",
+            f"{d['agreement']}|{d['app']}|{d['role']}|{d['channel']}",
+            f"{d['app_name']} {role} {d['channel'].split(':', 1)[-1]} · {why}",
+        )
+        for s in d["sources"]:
+            it.add(
+                {
+                    "file": s.get("file"),
+                    "line": s.get("line"),
+                    "detail": f"{s['witness_type']}: {s['witness']}",
+                }
+            )
+    for u in unmatched:
+        it = item(
+            "unmet_join",
+            "unmatched_name",
+            u["name"],
+            f"Name no application matches · {u['name']}",
+        )
+        it.add(
+            {
+                "file": u.get("file"),
+                "line": u.get("line"),
+                "detail": f"{u.get('witness_type')}: {u.get('witness')}",
+            }
+        )
 
 
 def _versions(packs: list[Pack], deps: list[Dependency], item: Any) -> None:

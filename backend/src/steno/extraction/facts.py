@@ -120,6 +120,19 @@ class ClueFact:
 
 
 @dataclass
+class ClaimFact:
+    """One witness's statement for a facet (claims-and-reconcile.md §3): stored in the claim
+    store, or, for CODE `name` claims, read by identify. `witness` is the pack that read it."""
+
+    claim_type: str
+    fields: dict[str, Any]
+    origin: Origin
+    witness_type: str
+    witness: str
+    generated: bool = False
+
+
+@dataclass
 class EntryPointFact:
     trigger: NodeFact | NodeRef
     function: str
@@ -163,6 +176,7 @@ class Extraction:
     clues: list[ClueFact] = field(default_factory=list)
     entry_points: list[EntryPointFact] = field(default_factory=list)
     interceptors: list[InterceptorFact] = field(default_factory=list)
+    claims: list[ClaimFact] = field(default_factory=list)
     access_rules: list[AccessRule] = field(default_factory=list)
     # Facts a rule matched but couldn't complete: (origin, reason)
     dropped: list[tuple[Origin, str]] = field(default_factory=list)

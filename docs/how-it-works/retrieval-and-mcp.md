@@ -208,7 +208,7 @@ Built: `search`, `get_node`. Not built: `glossary`.
 | Tool | Purpose | Returns | Serves use cases |
 |---|---|---|---|
 | `search(query, scope?, limit?, max_tokens?)` | **Built:** full-text over the names of searchable nodes (flows, applications, spaces, organization, interfaces, entities, tables, data stores, external systems; D104), plus function names in flow traces (a hit returns the flow). A query is split the way names are (`budgeting-app` → `budgeting`, `app`), and exact words rank first. Steps, schedules, and code nodes aren't searched; open them with `get_node`. **End state:** the routed entry point. Jev classifies the question, then Steno searches one scope or fans out across spaces in parallel. Passing `scope` skips routing. | Ranked cards, anchors, the routing decision and its confidence | All |
-| `get_node(id \| name, include_children?)` | Progressive disclosure: a node's card plus **a view that depends on its layer** (below) | Card + layer view + next-step hints | Onboarding, planning |
+| `get_node(id \| name, claims?)` | Progressive disclosure: a node's card plus **a view that depends on its layer** (below). `claims=true` adds the raw statements other witnesses make about it (deploy and ACL files, manifests), each cited | Card + layer view + next-step hints | Onboarding, planning |
 | `glossary(term, space?)` | Look up a term, nickname, or standard | Definition + where it's used | Onboarding |
 
 **What `get_node` returns depends on the node's layer.** A space's overview is simply `get_node` on a Space, so there's no separate overview tool.
@@ -217,9 +217,9 @@ Built: `search`, `get_node`. Not built: `glossary`.
 |---|---|
 | Organization | Its spaces, with purposes, and the **space-to-space communication map** by transport |
 | **Space** | **The "Bloomberg" view:** its applications, data stores, and topics; **ins and outs** (which spaces call in and which it calls out to, grouped by transport); communication within the space; a pointer to its glossary |
-| Application | Endpoints, outbound calls, topics produced and consumed, data store access, modules (Service/Library), flows by trigger |
+| Application | Endpoints, outbound calls, topics produced and consumed, data store access, modules (Service/Library), flows by trigger; its **names** (display name, aliases, whether the name is provisional); **messaging** with each topic's **agreement** (`confirmed`, `code_only`, `declared_only`) and a citation per witness. A stub application (a name only another witness uses) says it isn't ingested |
 | Flow | Its trigger, summary, significant steps, and the flows it leads to |
-| Interface, DataStore, Table, … | Its card, owner, and edges grouped by type |
+| Interface, DataStore, Table, … | Its card, owner, and edges grouped by type; a topic lists every application's use with its agreement, or says it wasn't checked (no other witness mentions it) |
 
 These views are rollups computed from application-level facts. The future UI renders the same views, so they're built once and serve both agents and people.
 
@@ -242,7 +242,7 @@ Built: `find_dependents` (`via`: `http`, `messaging`, `data`; `depth`; upstream 
 
 | Tool | Purpose | Returns |
 |---|---|---|
-| `find_dependents(id, direction: upstream\|downstream, depth?, via?)` | "Who consumes X?" and blast radius. `via` filters by transport. | Dependents grouped by app and space; each lists every way it touches the target (`how`: a flow that reads and writes a table is a reader and a writer), with a citation per call site |
+| `find_dependents(id, direction: upstream\|downstream, depth?, via?)` | "Who consumes X?" and blast radius. `via` filters by transport. | Dependents grouped by app and space; each lists every way it touches the target (`how`: a flow that reads and writes a table is a reader and a writer), with a citation per call site. For a topic, `agreement` for every application; a declared-only use (granted, no code found) makes the answer incomplete |
 | `find_paths(from, to, max_hops?)` | How two things are connected: every chain of flows and interfaces from one node to another | Ordered paths, each hop labeled sync or async |
 | `analyze_change(prs[] \| branch \| diff)` | **PR review and CI.** What a change affects, **including related PRs** (see below) | Affected flows, contract changes, consumers, which of them are covered by related PRs, and the order to deploy |
 | `get_interface(id)` | **Integration guide.** The contract, request/response entities, how to trigger it, and existing callers as examples | Contract + entities + example callers |

@@ -9,7 +9,7 @@ How every application gets one permanent identity and the name the organization 
 > - Each nightly run matches deployables by **canonical name or location**. Unmatched → new ID. Not seen → removed (and restored if it comes back). Admins can declare renames.
 > - Everything under an application (endpoints, flows) is built on its Steno ID, so other systems can depend on it.
 >
-> Status: **Decided** (2026-10-10). Scope: `POC` stage A. Not built yet: today application IDs come from folder names (see §8).
+> Status: **Decided** (2026-10-10), **built** (2026-10-14). Scope: `POC` stage A. Not built yet: naming patterns, admin links through an API or UI, and anchoring on the git host's repository ID ([identify](../how-it-works/ingestion/identify-and-reconcile.md#2-identify)).
 
 ---
 
@@ -134,10 +134,10 @@ An admin can tell Steno two deployables are the same, recorded as an ADMIN decis
 
 Applications need the registry because their names aren't intrinsic.
 
-## 8. Where it lives, and what changes
+## 8. Where it lives
 
-- **An identity registry in Postgres:** Steno ID, anchors (canonical name, location: git host repository ID + module path), name history with sources, lifecycle state, admin links. It has to be in Postgres because Steno IDs can't be recreated from git, and Neo4j must stay rebuildable from Postgres and git (D36).
-- **Child IDs use the Steno ID.** Today the application ID is `app:{name}`, the name is the repository plus module folder (`graph/structure.py`), and that name is built into every endpoint, flow, entity, and schedule ID (`graph/build.py`). That's the change stage A makes.
-- **Proven in the stub organization** (stage B): rename, move, rename-and-move, split, removal, and two repositories claiming one name are scripted, re-ingested after each change, and checked for no duplicates and no dead flows.
+- **An identity registry in Postgres:** Steno ID, anchors (canonical name, location: repository + module path), every name with its source and slot, past names, lifecycle state, conflicts, admin links, and names no application matched. It has to be in Postgres because Steno IDs can't be recreated from git, and Neo4j must stay rebuildable from Postgres and git (D36).
+- **Child IDs use the Steno ID.** The application node is `app:{steno_id}`, and every endpoint, flow, entity, and schedule ID is built on it, so renames and moves don't change them. The first run with identify rewrote the old name-based IDs once.
+- **Proven** in memory for rename, move, rename-and-move, split, removal, restoration, a declared rename, and two repositories claiming one name; the stage B stub organization adds them as scripted git changes.
 
 Implementation detail: [identify and reconcile](../how-it-works/ingestion/identify-and-reconcile.md).

@@ -1,0 +1,17 @@
+id: spring-application-name
+description: The name a Spring Boot application calls itself, e.g. spring.application.name=users-service - a name for identity (the runtime self-name on the name ladder)
+kind: config
+files:
+  - "**/application.yml"
+  - "**/application.yaml"
+  - "**/application.properties"
+  - "**/bootstrap.yml"
+  - "**/bootstrap.yaml"
+  - "**/bootstrap.properties"
+match:
+  key: "spring.application.name"
+emit:
+  - claim: name
+    application: $VALUE
+    name: $VALUE
+    slot: runtime

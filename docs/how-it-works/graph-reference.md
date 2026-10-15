@@ -6,7 +6,7 @@ How Steno represents an organization's architecture in Neo4j: every label, prope
 > - Every node has three independent aspects: **labels** (what it is), **one `BELONGS_TO`** (where it lives), and **interaction edges** (what it does).
 > - Node types (§3), relationship types (§4), and the properties every fact carries are defined here; nothing else may be emitted.
 > - Flows store a **trace** (every function, in order) instead of Function nodes; significant functions become `Step` nodes.
-> - Planned changes from the 2026-10 review: applications get a **Steno ID** and **kind labels** ([Identity](../concepts/identity.md)); facts get **sources and agreement** ([Trust](../concepts/trust.md)).
+> - Applications are keyed by a permanent **Steno ID** ([Identity](../concepts/identity.md)); where another witness checked a topic, an application's use of it carries **agreement and sources** ([claims and reconcile](./ingestion/claims-and-reconcile.md)). Planned: **kind labels** on applications.
 
 ---
 
@@ -107,7 +107,7 @@ Other points:
 | `Organization` | none (root) | `name`, `purpose` | |
 | `Space` | Organization or parent Space | `name`, `purpose` | Any way an org divides itself. Can nest to any depth. |
 | `Repository` | Space | `url`, `default_branch`, `last_ingested_sha` | What a connector points at. Can contain many applications. |
-| `Application` (+ kind labels `:Service`, `:Consumer`, `:Job`; `:Frontend` in `v2`) | Space | `name`, `purpose`; planned: `steno_id`, `canonical_name`, `display_name`, `aliases`, `state` | An **independently deployable unit**. `(:Application)-[:BUILT_FROM]->(:Module)`. Kind labels come from the triggers of its flows and aren't exclusive (D85). Identity: [Identity](../concepts/identity.md) (D81–D84). |
+| `Application` (+ kind labels `:Service`, `:Consumer`, `:Job`; `:Frontend` in `v2`) | Space | `name` (the canonical name), `steno_id`, `display_name`, `aliases`, `alias_text` (for search), `provisional_name` (only the folder names it), `conflict_with`, `purpose`; a stub (`app:declared:{name}`, `stub`, `declared_only`, `note`) for a name a witness uses that matches no application | An **independently deployable unit**. `(:Application)-[:BUILT_FROM]->(:Module)`. Kind labels come from the triggers of its flows and aren't exclusive (D85). Identity: [Identity](../concepts/identity.md) (D81–D84). |
 | `Module` (+ role label) | Repository | `path`, `build_tool` | The ecosystem's build unit: a Maven/Gradle module, a Python package with its own `pyproject.toml`, an npm workspace, a Go module. **Not a namespace package**: packages are paths. See [Module roles](#module-roles). |
 | `File` | Module | `path`, `language`, `content_hash` | |
 | `Interface` + `HttpEndpoint` | exposing Application | `method`, `path` | |
@@ -175,24 +175,24 @@ A flow's **trace** (L3) is the ordered list of every first-party function it run
 | `source_file`, `source_line` | Where it was found: citations |
 | `confidence` | 0–1. Rules and pipeline steps produce 1.0; inferred flows (D74) are 0.5; decisions (stand-ins now, Jev in `v2`) carry their own. Levels by how a fact was found are Open. |
 | `first_seen`, `last_seen` | When it first and last appeared |
-| *(planned)* `sources` | The witnesses behind the fact: `[{witness_type: CODE, rule, file, line}, {witness_type: PLATFORM, witness: acme-xld, file, line}]` (D76, D87) |
-| *(planned)* `agreement` | `confirmed` / `code_only` / `declared_only`, for facts in evidence facets (D80) |
+| `sources` | On reconciled edges: the witnesses behind the fact, one entry each: `[{witness_type: CODE, witness: kafka-listener, file, line, repo, commit}, {witness_type: PLATFORM, witness: steno-pack-strimzi, file, line, repo, commit}]` (JSON; D76, D87) |
+| `agreement` | On reconciled edges: `confirmed` / `code_only` / `declared_only` (D80) |
 
-**ID examples (today):**
+**ID examples:**
 
 | Node | ID |
 |---|---|
 | Organization, Space | `org:1`, `space:3` (Postgres row IDs) |
-| Application | `app:{name}`, the name being the repository plus the module folder; moving to a Steno ID (D81) |
-| HttpEndpoint | `endpoint:{app}:{METHOD}:{path}` |
+| Application | `app:{steno_id}`, a permanent opaque ID from the identity registry (D81); without a registry (`steno extract`), the path-derived name |
+| HttpEndpoint | `endpoint:{steno_id}:{METHOD}:{path}` |
 | Topic, queue, org channel | `{label}:{name}`, e.g. `kafkatopic:user.created` (keyed by name alone, so sender and receiver meet; D61) |
-| Flow | `flow:{app}:{trigger}` |
+| Flow | `flow:{steno_id}:{trigger}` |
 | Step | `step:{flow}:{symbol}[@bound_to][#n]` |
-| Entity | `entity:{app}:{symbol}` |
+| Entity | `entity:{steno_id}:{symbol}` |
 | Table | `table:{datastore}:{schema}:{name}` |
 | Module, File | `module:{repo}:{path}`, `file:{repo}:{path}` |
 
-**Application IDs are moving to Steno IDs** (D81). Today the application's name (repository plus module folder) is built into every child ID. After POC stage A, child IDs are built on the application's permanent Steno ID instead, so renames and moves don't change them.
+**Child IDs are built on the application's permanent Steno ID** (D81), so renames and moves don't change them. Shared nodes (topics, tables, data stores) keep the repository that wrote them first: another repository naming the same node doesn't take it over.
 
 Which Project introduced or changed a fact isn't a property. It's recorded later as `Project -CHANGED-> element` edges from Contextualized (see [Business context](#business-context-from-contextualized-later)).
 
@@ -281,8 +281,9 @@ Every relationship is either **extracted** (read directly from code or config by
 | `USES_ENTITY` | Interface / Flow → Entity | `role: request\|response\|message` | Payload contracts | Extracted |
 | `MAPS_TO` | Entity → Table | | **ORM mapping**: the `User` class maps to the `users` table (`@Table(name="users")`) | Extracted |
 | `HOSTED_ON` | KafkaTopic → KafkaCluster | | Infrastructure placement | Extracted (config) |
+| `PRODUCES` / `CONSUMES` (on an Application) | Application → KafkaTopic / Queue | `agreement`, `sources`, `witness_types`, `reconciled` | **Reconciled**: an application's use of a channel another witness checked, compared with the code: confirmed, code only, or declared only (no flow behind it). Written and owned by reconcile (`repo: reconcile`) | Reconcile ([claims and reconcile](./ingestion/claims-and-reconcile.md#7-reconcile)) |
 
-**Built today:** `BELONGS_TO`, `BUILT_FROM`, `EXPOSES`, `CALLS`, `PRODUCES`, `CONSUMES`, `READS_FROM`, `WRITES_TO`, `STARTS`, `FIRST_STEP`, `NEXT`, `SUBSTEP`, `MAPS_TO`, and the rollups onto flows. **Not built:** `DEPENDS_ON` (Artifacts A1, POC stage B), `USES_ENTITY`, `HOSTED_ON`. **`LEADS_TO` isn't stored:** it's computed when read (a flow's rollup `CALLS` / `PRODUCES` to an interface that `STARTS` another flow), by `get_flow` and `find_dependents`; materializing it is an option if traversal gets slow.
+**Built today:** `BELONGS_TO`, `BUILT_FROM`, `EXPOSES`, `CALLS`, `PRODUCES`, `CONSUMES`, `READS_FROM`, `WRITES_TO`, `STARTS`, `FIRST_STEP`, `NEXT`, `SUBSTEP`, `MAPS_TO`, the rollups onto flows, and reconciled application-level `PRODUCES` / `CONSUMES`. **Not built:** `DEPENDS_ON` (Artifacts A1, POC stage B), `USES_ENTITY`, `HOSTED_ON`. **`LEADS_TO` isn't stored:** it's computed when read (a flow's rollup `CALLS` / `PRODUCES` to an interface that `STARTS` another flow), by `get_flow` and `find_dependents`; materializing it is an option if traversal gets slow.
 
 Extracted effects are found on a function during the run and attached to the **Step** for that function (every function with an effect is a significant step, so every effect has one). They're also listed on its trace entry.
 
@@ -310,6 +311,8 @@ Walk both ends of a call up the tree to their lowest common ancestor:
 ### Stubs
 
 When a call's target isn't ingested yet, it points at a **stub** node keyed by its natural key (URL + method, topic name, table name), with `stub: true`. When the owning application is ingested, the real node **merges** into the stub by stable ID. The same pattern is used for `Table` nodes until their data store is identified.
+
+**Stubs from other witnesses.** A name a witness uses (an ACL's user, a manifest's component) that matches no application becomes a stub application, `app:declared:{name}`, so a declared-only edge always points somewhere visible; reconcile removes it once the name resolves. A channel a witness declares that no code mentions is a stub channel until a repository whose code names it takes it over ([claims and reconcile §6–7](./ingestion/claims-and-reconcile.md#6-subjects-and-names)).
 
 **An HTTP call whose target can't be named is never merged with others (D64).** The symbol resolver keeps every constant part of a URL, with runtime parts as placeholders (`https://{domain}/rest/api/content/{page_id}`), following values through parameters and attributes. The target is the host when it's constant (named by an [HTTP signature](./ingestion/rules-and-packs.md#http-signatures-decided-d64) when it's a known service's own host). When the host is runtime data, the call goes to a stub **per calling class**, named after the class and its file (`Unknown host · ConfluenceDataProvider (confluence.py)`, keyed `external:unresolved:{class}`); each call keeps its URL template (`{domain}/rest/api/content/{page_id}`), and it's listed as an unmet join for the coverage report. Steno doesn't guess the service from the path. Instead it says what it knows (D100): a runtime part read from config keeps its key (`${plaid.api.baseUrl}/link/token/create`), and the stub records the `config_keys`, the `paths` called, and a `host_note`. `get_flow` lists endpoints in other applications whose method and path match as `possible_targets`, a hint for the agent, never an edge. An admin naming the service is a later step (Open).
 

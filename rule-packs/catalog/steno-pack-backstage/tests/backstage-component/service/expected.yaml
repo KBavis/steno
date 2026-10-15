@@ -1,0 +1,4 @@
+# The API entity isn't a deployable
+claims:
+  - deployable: { application: users-service, kind: service, display_name: User Management, witness_type: DECLARED }
+  - name: { application: users-service, name: users-service, slot: manifest, line: 4 }

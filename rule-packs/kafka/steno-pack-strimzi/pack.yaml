@@ -1,0 +1,11 @@
+name: steno-pack-strimzi
+version: 0.1.0
+language: any
+source: core
+description: Strimzi (Kafka on Kubernetes) - KafkaTopic resources declare topics; KafkaUser ACLs say which applications may produce to and consume from them
+# Infrastructure applies these files: what the platform has set up, not what the code does
+witness_type: PLATFORM
+facets: [Messaging]
+enabled_when:
+  files: ["**/*.yaml", "**/*.yml"]
+  content: "kafka\\.strimzi\\.io/"

@@ -5,7 +5,7 @@ An organization-wide context engine for AI agents. It ingests repositories into 
 ## Start here
 
 - **`docs/` is the source of truth. Start at `docs/README.md`.** It has four sections, each with a hub page (`README.md`) that summarizes it and links deeper: `docs/purpose/` (what Steno is for, lead use cases, where it fits, integration contract), `docs/concepts/` (the graph, witnesses and facets, identity, trust), `docs/how-it-works/` (architecture, ingestion stage by stage, rules, resolvers, graph schema, MCP, storage, security), `docs/plan/` (roadmap, onboarding, decisions).
-- Every design point is marked **Decided**, **Proposed**, or **Open**, and scoped `POC`, `v1`, or `v2`. The decision log is `docs/plan/decisions.md` (D1–D113 and open questions). Follow Decided items; raise Proposed or Open items with the user before relying on them. Design choices belong to the user.
+- Every design point is marked **Decided**, **Proposed**, or **Open**, and scoped `POC`, `v1`, or `v2`. The decision log is `docs/plan/decisions.md` (D1–D114 and open questions). Follow Decided items; raise Proposed or Open items with the user before relying on them. Design choices belong to the user.
 - Reference pages: the node and edge vocabulary is `docs/how-it-works/graph-reference.md` (§3–4); the rule format is `docs/how-it-works/ingestion/rules-and-packs.md`; the Postgres tables are `docs/how-it-works/storage.md`.
 - `docs/next-steps.md` is a local, gitignored working list; never link it from tracked files. `docs/my_docs/` is the user's personal notes (gitignored).
 - Docs are Markdown only, layered: a short "In one minute" summary and a diagram at the top of each page, detail in linked sub-pages.
@@ -16,10 +16,10 @@ An organization-wide context engine for AI agents. It ingests repositories into 
 
 ## Repository layout
 
-- `backend/src/steno/`: `api/` (Admin API), `mcp/` (MCP tools), `ingestion/` (job queue, stage pipeline, worker, `local.py`: parse → extract → assemble on a folder, for the CLI and tests; jobs use the pipeline), `db/` (SQLAlchemy models + Alembic migrations for the Postgres tables in `docs/how-it-works/storage.md`), `graph/` (Neo4j schema, stable IDs, projections; structure, builder, writer), `coverage/` (the coverage report), `decisions/` (the `Decision` interface; stand-in backends), `connectors/`, `llm/`. Ingestion code by stage: `source/` (listing files, reading config; shared), `rule_packs/` (loading, selecting, testing packs), `extraction/` (the rule engine: parse + extract), `resolvers/` (symbol resolvers, one per language), `assemblers/` (one per clue type)
+- `backend/src/steno/`: `api/` (Admin API), `mcp/` (MCP tools), `ingestion/` (job queue, stage pipeline, worker, `local.py`: parse → extract → assemble on a folder, for the CLI and tests; jobs use the pipeline), `db/` (SQLAlchemy models + Alembic migrations for the Postgres tables in `docs/how-it-works/storage.md`), `graph/` (Neo4j schema, stable IDs, projections; structure, builder, writer), `coverage/` (the coverage report), `decisions/` (the `Decision` interface; stand-in backends), `connectors/`, `llm/`. Ingestion code by stage: `source/` (listing files, reading config and structured records; shared), `rule_packs/` (loading, selecting, testing packs; library versions), `extraction/` (the rule engine: parse + extract), `resolvers/` (symbol resolvers, one per language), `assemblers/` (one per clue type), `identity/` (the identify stage and the identity registry), `claims/` (claim types and the claim store), `reconcile/` (comparing the code with other witnesses)
 - `frontend/`: Vite + React + TS; `/api` is proxied to the backend on :8000
 - `resolver-jvm/`: JavaParser helper (Gradle wrapper)
-- `rule-packs/`: packs grouped by ecosystem (`java/`, `python/`, `http/`, `org/`); each has `pack.yaml`, `rules/`, `tests/`. Write rules with the `rule-pack-author` skill (`.claude/skills/rule-pack-author/`); the format is `docs/how-it-works/ingestion/rules-and-packs.md`
+- `rule-packs/`: packs grouped by ecosystem (`java/`, `python/`, `http/`, `kafka/`, `catalog/`, `org/`); each has `pack.yaml` (with its `witness_type`), `rules/`, `tests/`. `steno rules list` shows them. Write rules with the `rule-pack-author` skill (`.claude/skills/rule-pack-author/`); the format is `docs/how-it-works/ingestion/rules-and-packs.md`
 
 ## Commands
 

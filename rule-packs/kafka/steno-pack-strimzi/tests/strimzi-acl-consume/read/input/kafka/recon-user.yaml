@@ -1,0 +1,28 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  name: recon-svc
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: payment.settled
+          patternType: literal
+        operations: [Read, Describe]
+      - resource:
+          type: topic
+          name: recon.results
+        operations: [Write]
+      - resource:
+          type: topic
+          name: audit.
+          patternType: prefix
+        operations: [All]
+      - resource:
+          type: group
+          name: recon
+        operations: [Read]
