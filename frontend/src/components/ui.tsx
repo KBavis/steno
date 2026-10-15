@@ -1,4 +1,4 @@
-import { X, type LucideIcon } from 'lucide-react'
+import { Check, X, type LucideIcon } from 'lucide-react'
 import { useEffect, type ReactNode } from 'react'
 
 /** Steno's mark: stacked strata, after Nicolas Steno's law of superposition. */
@@ -59,6 +59,21 @@ export function EmptyState({
 export function ErrorAlert({ message }: { message?: string }) {
   if (!message) return null
   return <div className="alert">{message}</div>
+}
+
+/** A confirmation ("Deleted my-service") that goes away after a few seconds */
+export function Notice({ message, onDone }: { message?: string; onDone: () => void }) {
+  useEffect(() => {
+    if (!message) return
+    const timer = setTimeout(onDone, 4000)
+    return () => clearTimeout(timer)
+  }, [message, onDone])
+  if (!message) return null
+  return (
+    <div className="alert alert-ok" role="status">
+      <Check size={15} /> {message}
+    </div>
+  )
 }
 
 /** A panel that slides in from the right, for create and edit forms. Escape closes it. */

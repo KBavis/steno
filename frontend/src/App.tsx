@@ -2,6 +2,7 @@ import { Building2, FolderGit2, Layers, Network, Plug, ScanSearch, type LucideIc
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { api, type Organization } from './api/client'
 import { HealthStatus } from './components/HealthStatus'
+import { ThemeToggle } from './components/ThemeToggle'
 import { ErrorAlert, Logo } from './components/ui'
 import { ConnectorsPage } from './pages/ConnectorsPage'
 import { CoveragePage } from './pages/CoveragePage'
@@ -95,6 +96,7 @@ export default function App() {
           ))}
         </nav>
         <div className="sidebar-footer">
+          <ThemeToggle />
           <HealthStatus />
         </div>
       </aside>

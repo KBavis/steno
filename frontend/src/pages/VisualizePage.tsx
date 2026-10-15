@@ -24,8 +24,10 @@ import '../components/graph/graph.css'
 import { DEFAULT_OPTIONS, filterView, layoutView, type EntityData, type ViewOptions } from '../components/graph/layout'
 import { edgeTypes, nodeTypes } from '../components/graph/nodeTypes'
 import { play, snapshot, type Move, type Rect } from '../components/graph/transition'
+import { ThemeToggle } from '../components/ThemeToggle'
 import { EmptyState, ErrorAlert, Logo } from '../components/ui'
 import { EDGE_TYPES, kindStyle } from '../lib/graphStyle'
+import { useTheme } from '../lib/theme'
 
 // ------------------------------------------------------------------ routes
 
@@ -163,6 +165,7 @@ const DEFAULT_EXPANSION: Expansion = {}
 
 function Visualizer({ onExit }: { onExit: () => void }) {
   const [route, setRoute] = useState<Route>(parseRoute)
+  const { theme } = useTheme()
   const [view, setView] = useState<GraphView>()
   const [nodes, setNodes] = useState<Node[]>([])
   const [baseEdges, setBaseEdges] = useState<Edge[]>([])
@@ -459,7 +462,7 @@ function Visualizer({ onExit }: { onExit: () => void }) {
               edgeTypes={edgeTypes}
               onNodesChange={onNodesChange}
               onNodeDragStop={onDragStop}
-              colorMode="system"
+              colorMode={theme}
               minZoom={0.02}
               maxZoom={4}
               nodesConnectable={false}
@@ -648,6 +651,7 @@ function TopBar({
           </div>
         )}
         <GraphSearch onPick={onPick} />
+        <ThemeToggle />
         <ViewMenu route={route} options={options} onChange={onOptions} onReset={onResetArrangement} />
       </div>
     </header>

@@ -1,5 +1,5 @@
 import { FolderGit2, GitBranch, Play, Plus } from 'lucide-react'
-import { useState, type FormEvent } from 'react'
+import { useCallback, useState, type FormEvent } from 'react'
 import { api, type Connector, type Repository, type RepositoryInput } from '../api/client'
 import { useAction } from '../hooks/useAction'
 import { usePoll } from '../hooks/usePoll'
@@ -7,7 +7,7 @@ import { scopeValue } from '../lib/connectors'
 import { spaceTree } from '../lib/spaces'
 import { DrawerActions, Field, RowActions } from './Form'
 import { KindChip } from './KindChip'
-import { Drawer, EmptyState, ErrorAlert, PageTop } from './ui'
+import { Drawer, EmptyState, ErrorAlert, Notice, PageTop } from './ui'
 
 const EMPTY: RepositoryInput = {
   connector_id: 0,
@@ -50,6 +50,8 @@ export function RepositoriesSection({
   const [form, setForm] = useState<RepositoryInput>(EMPTY)
   const [urlTouched, setUrlTouched] = useState(false)
   const [queued, setQueued] = useState<number>()
+  const [notice, setNotice] = useState<string>()
+  const clearNotice = useCallback(() => setNotice(undefined), [])
   const action = useAction()
 
   const connectorList = connectors.data ?? []
@@ -82,6 +84,7 @@ export function RepositoriesSection({
     e.preventDefault()
     const ok = await action.run(() => (editing ? api.repositories.update(editing.id, form) : api.repositories.create(form)))
     if (ok) {
+      setNotice(editing ? `Saved ${form.name}` : `Added ${form.name}`)
       setEditing(undefined)
       repos.reload()
     }
@@ -90,6 +93,7 @@ export function RepositoriesSection({
   async function remove(repo: Repository) {
     if (!confirm(`Delete "${repo.name}" and its jobs?`)) return
     if (await action.run(() => api.repositories.remove(repo.id))) {
+      setNotice(`Deleted ${repo.name}`)
       repos.reload()
       onJobQueued?.()
     }
@@ -117,6 +121,7 @@ export function RepositoriesSection({
         action={repos.data?.length ? addButton : null}
       />
       <ErrorAlert message={repos.error ?? (editing === undefined ? action.error : undefined)} />
+      <Notice message={notice} onDone={clearNotice} />
 
       <div className="card">
         {repos.data?.length === 0 ? (

@@ -7,7 +7,9 @@ from steno.db.session import get_session
 from steno.graph.driver import database, get_driver
 from steno.graph.projection import sync_declared
 
-SessionDep = Annotated[Session, Depends(get_session)]
+# Commit before the response is sent, so a client that reloads right after a write sees it,
+# and a failed commit becomes an error response instead of a silent 2xx
+SessionDep = Annotated[Session, Depends(get_session, scope="function")]
 
 
 def get_or_404[T](session: Session, model: type[T], id: int) -> T:

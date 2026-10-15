@@ -49,10 +49,17 @@ def _authed(
     return clone_url, token
 
 
-def _git(cmd: list[str], token: str | None, what: str) -> str:
-    proc = subprocess.run(
-        cmd, capture_output=True, text=True, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}
-    )
+def _git(cmd: list[str], token: str | None, what: str, timeout: float | None = None) -> str:
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise CloneError(f"{what} timed out after {timeout:.0f}s") from exc
     if proc.returncode != 0:
         message = proc.stderr.strip().splitlines()[-1] if proc.stderr.strip() else f"{what} failed"
         raise CloneError(message.replace(token, "***") if token else message)
@@ -60,11 +67,20 @@ def _git(cmd: list[str], token: str | None, what: str) -> str:
 
 
 def remote_head(
-    clone_url: str, branch: str, kind: ConnectorKind, credentials_ref: str | None
+    clone_url: str,
+    branch: str,
+    kind: ConnectorKind,
+    credentials_ref: str | None,
+    timeout: float | None = 30,
 ) -> str | None:
-    """The commit a remote branch points at, without cloning (`git ls-remote`)."""
+    """The commit a remote branch points at, without cloning (`git ls-remote`).
+
+    None when the repository exists but the branch doesn't; CloneError when the repository
+    can't be reached (missing, private without credentials, or the host is down).
+    """
     url, token = _authed(clone_url, kind, credentials_ref)
-    out = _git(["git", "ls-remote", url, f"refs/heads/{branch}"], token, "git ls-remote")
+    cmd = ["git", "ls-remote", url, f"refs/heads/{branch}"]
+    out = _git(cmd, token, "git ls-remote", timeout)
     return out.split()[0] if out.strip() else None
 
 

@@ -5,6 +5,17 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Steno</title>
+    <script>
+      // Set the theme before the first paint so dark mode doesn't flash light (src/lib/theme.ts)
+      ;(function () {
+        var choice
+        try {
+          choice = localStorage.getItem('steno.theme')
+        } catch (e) {}
+        var dark = choice === 'dark' || (choice !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

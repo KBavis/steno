@@ -33,37 +33,35 @@
   --canvas-dot: #d9d6d2;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --k-org: #d6d3d1;
-    --k-org-soft: #1f1f23;
-    --k-space: #a78bfa;
-    --k-space-soft: #1c1730;
-    --k-app: #818cf8;
-    --k-app-soft: #1b1c36;
-    --k-flow: #38bdf8;
-    --k-flow-soft: #0f1f2c;
-    --k-iface: #2dd4bf;
-    --k-iface-soft: #0e2421;
-    --k-data: #fb923c;
-    --k-data-soft: #2a1a0e;
-    --k-ext: #f472b6;
-    --k-ext-soft: #2a1220;
-    --k-code: #a8a29e;
-    --k-code-soft: #1a1a1e;
+:root[data-theme='dark'] {
+  --k-org: #d6d3d1;
+  --k-org-soft: #1f1f23;
+  --k-space: #a78bfa;
+  --k-space-soft: #1c1730;
+  --k-app: #818cf8;
+  --k-app-soft: #1b1c36;
+  --k-flow: #38bdf8;
+  --k-flow-soft: #0f1f2c;
+  --k-iface: #2dd4bf;
+  --k-iface-soft: #0e2421;
+  --k-data: #fb923c;
+  --k-data-soft: #2a1a0e;
+  --k-ext: #f472b6;
+  --k-ext-soft: #2a1220;
+  --k-code: #a8a29e;
+  --k-code-soft: #1a1a1e;
 
-    --e-reads_from: #22d3ee;
-    --e-writes_to: #fb923c;
-    --e-calls: #f472b6;
-    --e-invokes: #5f5f68;
-    --e-starts: #818cf8;
-    --e-entry: #818cf8;
-    --e-produces: #f472b6;
-    --e-consumes: #f472b6;
+  --e-reads_from: #22d3ee;
+  --e-writes_to: #fb923c;
+  --e-calls: #f472b6;
+  --e-invokes: #5f5f68;
+  --e-starts: #818cf8;
+  --e-entry: #818cf8;
+  --e-produces: #f472b6;
+  --e-consumes: #f472b6;
 
-    --canvas: #0c0c0e;
-    --canvas-dot: #26262b;
-  }
+  --canvas: #0c0c0e;
+  --canvas-dot: #26262b;
 }
 
 /* Space hues: each top-level space keeps one color at every level */
@@ -78,17 +76,15 @@
   --h7: #ea580c;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --h0: #818cf8;
-    --h1: #2dd4bf;
-    --h2: #fbbf24;
-    --h3: #fb7185;
-    --h4: #38bdf8;
-    --h5: #a78bfa;
-    --h6: #34d399;
-    --h7: #fb923c;
-  }
+:root[data-theme='dark'] {
+  --h0: #818cf8;
+  --h1: #2dd4bf;
+  --h2: #fbbf24;
+  --h3: #fb7185;
+  --h4: #38bdf8;
+  --h5: #a78bfa;
+  --h6: #34d399;
+  --h7: #fb923c;
 }
 
 .hue-none { --hue: var(--accent); }
@@ -1323,20 +1319,18 @@
   color: #b91c1c;
 }
 
-@media (prefers-color-scheme: dark) {
-  .m-get {
-    color: #67e8f9;
-  }
-  .m-post {
-    color: #86efac;
-  }
-  .m-put,
-  .m-patch {
-    color: #fcd34d;
-  }
-  .m-delete {
-    color: #fca5a5;
-  }
+:root[data-theme='dark'] .m-get {
+  color: #67e8f9;
+}
+:root[data-theme='dark'] .m-post {
+  color: #86efac;
+}
+:root[data-theme='dark'] .m-put,
+:root[data-theme='dark'] .m-patch {
+  color: #fcd34d;
+}
+:root[data-theme='dark'] .m-delete {
+  color: #fca5a5;
 }
 
 /* tones */
