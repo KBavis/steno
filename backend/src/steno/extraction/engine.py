@@ -319,6 +319,10 @@ class Engine:
             value = self._value(ctx, spec)
             if value is not _OMIT:
                 props[key] = value
+            elif key == "name":
+                # A node's name is its identity: without it, it's a gap, not a fact
+                # (`name: "@class"` without the symbol resolver)
+                raise _Drop(f"{labels[-1]} name {spec!r} unresolved")
         if labels[-1] == "HttpEndpoint" and isinstance(props.get("method"), str):
             props["method"] = props["method"].upper()
         if labels[-1] == "ExternalSystem" and "host" in props:

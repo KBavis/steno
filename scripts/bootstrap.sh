@@ -57,11 +57,15 @@ else
   ok "docker running"
 fi
 
-# Java 21: resolver-jvm (JavaParser helper, called by the worker)
-if command -v java >/dev/null 2>&1 && java -version 2>&1 | grep -q 'version "21'; then
-  ok "java 21"
+# Java 21 JDK: resolver-jvm (JavaParser helper, called by the worker). A JRE alone runs Java
+# but can't build the resolver, so check for the compiler too.
+HAVE_JDK=0
+if command -v javac >/dev/null 2>&1 && javac -version 2>&1 | grep -q ' 21'; then
+  HAVE_JDK=1
+  ok "java 21 (jdk)"
 else
-  warn "Java 21 not found. The worker's JVM resolver needs it. Install with: sudo apt install openjdk-21-jdk"
+  warn "Java 21 JDK not found. Without it, Java repositories ingest without symbol resolution."
+  warn "  Install with: sudo apt update && sudo apt install openjdk-21-jdk-headless, then rerun."
 fi
 
 step "Installing project dependencies"
@@ -74,6 +78,23 @@ if [ ! -d frontend/node_modules ] || [ frontend/package-lock.json -nt frontend/n
   ok "frontend/node_modules installed"
 else
   ok "frontend/node_modules up to date"
+fi
+
+# The worker runs the resolver from its install dir; build it when missing or its source changed
+RESOLVER_LIB=resolver-jvm/build/install/steno-resolver/lib
+if [ "$HAVE_JDK" = 1 ]; then
+  if [ ! -d "$RESOLVER_LIB" ] || [ -n "$(find resolver-jvm/src resolver-jvm/*.gradle* -newer "$RESOLVER_LIB" -print -quit 2>/dev/null)" ]; then
+    # A Gradle daemon started before the JDK was installed keeps reporting "no Java 21";
+    # on failure, stop it and try once more
+    (cd resolver-jvm && { ./gradlew --quiet installDist || { ./gradlew --stop -q && ./gradlew --quiet installDist; }; }) \
+      || fail "resolver-jvm build failed (see above). Fix it, or run: make resolver"
+    touch "$RESOLVER_LIB"
+    ok "resolver-jvm built"
+  else
+    ok "resolver-jvm up to date"
+  fi
+else
+  warn "resolver-jvm not built (needs the Java 21 JDK)"
 fi
 
 if [ ! -f backend/.env ]; then

@@ -43,4 +43,4 @@ lint:
 	cd frontend && npm run lint
 
 resolver:      ## Build the JVM symbol-resolution helper
-	cd resolver-jvm && ./gradlew installDist
+	cd resolver-jvm && (./gradlew installDist || (./gradlew --stop && ./gradlew installDist))

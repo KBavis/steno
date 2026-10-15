@@ -5,7 +5,8 @@ import { usePoll } from '../hooks/usePoll'
 import { duration, timeAgo } from '../lib/time'
 import { EmptyState, ErrorAlert } from './ui'
 
-const STAGES: StageName[] = ['clone', 'deps', 'parse', 'extract', 'assemble', 'flows', 'write', 'coverage', 'cards']
+// In run order, as in backend/src/steno/ingestion/pipeline.py STAGES
+const STAGES: StageName[] = ['clone', 'deps', 'parse', 'extract', 'assemble', 'identify', 'flows', 'write', 'reconcile', 'coverage', 'cards']
 
 const STATUS_BADGE: Record<JobStatus, string> = {
   queued: 'badge',
