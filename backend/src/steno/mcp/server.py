@@ -28,11 +28,25 @@ mcp = MCPServer(
     instructions=(
         "Steno answers questions about how an organization's software fits together: "
         "applications, the interfaces they expose and call, the flows that run when an "
-        "interface or schedule triggers them, the data stores they read and write, and the "
-        "code behind each step. Start with `search` (names) or `get_node` (the organization, "
-        "a space, or an application), follow a flow with `get_flow`, read its code with "
-        "`view_flow_code`, and ask who depends on something with `find_dependents`. Every "
-        "answer cites the file, lines, and commit each claim comes from."
+        "interface, topic, or schedule triggers them, the data stores and topics they use, and "
+        "the code behind each step.\n\n"
+        "Work top-down; an organization has thousands of flows, and no page shows them all:\n"
+        "1. `search` with the words the code uses. Read `where` first: every space and "
+        "application with matches, and how many. `results` shows only some; when several "
+        "applications match, `search` again with `scope=<application>` for each.\n"
+        "2. `get_node` on an application (its flows, data, calls, names, topic agreement), "
+        "a space, or `organization` (the spaces and how they communicate).\n"
+        "3. `get_flow` for a flow's steps; open a folded step with `under=<path>`; "
+        "`expand='sync'` follows calls into other applications.\n"
+        "4. `view_flow_code` only for the steps the question is about.\n"
+        "5. `find_dependents` for who uses something, or `direction='downstream'` for what "
+        "a change affects.\n\n"
+        "Before saying 'all', 'only', or 'none', check what the answer couldn't see: `where` "
+        "and `more` in search, `completeness` everywhere else (`complete: false` means there "
+        "may be more). `possible_callers` and `possible_targets` are unconfirmed hints. "
+        "Where another witness checked a fact, `agreement` is `confirmed`, `code_only` (no "
+        "grant or declaration), or `declared_only` (stated, no code found): report the last "
+        "two as findings. Every answer cites file, lines, and commit; pass the citations on."
     ),
 )
 
@@ -49,8 +63,10 @@ def ping() -> dict[str, Any]:
 def search(
     query: str, ctx: Context, scope: str | None = None, limit: int = 10, max_tokens: int = 2000
 ) -> dict[str, Any]:
-    """Find applications, flows, interfaces, tables, and entities by name, or flows by the
-    functions they run. `scope`: a space or application name to search within. Matches names
+    """Find applications, flows, interfaces, tables, data stores, and external systems by name,
+    or flows by the functions they run. Top-down: `where` lists every space and application
+    with matches and how many; `results` takes each application's best hits in turn and may not
+    show them all (`more`). `scope`: a space or application name to search within. Matches names
     and words, not meaning (yet): use the words the code uses (`job`, `create_project`)."""
     return _run(
         ctx, "search", locals(), max_tokens, lambda t: t.search(query, scope=scope, limit=limit)

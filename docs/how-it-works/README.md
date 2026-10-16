@@ -63,7 +63,7 @@ flowchart LR
 | ↳ [Identify and reconcile](./ingestion/identify-and-reconcile.md) | The identity registry and the identify step; claims, the claim store, and reconcile |
 | ↳ [Coverage report](./ingestion/coverage-report.md) | What no rule explained, triage, the agreement view, turning an item into a rule |
 | [Graph reference](./graph-reference.md) | Every node, property, and relationship; traces; flows; data stores; example queries |
-| [Retrieval and MCP](./retrieval-and-mcp.md) | The MCP tools, search, cards, citations, code access, latency, LLM use and cost |
+| [Retrieval and MCP](./retrieval-and-mcp.md) | The MCP tools and how they work together, search, cards, citations, code access, latency, LLM use and cost |
 | [Storage](./storage.md) | Postgres and Neo4j: what each holds, how they meet, every table, rebuilding |
 | [Security and privacy](./security.md) | Source code, secrets, data leaving the organization, access control |
 

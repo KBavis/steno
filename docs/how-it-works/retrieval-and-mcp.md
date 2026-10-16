@@ -5,7 +5,8 @@ How agents get context out of Steno quickly and accurately: the MCP tools, searc
 > **In one minute**
 > - **Round trips dominate latency**, so tools are shaped to answer typical questions in ≤ 3 calls: precomputed cards, server-side fan-out, batch tools, token budgets.
 > - **Built (POC):** `search` (full-text over names, plus flows whose traces contain a matching function), `get_node`, `get_flow` (outlines), `view_flow_code`, `find_dependents`. Every call is logged.
-> - **Every result carries citations** and lists the scopes searched. Impact answers will carry a **completeness block** (what Steno couldn't see).
+> - **Every result carries citations** and lists the scopes searched, and a **completeness block** says what Steno couldn't see.
+> - **How the tools work together** ([§5](#how-the-tools-work-together-built)): top-down, `search` → `where` → `scope` → `get_node` → `get_flow` → `view_flow_code`, reading `completeness` and `agreement` before claiming anything is complete. The server sends this to agents as its MCP instructions when they connect.
 > - **No file contents are stored:** code is read from the git host at the ingested commit; code search goes through the git host's search API.
 > - **Later:** LLM-written flow cards and vector search (after the cost dry run), and Jev as a navigator for routing and verification (`v2`). The routing design below describes that end state.
 
@@ -181,6 +182,68 @@ Code usually **isn't local** to the agent. Steno **stores no file contents**. Ev
 Transport: **MCP over Streamable HTTP**. Every tool accepts `max_tokens`. Every result carries **confidence**, **citations** (below), and hints for the next call.
 
 **Built (2026-10-07):** `search` (full-text over names, plus flows whose traces contain a matching function), `get_node`, `get_flow`, `view_flow_code` (reads from the git host at the ingested commit; GitHub, GitLab, Bitbucket), and `find_dependents` (`via`: `http`, `messaging`, `data`), in `backend/src/steno/mcp/`. A result over its `max_tokens` loses items from its longest lists and says so in `truncated`. Every call is logged in `tool_call`. Confidence levels aren't built yet (Open).
+
+### How the tools work together (built)
+
+Five tools, used **top-down**: find *where* first, narrow, then go deeper. An organization has thousands of flows and no page shows them all, so every answer says how much exists beyond what it shows, and the agent's job is to read that before saying "all", "only", or "none".
+
+```mermaid
+flowchart TD
+    Q["A question"] --> S["search(words)"]
+    S --> W{"read `where`:<br/>which spaces and applications match?"}
+    W -- "one place" --> N["get_node(application)"]
+    W -- "several" --> P["search(words, scope=each one)<br/>(in parallel)"]
+    P --> N
+    N --> F["get_flow(flow id)<br/>outline; open folds with `under`"]
+    F --> C["view_flow_code(flow, paths)<br/>only the steps that matter"]
+    N --> D["find_dependents(id)<br/>who uses it; blast radius"]
+    F & D --> R{"read `completeness`<br/>and `agreement`"}
+    R --> A["Answer, with citations<br/>and the gaps stated"]
+```
+
+| Step | Tool | Read | Then |
+|---|---|---|---|
+| 1. Where is it? | `search(words)` | `where`: spaces → applications → counts; `results`: each application's best hit in turn; `more` | One application: go to step 2. Several: `search(words, scope=…)` for each, in parallel. Nothing: other words (search matches names and function names, not meaning yet) |
+| 2. What is it? | `get_node(id or name)` | An application's flows, data, outbound calls, names, and `messaging` with `agreement`; a space's applications and how they communicate; `also_named` when the name is shared | The flow that answers the question |
+| 3. What happens? | `get_flow(flow id)` | Steps in order, with what each reads, writes, and calls; `interceptor` steps (filters, validators) first; `stops` (calls Steno couldn't follow); `host_unknown`, `possible_targets` | Open a folded step with `under=<path>`; follow calls into other applications with `expand="sync"` |
+| 4. Show me | `view_flow_code(flow id, paths)` | The code of the chosen steps, at the ingested commit | Only when the step list doesn't answer it |
+| 5. Who depends on it? | `find_dependents(id)` | Dependents by application and space, every way each touches the target, `agreement` for a topic, `possible_callers` | `direction="downstream"` for blast radius; `via` to filter by transport |
+
+`get_node("organization")` is the organization (its spaces and how they communicate); a name several nodes share is answered with the most specific one plus `also_named`.
+
+**Why top-down matters at organization scale.** A word matches dozens of flows; a page of ten can show one application's and hide the rest. In testing, an agent asked which applications ingest data saw ten matches from Steno, missed contextualized's five, and answered "only steno". So `search` leads with `where`, every space and application with matches and how many, and its `results` take turns by application. Reading code before knowing which flow matters wastes the budget for the same reason: the graph already says which flow, step, and lines.
+
+**Reading an answer:**
+
+| Field | Means | Do |
+|---|---|---|
+| `where` (search) | Every space and application with matches, with counts | Check it before saying "only" or "all" |
+| `more` (search, flows) | There's more than shown | Narrow with `scope`, or open with `under` |
+| `completeness` | What the answer can't vouch for: calls not followed, hosts set outside the repository, framework hooks no rule explains, unconfirmed callers, declared-only uses. `complete: false` means "maybe more" | Say so in the answer; don't present it as complete |
+| `agreement` | Where another witness (an ACL file, a manifest) checked a fact: `confirmed`, `code_only` (no grant or declaration), `declared_only` (stated, no code found) | Report `code_only` and `declared_only` as findings, not facts |
+| `possible_callers`, `possible_targets` | Calls whose host isn't in any repository, matched by method and path | Hints, never facts: say "possibly" |
+| `ingested: false`, `stub` | Known only from another witness | Don't describe its behavior; Steno hasn't read its code |
+| `provisional` (names) | Named only by its folder | Use the name, but say it may not be the deployed name |
+| `citations` | File, lines, commit, and a link for each claim | Pass them on with the answer |
+
+**Staying within budget:**
+
+- **`max_tokens`** on every tool caps the answer; a cut answer says what was left out.
+- **Flows are outlines.** `get_flow` shows about 25 steps; deeper ones are folded, each saying how many steps it holds and what they touch (`inside_does`). Open the one that matters with `under`; `levels` sets the depth; `detail="all"` adds helpers.
+- **Fan out in parallel** across scopes rather than one wide search with a large `limit`.
+- **Read code last**, and only the steps the question is about.
+
+**Mistakes seen so far:**
+
+| Mistake | Fix |
+|---|---|
+| Reading search's first page as everything ("only steno ingests") | Read `where` first; it lists every application with matches |
+| `get_node("organization")` landing on a table named `organization` | Fixed: `organization` is the organization node; shared names come with `also_named` |
+| Calling a flow complete when it has `stops` | Read `completeness`; say what Steno couldn't follow |
+| Treating `possible_callers` as callers | They're unconfirmed; the host comes from config outside the repository |
+| Searching business words ("charge the customer") | Use the words the code uses (`payment`, `charge`, `billing`); semantic search comes later |
+
+**How agents learn this.** The MCP server's `instructions` (in `backend/src/steno/mcp/server.py`) are a condensed form of this section; MCP clients receive them when they connect, and Claude Code puts them in the agent's system prompt. Each tool's description says what it returns. Keep the three in step: a change to what a tool returns goes in its description, and in the instructions when it changes the pattern.
 
 ### Citations (Decided; built)
 
