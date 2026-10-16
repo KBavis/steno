@@ -24,7 +24,7 @@ from steno.connectors.source import SourceError, read_file, slice_lines
 from steno.db.models import Connector, Repository
 from steno.extraction.facts import split_url
 from steno.graph.build import step_of
-from steno.graph.views import GraphViews, kind_of
+from steno.graph.views import GraphViews, kind_of, search_words
 
 EFFECTS = ["READS_FROM", "WRITES_TO", "CALLS", "PRODUCES", "CONSUMES"]
 VERB = {
@@ -103,7 +103,12 @@ class Tools:
         }
 
     def _resolve(self, ref: str) -> Any:
-        """A node by stable ID, or by name (the most specific match)."""
+        """A node by stable ID, or by name (the most specific match). `organization` is the
+        organization, whatever it's called (a table named `organization` is not)."""
+        if ref.strip().lower() in ("organization", "org"):
+            rows = self._read("MATCH (n:Organization) RETURN n LIMIT 1")
+            if rows:
+                return rows[0]["n"]
         rows = self._read("MATCH (n {id: $ref}) RETURN n LIMIT 1", ref=ref)
         if not rows:
             rows = self._read(
@@ -128,37 +133,56 @@ class Tools:
     # ------------------------------------------------------------------- search
 
     def search(self, query: str, scope: str | None = None, limit: int = 10) -> dict[str, Any]:
-        hits = self.views.search(query, limit=max(limit * 3, 20))
-        out = []
-        more = next((h["label"] for h in hits if h.get("kind") == "more"), None)
-        for h in hits:
-            if not h.get("id"):
+        """Top-down (D2): first where the matches are (every space and application with any,
+        and how many), then the hits, each application's best in turn, so one application
+        with many matches can't crowd the others off the page."""
+        names, functions = self.views.search_hits(query, names_limit=max(limit * 3, 30))
+        words = search_words(query)
+        hits: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for h in names:
+            if not h.get("id") or h["id"] in seen:
                 continue
-            where = self._where(h["id"])
-            if scope and scope not in where.values() and scope != h["id"]:
+            seen.add(h["id"])
+            hits.append(
+                {"id": h["id"], "kind": h["kind"], "name": h["label"], **self._where(h["id"])}
+            )
+        for f in functions:
+            if f["id"] in seen:  # named and running a matching function: one hit
                 continue
-            hit = {"id": h["id"], "kind": h["kind"], "name": h["label"], **where}
-            if h.get("sub"):
-                hit["matched"] = f"function {h['label']} {h['sub']}"
-            out.append(hit)
-            if len(out) >= limit:
-                break
+            seen.add(f["id"])
+            hits.append(
+                {
+                    "id": f["id"],
+                    "kind": "flow",
+                    "name": f["label"],
+                    **({"space": f["space"]} if f["space"] else {}),
+                    **({"application": f["application"]} if f["application"] else {}),
+                    "matched": _matched(f, words),
+                }
+            )
+        if scope:
+            hits = [h for h in hits if scope in (h.get("space"), h.get("application"), h["id"])]
+        shown = _interleave(hits, limit)
+        rest = len(hits) - len(shown)
         return {
             "query": query,
             "searched": [scope] if scope else ["organization"],
-            "results": out,
+            **({"where": _where_summary(hits)} if hits else {}),
+            "results": shown,
             **(
-                {"more": f"{more} match by function name; narrow the words or use scope"}
-                if more
-                else {"more": "there may be more; narrow the words or use scope"}
-                if len(out) >= limit
+                {
+                    "more": f"{rest} more match{'es' if rest != 1 else ''}: `where` shows every "
+                    "application and space with matches; narrow with scope=<application or space>"
+                }
+                if rest
                 else {}
-            ),  # fmt: skip
+            ),
             "next": [
                 "get_node(id) for an application, space, or interface",
                 "get_flow(id) for a flow's steps",
             ]
-            if out
+            if shown
             else ["Try a shorter or different word: search matches names, not meaning yet."],
         }
 
@@ -177,6 +201,21 @@ class Tools:
             out = self._other(node, kind)
         if claims:
             out["claims"] = self._claims(node)
+        if node["id"] != ref:  # found by name: say so when other nodes have that name too
+            others = [
+                {"id": r["id"], "kind": kind_of(r["labels"])}
+                for r in self._read(
+                    "MATCH (n) WHERE n.name = $name AND n.id <> $id AND n.id IS NOT NULL "
+                    "RETURN n.id AS id, labels(n) AS labels LIMIT 10",
+                    name=ref,
+                    id=node["id"],
+                )
+            ]
+            if others:
+                out["also_named"] = {
+                    "note": f"other nodes are named {ref!r} too; get_node(id) on the one meant",
+                    "nodes": others,
+                }
         return out
 
     # ------------------------------------------------- witnesses (D109, claims)
@@ -1045,6 +1084,62 @@ def _witness(source: dict[str, Any]) -> str:
     came from, and the rule or pack that read it."""
     where = " ".join(x for x in (source.get("repo"), f"({source['witness']})") if x)
     return f"{source['witness_type']}: {where}"
+
+
+def _where_summary(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Every space with matches, most first, and within it every application and how many of
+    its nodes and flows matched; matches outside any application (tables, stores) as `other`."""
+    spaces: dict[str, dict[str, Any]] = {}
+    for h in hits:
+        space = spaces.setdefault(
+            h.get("space") or "no space",
+            {"matches": 0, "applications": defaultdict(int), "other": 0},
+        )
+        space["matches"] += 1
+        if h.get("application"):
+            space["applications"][h["application"]] += 1
+        elif h.get("kind") != "application":
+            space["other"] += 1
+    out = []
+    for name, s in sorted(spaces.items(), key=lambda kv: -kv[1]["matches"]):
+        apps = dict(sorted(s["applications"].items(), key=lambda kv: -kv[1]))
+        out.append(
+            {
+                "space": name,
+                "matches": s["matches"],
+                **({"applications": apps} if apps else {}),
+                **({"other": s["other"]} if s["other"] else {}),
+            }
+        )
+    return out
+
+
+def _interleave(hits: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    """Each application's best hit in turn (and each space's hits outside any application), in
+    the order the groups first appear: recall across applications before depth in one."""
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for h in hits:
+        # An application and its flows are one group; other nodes group by space
+        if h.get("kind") == "application":
+            key = h["name"]
+        else:
+            key = h.get("application") or f"space:{h.get('space', '')}"
+        groups.setdefault(key, []).append(h)
+    out: list[dict[str, Any]] = []
+    queues = list(groups.values())
+    while len(out) < limit and any(queues):
+        for q in queues:
+            if q and len(out) < limit:
+                out.append(q.pop(0))
+    return out
+
+
+def _matched(f: dict[str, Any], words: list[str]) -> str:
+    """Why a flow matched: the function's short name, or its full name when the words are in
+    its module path (`app.ingestion.files._write_file`), not its own name."""
+    short = f["label"]
+    named = all(w in short.lower() for w in words)
+    return f"function {short if named else f['symbol']} in {f['flow']}"
 
 
 def _meanings(uses: list[dict[str, Any]]) -> dict[str, str]:

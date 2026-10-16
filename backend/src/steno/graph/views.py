@@ -681,64 +681,79 @@ class GraphViews:
         }
 
     def search(self, text: str, limit: int = 12) -> list[dict[str, Any]]:
+        """The UI's search: names first, then flows by the functions they run."""
+        names, functions = self.search_hits(text, names_limit=limit)
+        out = [{k: v for k, v in h.items() if k != "symbol"} for h in names]
+        out += [
+            {
+                "id": h["id"],
+                "kind": "flow",
+                "label": h["label"],
+                "sub": f"in {h['flow']}",
+            }
+            for h in functions[:limit]
+        ]
+        if len(functions) > limit:
+            out.append(
+                {"id": None, "kind": "more", "label": f"{len(functions) - limit} more flows"}
+            )
+        return out
+
+    def search_hits(
+        self, text: str, names_limit: int = 50
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Every match, for searching top-down: nodes whose names match (full-text, best
+        first), and every flow whose trace runs a function whose name contains the words, with
+        the flow's application and space, so matches can be grouped by where they are."""
         words = search_words(text)
         if not words:
-            return []
+            return [], []
         # A prefix match scores the same for every hit; the exact word, boosted, ranks whole-name
         # matches (the `transaction` table) above names that merely start with it
         query = " AND ".join(f"({_escape(w)}^4 OR {_escape(w)}*)" for w in words)
-        out = []
-        for row in self._read(
-            "CALL db.index.fulltext.queryNodes('searchable_text', $q) YIELD node, score "
-            "RETURN node, score LIMIT $limit",
-            q=query,
-            limit=limit,
-        ):
-            n = row["node"]
-            out.append(
-                {
-                    "id": n.get("id"),
-                    "kind": kind_of(list(n.labels)),
-                    "label": n.get("name"),
-                    "score": row["score"],
-                }
+        names = [
+            {
+                "id": row["node"].get("id"),
+                "kind": kind_of(list(row["node"].labels)),
+                "label": row["node"].get("name"),
+                "score": row["score"],
+            }
+            for row in self._read(
+                "CALL db.index.fulltext.queryNodes('searchable_text', $q) YIELD node, score "
+                "RETURN node, score LIMIT $limit",
+                q=query,
+                limit=names_limit,
             )
-        # Functions aren't searchable architecture nodes, but their names help find a flow:
-        # a match in a flow's trace opens that flow
-        # Functions whose names contain every word (`category suggestion` finds
-        # SuggestionEngineClient.predictCategory); no cap that hides flows silently
+        ]
+        # Functions aren't searchable architecture nodes, but their names help find a flow: a
+        # match in a flow's trace opens that flow. Every word must be in one function's name
+        # (`category suggestion` finds SuggestionEngineClient.predictCategory); if none has
+        # them all, and no name matched, any of them
         terms = [w.lower() for w in words]
-        rows = self._read(
+        cypher = (
             "MATCH (fl:Flow) "
-            "WITH fl, [s IN fl.trace_symbols WHERE all(t IN $terms WHERE toLower(s) CONTAINS t)]"
+            "WITH fl, [s IN fl.trace_symbols WHERE {test}(t IN $terms WHERE toLower(s) CONTAINS t)]"
             " AS found WHERE size(found) > 0 "
-            "WITH fl, found ORDER BY size(found[0]) "
-            "RETURN fl, found[0] AS symbol",
-            terms=terms,
+            "OPTIONAL MATCH (fl)-[:BELONGS_TO]->(a:Application) "
+            "OPTIONAL MATCH (a)-[:BELONGS_TO]->(sp:Space) "
+            "WITH fl, found, a, sp ORDER BY size(found[0]) "
+            "RETURN fl, found[0] AS symbol, a.name AS app, sp.name AS space"
         )
-        if not rows and not out and len(terms) > 1:  # nothing has them all: any of them
-            rows = self._read(
-                "MATCH (fl:Flow) "
-                "WITH fl, [s IN fl.trace_symbols "
-                "WHERE any(t IN $terms WHERE toLower(s) CONTAINS t)] AS found "
-                "WHERE size(found) > 0 "
-                "WITH fl, found ORDER BY size(found[0]) "
-                "RETURN fl, found[0] AS symbol",
-                terms=terms,
-            )
-        for row in rows[:limit]:
-            fl = row["fl"]
-            out.append(
-                {
-                    "id": fl.get("id"),
-                    "kind": "flow",
-                    "label": short_symbol(row["symbol"]),
-                    "sub": f"in {fl.get('name')}",
-                }
-            )
-        if len(rows) > limit:
-            out.append({"id": None, "kind": "more", "label": f"{len(rows) - limit} more flows"})
-        return out
+        rows = self._read(cypher.format(test="all"), terms=terms)
+        if not rows and not names and len(terms) > 1:
+            rows = self._read(cypher.format(test="any"), terms=terms)
+        functions = [
+            {
+                "id": row["fl"].get("id"),
+                "label": short_symbol(row["symbol"]),
+                "symbol": row["symbol"],
+                "flow": row["fl"].get("name"),
+                "application": row["app"],
+                "space": row["space"],
+            }
+            for row in rows
+        ]
+        return names, functions
 
     def _breadcrumbs(self, node_id: str) -> list[dict[str, Any]]:
         """The node's owners, from the organization down: Org › Space › … › App › Flow."""
