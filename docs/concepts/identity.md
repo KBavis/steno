@@ -112,7 +112,7 @@ stateDiagram-v2
 - **Removed is a tombstone**, not a deletion. The Steno ID, names, and last commit stay in the registry, so project history and plans that link to it still resolve, and it can come back without a duplicate.
 - **A caller still pointing at a removed service** becomes an unjoined send: "this calls something that no longer exists." That's a useful finding.
 - **Deprecated** is declared, never inferred. Answers carry it ("deprecated; use X").
-- **Deleted or archived repositories** are found by listing each connector's repositories, and all their applications are removed.
+- **Deleted or archived repositories** are found by listing each connector's repositories, and all their applications are removed (`v2`).
 
 ## 6. Manual renames (Decided)
 

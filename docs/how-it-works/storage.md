@@ -40,7 +40,7 @@ flowchart LR
 
 **Rebuilding Neo4j from scratch:** `steno graph init` (constraints, organization, spaces), then one ingestion job per repository. LLM text comes back from `llm_output` without new spend.
 
-**Where they can drift today:** moving or deleting a repository doesn't touch Neo4j. A moved repository keeps its old `BELONGS_TO` until re-ingested; a deleted one's nodes stay. Direction: remove a repository's facts (and orphaned shared nodes) in the same request as the delete, and re-point `BELONGS_TO` on a move. The identity lifecycle (removed applications as tombstones) builds on this.
+**Where they can drift today:** moving or deleting a repository doesn't touch Neo4j. A moved repository keeps its old `BELONGS_TO` until re-ingested; a deleted one's nodes stay. Direction (`v2`: removing a repository from Steno isn't a normal operation): remove a repository's facts, claims, and orphaned shared nodes in the same request as the delete, tombstone its applications, and re-point `BELONGS_TO` on a move.
 
 ## 2. Principles (Decided)
 

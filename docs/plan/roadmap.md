@@ -24,7 +24,7 @@ flowchart LR
 | Built | Not built |
 |---|---|
 | Onboarding UI and Admin API; organization and spaces projected into Neo4j | Bulk onboarding and repository roles in the UI (`v1`, D111) |
-| Job queue (Postgres), worker, per-stage records, nightly runs, write-only-changes, `fact_change`; re-ingesting the same commit writes nothing | Removing a deleted repository's facts |
+| Job queue (Postgres), worker, per-stage records, nightly runs, write-only-changes, `fact_change`; re-ingesting the same commit writes nothing | Removing a deleted repository's facts (`v2`) |
 | **Identity** (D81–D84): registry, identify stage, Steno IDs keying every child ID, names from build files, `spring.application.name`, and other witnesses; conflicts, tombstones, restores | Naming patterns; admin links through an API or UI; application kinds |
 | **Claims and reconcile** (D109, D114): pack witness types, record rules (`each`, `when`, XML), the claim store, reconcile for Messaging, agreement and sources on application-level edges, stubs for unmatched names | Schedules reconciliation; declared topic placement; the setup sheet |
 | Packs: Python (9), Java (13), Strimzi (PLATFORM), Backstage (DECLARED); every rule with tests, including Spring Boot 2 cases; HTTP signatures; versions each pack is tested on (D106) | Organization packs (XLD repository, `component_manifest.yaml`) |

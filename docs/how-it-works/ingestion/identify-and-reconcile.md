@@ -64,7 +64,7 @@ Code: `identity/identify.py` (the algorithm, over a registry interface), `identi
 
 **Proven** in memory (`tests/test_identify.py`): unchanged, renamed in place, moved within a repository, moved to another repository after the old one removed it, renamed and moved at once (new, with a hint), a declared rename ahead of time, a split, two repositories claiming one name (a conflict), and a platform deploy name linked exactly becoming canonical. The stage B stub organization adds the same changes as scripted git commits.
 
-**Not built yet:** naming patterns ("deploy name = `org-svc-{module}`"), an API or UI for admin links and overrides, anchoring on the git host's repository ID (so a repository rename keeps its location), and removing every application of a repository deleted from Steno.
+**Not built yet:** naming patterns ("deploy name = `org-svc-{module}`"), an API or UI for admin links and overrides, and anchoring on the git host's repository ID (so a repository rename keeps its location). Removing every application of a repository deleted from Steno is `v2`.
 
 ## 3. Reconcile
 
