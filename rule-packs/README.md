@@ -28,6 +28,8 @@ rule-packs/
 └─ org/                          your organization's own packs, any language or witness type
 ```
 
+An organization's packs can also live outside this repository, in its own: set `STENO_RULE_PACK_DIRS` to the folder (or folders, comma-separated). See `docs/how-it-works/ingestion/rules-and-packs.md` §6.
+
 Code rules mostly produce **facts** (straight into the graph); rules over platform and declared files produce **claims**, which reconcile compares with the code. See `docs/how-it-works/ingestion/claims-and-reconcile.md`.
 
 Each pack:

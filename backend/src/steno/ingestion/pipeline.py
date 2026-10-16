@@ -52,7 +52,7 @@ from steno.identity.identify import deployables
 from steno.identity.identify import identify as run_identify
 from steno.identity.registry import SqlRegistry
 from steno.reconcile.run import reconcile as run_reconcile
-from steno.rule_packs.packs import is_enabled, load_packs
+from steno.rule_packs.packs import is_enabled, load_all_packs
 from steno.rule_packs.versions import dependencies
 
 log = logging.getLogger(__name__)
@@ -109,7 +109,7 @@ def parse(ctx: JobContext) -> dict[str, Any]:
     """Pick the rule packs that apply, then read the code once: the symbol resolver's symbol table
     and a syntax tree per file. No rules run yet."""
     assert ctx.workspace is not None
-    all_packs = load_packs(get_settings().rule_packs_dir)
+    all_packs = load_all_packs()
     ctx.state["all_packs"] = all_packs  # coverage: which libraries any pack covers
     packs = [p for p in all_packs if is_enabled(p, ctx.workspace)]
     ctx.state["packs"] = packs

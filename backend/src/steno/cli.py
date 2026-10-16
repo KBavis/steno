@@ -132,15 +132,20 @@ def job_nightly() -> None:
 
 @rules_app.command("list")
 def rules_list() -> None:
-    """Every rule pack: its folder, witness type, facets, and rule count."""
-    from steno.rule_packs.packs import load_packs
+    """Every rule pack: where it's from, its witness type, facets, and rule count."""
+    from steno.rule_packs.packs import load_all_packs
 
     root = get_settings().rule_packs_dir
-    for pack in load_packs(root):
-        folder = pack.path.relative_to(root).parts[0]
+    for pack in load_all_packs():
+        where = (
+            pack.path.relative_to(root).parts[0]
+            if pack.path.is_relative_to(root)
+            else str(pack.path.parent)
+        )
         facets = f"  [{', '.join(pack.facets)}]" if pack.facets else ""
         typer.echo(
-            f"{folder:8s} {pack.witness_type:9s} {pack.name:40s} {len(pack.rules):3d} rules{facets}"
+            f"{pack.source:4s} {where:10s} {pack.witness_type:9s} {pack.name:40s} "
+            f"{len(pack.rules):3d} rules{facets}"
         )
 
 
@@ -149,10 +154,10 @@ def rules_test(
     packs: list[str] = typer.Argument(None, help="Pack names; all packs if omitted"),
 ) -> None:
     """Run rule packs' test cases and compare with expected.yaml."""
-    from steno.rule_packs.packs import load_packs
+    from steno.rule_packs.packs import load_all_packs
     from steno.rule_packs.testing import run_pack_tests
 
-    all_packs = load_packs(get_settings().rule_packs_dir)
+    all_packs = load_all_packs()
     selected = [p for p in all_packs if not packs or p.name in packs]
     if packs and len(selected) != len(packs):
         unknown = set(packs) - {p.name for p in selected}
@@ -192,10 +197,10 @@ def extract(
 
     from steno.extraction.report import to_json
     from steno.ingestion.local import run_folder
-    from steno.rule_packs.packs import is_enabled, load_packs
+    from steno.rule_packs.packs import is_enabled, load_all_packs
 
     repo = Path(path).resolve()
-    packs = [p for p in load_packs(get_settings().rule_packs_dir) if is_enabled(p, repo)]
+    packs = [p for p in load_all_packs() if is_enabled(p, repo)]
     typer.echo(f"packs: {', '.join(p.name for p in packs) or '(none enabled)'}")
     x = run_folder(repo, packs).out
     by = Counter

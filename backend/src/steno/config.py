@@ -2,8 +2,10 @@
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -21,8 +23,18 @@ class Settings(BaseSettings):
     # Where ingestion workers clone repositories; deleted after each run
     workspace_dir: Path = Path("/tmp/steno-workspaces")
 
-    # Rule packs (docs/how-it-works/ingestion/rules-and-packs.md)
+    # Rule packs (docs/how-it-works/ingestion/rules-and-packs.md): the core packs here, plus
+    # any folders in `rule_pack_dirs` (an organization's packs, kept in its own repository).
+    # STENO_RULE_PACK_DIRS: folders separated by commas
     rule_packs_dir: Path = Path(__file__).resolve().parents[3] / "rule-packs"
+    rule_pack_dirs: Annotated[list[Path], NoDecode] = []
+
+    @field_validator("rule_pack_dirs", mode="before")
+    @classmethod
+    def _split_dirs(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [Path(p.strip()).expanduser() for p in value.split(",") if p.strip()]
+        return value
 
     # The JVM helper for Java symbol resolution (D69): `make resolver` builds it here
     resolver_jvm_dir: Path = (

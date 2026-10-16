@@ -12,6 +12,7 @@ from typing import Any
 
 import yaml
 
+from steno.config import get_settings
 from steno.rule_packs.versions import dependencies
 from steno.source.files import is_test_file, source_files
 
@@ -127,7 +128,33 @@ def _http_systems(file: Path) -> list[HttpSystem]:
 
 
 def load_packs(root: Path) -> list[Pack]:
+    """The packs in one folder laid out like `rule-packs/`: ecosystem → pack."""
     return [load_pack(p.parent) for p in sorted(root.glob("*/*/pack.yaml"))]
+
+
+def load_all_packs() -> list[Pack]:
+    """Every pack Steno uses: the core packs (`rule-packs/`, including `rule-packs/org/`) plus
+    each folder in `rule_pack_dirs`, such as a clone of an organization's own packs repository.
+    An extra folder may use the same layout (ecosystem → pack) or hold packs directly; its packs
+    are `source: org` unless they say otherwise. A pack name found twice is an error, never a
+    silent override."""
+    settings = get_settings()
+    packs = load_packs(settings.rule_packs_dir)
+    for folder in settings.rule_pack_dirs:
+        if not folder.is_dir():
+            raise ValueError(f"rule pack folder {folder} doesn't exist (STENO_RULE_PACK_DIRS)")
+        files = sorted({*folder.glob("*/pack.yaml"), *folder.glob("*/*/pack.yaml")})
+        for path in files:
+            pack = load_pack(path.parent)
+            if "source" not in (yaml.safe_load(path.read_text()) or {}):
+                pack.source = "org"
+            packs.append(pack)
+    seen: dict[str, Path] = {}
+    for pack in packs:
+        if pack.name in seen:
+            raise ValueError(f"two packs named {pack.name}: {seen[pack.name]} and {pack.path}")
+        seen[pack.name] = pack.path
+    return packs
 
 
 # ------------------------------------------------------------- enabled_when
