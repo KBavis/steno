@@ -1352,6 +1352,7 @@ textarea {
 .rules-toggle { display: inline-flex; gap: 4px; align-items: center; margin: 4px 0 10px; }
 .rules-toggle .rotated { transform: rotate(90deg); }
 .rules-review section { margin-bottom: 20px; }
+.rules-summary { font-size: 15px; margin: 0 0 16px !important; }
 .rules-review h3 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 0 0 6px; }
 .rules-review p { margin: 0; line-height: 1.55; }
 .rules-effect { padding: 12px 14px; border-radius: var(--radius-sm); background: var(--accent-soft); }

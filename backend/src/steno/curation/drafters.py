@@ -116,8 +116,11 @@ rule instead of duplicating it. Read more code with `read_file` when the samples
 what the pattern means (the framework's own source, if it's in a repository, is the best
 documentation). In the pack you suggest, a rule for a public library (Spring, Kafka clients,
 anything from a public registry) belongs in a core pack; a rule for the organization's own
-framework belongs in an organization pack. Be concise; the person reviewing reads your
-summary, not your reasoning."""
+framework belongs in an organization pack.
+
+The `summary` is what the reviewer reads first: one sentence, at most 25 words, saying what
+code it matches and what fact it records (or, for ignore and vocabulary, why). No hedging,
+no background."""
 
 
 def prompt_of(request: DraftRequest) -> str:

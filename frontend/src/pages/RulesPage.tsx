@@ -30,8 +30,8 @@ export function RulesPage() {
   return (
     <>
       <PageHeader
-        title="Suggested rules"
-        description="Steno drafts rules for code its current rules don't explain yet, so the graph picks up facts it's missing today. Each rule is tested before you see it. Nothing changes until you approve."
+        title="Suggested New Rules"
+        description="Rules Steno drafted for code it can't explain yet. Each is tested before you see it; nothing changes until you approve."
         action={
           <div className="rules-start">
             <select value={count} onChange={(e) => setCount(Number(e.target.value))} disabled={busy || working} aria-label="How many">
@@ -214,10 +214,7 @@ function Review({ id, onClose, onDone }: { id: number; onClose: () => void; onDo
       <ErrorAlert message={loadError ?? error} />
       {p && (
         <div className="rules-review">
-          <section>
-            <h3>What it recognizes</h3>
-            <p>{p.summary}</p>
-          </section>
+          <p className="rules-summary">{p.summary}</p>
 
           <section className="rules-effect">
             <h3>{open ? 'If you approve' : p.status === 'approved' ? 'What approving did' : 'Rejected'}</h3>
@@ -265,8 +262,7 @@ function Review({ id, onClose, onDone }: { id: number; onClose: () => void; onDo
           )}
 
           <p className="rules-meta">
-            Drafted by {p.drafter === 'claude_agent_sdk' ? 'Claude' : p.drafter} for ${p.cost_usd.toFixed(2)}, a one-time cost to write the
-            suggestion. Running an approved rule costs nothing.
+            Drafting this cost ${p.cost_usd.toFixed(2)} (one time). Running the rule costs nothing.
           </p>
         </div>
       )}
@@ -277,20 +273,20 @@ function Review({ id, onClose, onDone }: { id: number; onClose: () => void; onDo
 /** What approving does, in one concrete sentence */
 function effect(p: Proposal, passed: number): string {
   if (p.status === 'needs_person')
-    return "Steno couldn't settle what this code means. Reject it with a note, so it isn't suggested again."
+    return "Steno couldn't tell what this code means. Reject it with a note so it isn't suggested again."
   switch (p.kind) {
     case 'rule': {
       const pack = String(p.pack?.name ?? 'a pack')
       const where = p.pack_exists
         ? `the existing pack ${pack}`
-        : `a new ${p.pack?.source === 'core' ? 'core' : 'organization'} pack, ${pack}`
-      return `Steno adds the rule ${p.rule_id} to ${where}. Its ${passed} test cases pass. From the next ingestion of each repository, these facts appear in the graph.`
+        : `the new ${p.pack?.source === 'core' ? 'core' : 'organization'} pack ${pack}`
+      return `Adds ${p.rule_id} to ${where} (${passed} of ${passed} tests pass). It runs from each repository's next ingestion.`
     }
     case 'enable_pack':
-      return 'An existing rule pack already explains this code, but it isn’t turned on where the code is. Approving records the decision; turning the pack on is still yours to do.'
+      return 'Records that an existing pack covers this; turning it on is still yours to do.'
     case 'ignore':
-      return 'Steno stops reporting this as unexplained, in every repository. You can reopen it from the Coverage page later.'
+      return 'Stops reporting it as unexplained, everywhere. Reopen it from Coverage anytime.'
     case 'vocabulary':
-      return 'Nothing changes in the graph. Steno records it as a gap: capturing it needs a new kind of fact, which is a design change.'
+      return 'Nothing changes in the graph; it’s logged as a gap that needs a new kind of fact.'
   }
 }
