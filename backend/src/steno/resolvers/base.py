@@ -179,12 +179,30 @@ class Resolver(Protocol):
     def stats(self) -> dict[str, Any]: ...
 
 
+class Properties(dict[str, Any]):
+    """The config property map, remembering which keys were read: a key set in config that
+    nothing reads is a coverage item (unread config, D122)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.used: set[str] = set()
+
+    def __getitem__(self, key: str) -> Any:
+        self.used.add(key)
+        return super().__getitem__(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if key in self:
+            self.used.add(key)
+        return super().get(key, default)
+
+
 class Resolvers:
     """The resolvers for a repository's languages, and one config property map they share."""
 
     def __init__(self, root: Path, resolvers: list[Resolver]):
         self.root = root
-        self.properties: dict[str, Any] = {}
+        self.properties: dict[str, Any] = Properties()
         self.by_language = {r.language: r for r in resolvers}
         for r in resolvers:
             r.properties = self.properties

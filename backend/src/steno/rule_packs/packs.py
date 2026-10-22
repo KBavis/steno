@@ -71,6 +71,10 @@ class Pack:
     # A source generated from the code (an OpenAPI spec built from controllers): its claims
     # never count as an independent witness
     generated: bool = False
+    # What's never worth a rule (D122): file globs and config key prefixes the coverage
+    # report doesn't list. Checked against the facets: nothing a facet reads belongs here
+    noise_files: list[str] = field(default_factory=list)
+    noise_config: list[str] = field(default_factory=list)
 
 
 def load_pack(path: Path) -> Pack:
@@ -110,6 +114,8 @@ def load_pack(path: Path) -> Pack:
         witness_type=_witness_type(meta, path),
         facets=list(meta.get("facets") or []),
         generated=bool(meta.get("generated", False)),
+        noise_files=[str(g) for g in (meta.get("noise") or {}).get("files") or []],
+        noise_config=[str(k) for k in (meta.get("noise") or {}).get("config") or []],
     )
 
 

@@ -15,7 +15,9 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from steno.coverage.collect import Item
+from steno.coverage.runs import latest_runs
 from steno.db.models import (
+    CoverageItem,
     CoverageKind,
     CoverageOccurrence,
     CoveragePattern,
@@ -39,6 +41,7 @@ WEIGHT = {
     "version_untested": 0.5,
     "version_unknown": 0.2,
     "unread_file": 0.5,  # low until something says it matters (D122)
+    "unread_config": 0.5,
 }
 # States a pattern leaves when its occurrences are gone (a rule explains it now)
 OPEN_STATES = {
@@ -197,7 +200,7 @@ def owner_of(it: Item) -> str | None:
         return lib or package_root(it.target)
     if it.signal in ("library", "version_untested", "version_unknown"):
         return it.target.split(" ")[0]
-    if it.signal == "config_unset":
+    if it.signal in ("config_unset", "unread_config"):
         return "config:" + ".".join(it.target.split(".")[:2])
     return package_root(it.target)
 
@@ -229,3 +232,37 @@ def frameworks(patterns: list[CoveragePattern]) -> list[dict[str, Any]]:
                         "patterns": members})  # fmt: skip
     out.sort(key=lambda g: -g["score"])
     return out
+
+
+# What a person may set by triage; the other states belong to rule curation
+TRIAGE = {PatternState.IGNORED, PatternState.OPEN}
+
+
+def triage(
+    session: Session, fingerprints: list[str], state: PatternState, note: str | None = None
+) -> int:
+    """Ignore or reopen whole patterns (D122), in bulk, with why. The same items in every
+    repository's latest coverage run follow, so the report and the patterns agree; later runs
+    carry the decision over. Returns how many patterns changed."""
+    if state not in TRIAGE:
+        raise ValueError(f"triage sets {sorted(s.value for s in TRIAGE)}, not {state.value}")
+    patterns = list(
+        session.scalars(
+            select(CoveragePattern).where(CoveragePattern.fingerprint.in_(fingerprints))
+        )
+    )
+    status = CoverageStatus.IGNORED if state == PatternState.IGNORED else CoverageStatus.UNEXPLAINED
+    jobs = [job.id for job, _ in latest_runs(session).values()]
+    for p in patterns:
+        p.state = state
+        p.note = note
+        signal, _, target = p.fingerprint.partition(":")
+        for it in session.scalars(
+            select(CoverageItem).where(
+                CoverageItem.job_id.in_(jobs),
+                CoverageItem.signal == signal,
+                CoverageItem.target_symbol == target,
+            )
+        ):
+            it.status = status
+    return len(patterns)

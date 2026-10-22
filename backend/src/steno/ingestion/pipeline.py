@@ -306,6 +306,11 @@ def coverage(ctx: JobContext) -> dict[str, Any]:
         files=[p.relative_to(engine.repo).as_posix() for p in engine.files],
         read=engine.read,
         root=engine.repo,
+        in_library=_in_library(ctx),
+        config_used=(
+            engine.config_used
+            | (getattr(engine.resolver.properties, "used", set()) if engine.resolver else set())
+        ),
     )
     previous = _previous_triage(ctx)
     statuses: dict[str, CoverageStatus] = {}
@@ -332,6 +337,17 @@ def coverage(ctx: JobContext) -> dict[str, Any]:
     # The organization's patterns: what rule curation works from (D121)
     patterns = record_patterns(ctx.session, ctx.repository.id, ctx.job.id, report.items, statuses)
     return {**report.metrics, "patterns": patterns}
+
+
+def _in_library(ctx: JobContext) -> Any:
+    """Whether a file is in one of the repository's library modules (D122 evidence)."""
+    structure = ctx.state["structure"]
+
+    def check(file: str) -> bool:
+        module = structure.module_of(file)
+        return module is not None and "Library" in module.roles
+
+    return check
 
 
 def _application_of(ctx: JobContext) -> Any:

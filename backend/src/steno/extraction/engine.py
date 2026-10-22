@@ -116,6 +116,8 @@ class Engine:
         # Files some rule looked at (relative paths): the rest are the coverage report's unread
         # files (D122)
         self.read: set[str] = set()
+        # Config keys a config rule turned into a fact or claim (not just a property clue)
+        self.config_used: set[str] = set()
         self._roots: dict[Path, SgNode] = {}
 
     def parse(self) -> None:
@@ -268,6 +270,8 @@ class Engine:
                     continue  # secret values are never ingested (docs/how-it-works/security.md)
                 m = pattern.match(key)
                 if m:
+                    if any("clue" not in e for e in rule.emit):
+                        self.config_used.add(key)
                     caps = {"KEY": Capture(key), "VALUE": Capture(value)} | {
                         k: Capture(v) for k, v in m.groupdict().items()
                     }

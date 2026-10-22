@@ -25,6 +25,7 @@ rule-packs/
 ├─ http/                         HTTP signatures for well-known services
 ├─ kafka/                        PLATFORM: Strimzi topics and ACLs
 ├─ catalog/                      DECLARED: Backstage catalog files
+├─ core/                         what's never worth a rule anywhere (noise), for the coverage report
 └─ org/                          your organization's own packs, any language or witness type
 ```
 

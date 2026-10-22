@@ -108,3 +108,18 @@ def test_ignoring_an_item_ignores_its_pattern(session):
     it = _hook(("A.java", "A#on()"))
     record(session, a.id, 1, [it], {it.fingerprint: CoverageStatus.IGNORED})
     assert _pattern(session).state == PatternState.IGNORED
+
+
+def test_triage_ignores_and_reopens_whole_patterns(session):
+    from steno.coverage.patterns import triage
+
+    a = _repo(session, "pattern-test-e")
+    record(session, a.id, 1, [_hook(("A.java", "A#on()"))])
+    fp = "unknown_hook:com.acme.test.AcmeHandler"
+    assert triage(session, [fp], PatternState.IGNORED, "logging helper, not wiring") == 1
+    p = _pattern(session)
+    assert (p.state, p.note) == (PatternState.IGNORED, "logging helper, not wiring")
+    triage(session, [fp], PatternState.OPEN, "it is wiring after all")
+    assert _pattern(session).state == PatternState.OPEN
+    with pytest.raises(ValueError):
+        triage(session, [fp], PatternState.APPROVED)

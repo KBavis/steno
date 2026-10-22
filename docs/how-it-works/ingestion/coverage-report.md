@@ -53,8 +53,8 @@ UNEXPLAINED (org-wide, top 3)
 | **Unparsed files** | Files Steno couldn't read at all: nothing in them is in the graph | Yes |
 | **Unresolved library types** | A number in the metrics, not items (D101): calls that ran through a library type Steno can't see. The library call each chain starts from is what's accounted for; the count informs the dependency-JAR decision (D69). | Yes (metric) |
 | **Cross-app inconsistencies** | A topic or channel produced but never consumed, or consumed but never produced; a call to an endpoint the target app doesn't expose. Each means one side was missed. | Later: needs several applications (POC stage B) |
-| **Config no rule read** (D122) | Config keys no rule read, grouped by prefix (`acme.messaging.*`) | Planned |
-| **Unread files** (D122) | Files no rule looked at, grouped by extension and location convention across the organization (`*.xyz under resources/flows/`); source code in a language no pack reads is one item per language (`*.js`). Noise (images, Markdown, lock files, CSS, editor and CI settings), build files, and test code aren't listed; SQL is, because the Data facet reads migrations. Ranked low until something says it matters. | Yes |
+| **Config no rule read** (D122) | Config keys set in the repository that nothing read: no rule stated a fact from them, and no `${placeholder}` or settings lookup used them (the shared property map records every key read). Grouped by prefix (`acme.messaging.*`); the packs' noise prefixes (`logging`, `management`, `spring.jpa`, …) aren't listed. | Yes |
+| **Unread files** (D122) | Files no rule looked at, grouped by extension and location convention across the organization (`*.xyz under resources/flows/`); source code in a language no pack reads is one item per language (`*.js`). Noise (the packs' `noise.files` globs: images, Markdown, lock files, CSS, editor and CI settings), build files, and test code aren't listed; SQL is, because the Data facet reads migrations. Ranked low until evidence says it matters. | Yes |
 
 **By application, at any scope (D67).** Each item records the applications it occurs in (from its files' service modules), and the stage records each application's numbers. The report reads like the graph: the organization (its spaces, worst first), a space (its sub-spaces and applications), or one application, each with rolled-up numbers. Items are ranked by reach: how many applications, then spaces, one fix would help.
 
@@ -134,9 +134,19 @@ flowchart LR
 | Framework hook, and anything else naming a type | The package root: the first three package segments (`com.acme.messaging`) |
 | The application's own code (inferred triggers, unreachable effects, unknown hosts, dropped matches, unparsed or unread files) | None: stands alone |
 
-**Unread files** (a coverage signal since 2026-10-21): files no rule looked at (the engine records every file a code or config rule reads), grouped by extension and location convention (`*.xyz under resources/flows/`). Code in a language no pack reads is one pattern per language (`*.js`). A built-in noise list skips images, Markdown, lock files, CSS, editor and CI files; build files and test code aren't listed; SQL is, because migrations matter to the Data facet.
+**Unread files and unread config** (coverage signals since 2026-10-21/22): files no rule looked at (the engine records every file a code or config rule reads), grouped by extension and location convention (`*.xyz under resources/flows/`), with code in a language no pack reads as one pattern per language (`*.js`); and config keys nothing read, grouped by prefix (`acme.messaging.*`).
 
-**Evidence** (D122): an unread file whose name appears in the code (`getResource("flows/order.xyz")`) gets `referenced_by_code`, which multiplies its score by five.
+**Noise comes from the packs.** A pack's `noise` block lists file globs and config key prefixes the report never lists; the core pack `rule-packs/core/steno-pack-noise` holds the universal list, and an organization's pack can add its own. A test checks it against the facets: migrations, API contracts and schemas, deploy, Helm, topic, and catalog files are never noise.
+
+**Evidence** (D122), each multiplying a pattern's score (× 5 for one, × 9 for two, …):
+
+| Evidence | Means | For |
+|---|---|---|
+| `referenced_by_code` | The code mentions the file's name (`getResource("flows/order.xyz")`) | Unread files |
+| `names_known_things` | The file's text or the config value names a topic, endpoint path, table, or application already in this run's graph (a name with a separator, or at least 8 characters, so ordinary words don't count) | Unread files, unread config |
+| `in_internal_library` | It occurs inside one of the repository's library modules | Any pattern |
+
+**Triage on patterns.** `PUT /api/patterns/triage` with `{fingerprints, state: ignored | open, note}` ignores or reopens whole patterns in bulk, recording why. The same items in every repository's latest coverage run follow, so the report and the patterns agree, and later runs keep the decision. The other states belong to rule curation.
 
 **Reading them:** `GET /api/patterns?state=open&limit=50` returns patterns grouped by owner, each group ranked by its summed score; patterns no library owns stand alone.
 
