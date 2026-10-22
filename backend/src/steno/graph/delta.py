@@ -12,10 +12,10 @@ Two kinds of property don't count as a change:
   read at, so its citations stay exact.
 """
 
-import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from steno.graph import trace as trace_codec
 from steno.graph.build import POINTERS, SHARED, GraphPlan
 
 # Neo4j returns a node's `id` among its properties; the plan keeps it apart. Never compared,
@@ -33,7 +33,7 @@ VOLATILE = {
 NODE_POINTERS = {"file", *POINTERS, "entry_file", "entry_start_line", "entry_end_line"}
 # Written by later stages (cards), never part of a plan
 LATER = ("card",)
-TRACE_FIELDS = {"trace", "trace_files", "trace_symbols"}
+TRACE_FIELDS = {"trace", "trace_files", "trace_symbols", "trace_entries"}
 
 EdgeKey = tuple[str, str, str]
 
@@ -147,8 +147,8 @@ def _comparable(props: dict[str, Any]) -> dict[str, Any]:
         and k != IDENTITY
         and not k.startswith(LATER)
     }
-    if isinstance(out.get("trace"), str):
-        out["trace"] = [_strip_pointers(e) for e in json.loads(out["trace"])]
+    if out.get("trace") is not None:
+        out["trace"] = [_strip_pointers(e) for e in trace_codec.decode(out["trace"])]
     return out
 
 
@@ -247,8 +247,7 @@ def _trace_change(
 
 
 def _trace_of(props: dict[str, Any] | None) -> list[dict[str, Any]]:
-    raw = (props or {}).get("trace")
-    return json.loads(raw) if isinstance(raw, str) else []
+    return trace_codec.decode((props or {}).get("trace"))
 
 
 def _fn(entry: dict[str, Any]) -> str:

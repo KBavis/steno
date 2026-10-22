@@ -22,9 +22,12 @@ from sqlalchemy.orm import Session
 
 from steno.api.links import source_url
 from steno.claims.store import active
+from steno.connectors.git import CloneError, remote_head
 from steno.connectors.source import SourceError, read_file, slice_lines
+from steno.coverage.runs import unexplained
 from steno.db.models import Connector, Repository
 from steno.extraction.facts import split_url
+from steno.graph import trace as trace_codec
 from steno.graph.build import step_of
 from steno.graph.views import GraphViews, kind_of, search_words
 
@@ -557,7 +560,7 @@ class Tools:
         if "Flow" not in fl.labels:
             raise ToolError(f"{ref!r} is a {kind_of(list(fl.labels))}, not a flow")
         flow_id = fl["id"]
-        trace = json.loads(fl.get("trace") or "[]")
+        trace = trace_codec.decode(fl.get("trace"))
         repo, commit = fl.get("repo"), fl.get("commit")
 
         # Effects with their call sites, per step
@@ -736,7 +739,7 @@ class Tools:
         fl = self._resolve(ref)
         if "Flow" not in fl.labels:
             raise ToolError(f"{ref!r} isn't a flow")
-        trace = json.loads(fl.get("trace") or "[]")
+        trace = trace_codec.decode(fl.get("trace"))
         wanted = set(paths or [])
         picked = [
             t
@@ -1043,8 +1046,17 @@ class Tools:
                    else "something outside the code runs it")
             )  # fmt: skip
         out.update(_hooks_note(hooks))
-        out["complete"] = not out
-        return out
+        functions = fl.get("functions") or len(trace_codec.decode(fl.get("trace")))
+        checked = [
+            f"the {functions} functions this flow runs"
+            + (f", in {app}'s code" if app else "")
+            + _at(fl.get("commit"))
+        ]
+        if fl.get("interceptors"):
+            checked.append(
+                f"{len(fl['interceptors'])} interceptors that run before it (filters, validators)"
+            )
+        return _completeness(checked, out, self._unexplained([app] if app else []))
 
     def _path_matches(self, method: str | None, url: str | None, flow_id: str) -> list[str]:
         """Endpoints in other applications whose method and path match a call whose host isn't

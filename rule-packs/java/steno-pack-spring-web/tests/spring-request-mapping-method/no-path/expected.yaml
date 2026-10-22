@@ -1,0 +1,4 @@
+nodes:
+  - HttpEndpoint: { method: GET, path: "/health" }
+entry_points:
+  - { trigger: "GET /health", function: "com.x.HealthController#check()" }

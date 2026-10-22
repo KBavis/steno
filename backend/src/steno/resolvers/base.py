@@ -145,6 +145,9 @@ class Resolver(Protocol):
     extensions: tuple[str, ...]
     root: Path
     errors: list[tuple[Path, str]]
+    # Why the resolver couldn't run at all (the JVM helper ran out of memory): every flow in
+    # its language would be hollow, so the job must fail rather than write them
+    failed: str | None
     properties: dict[str, Any]
     return_hints: dict[tuple[str, str], str]
 
@@ -202,6 +205,10 @@ class Resolvers:
     @property
     def errors(self) -> list[tuple[Path, str]]:
         return [e for r in self for e in r.errors]
+
+    @property
+    def failed(self) -> str | None:
+        return next((r.failed for r in self if r.failed), None)
 
     def functions(self) -> Iterator[Function]:
         for r in self:

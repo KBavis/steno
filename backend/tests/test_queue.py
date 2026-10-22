@@ -75,3 +75,50 @@ def test_interrupted_jobs_unlock_their_repository(session):
     assert job.id in recover_interrupted(session)
     assert job.status == JobStatus.FAILED and job.error.startswith("interrupted")
     assert enqueue(session, repo.id, JobMode.DRY_RUN).id != job.id  # unlocked
+
+
+def test_a_job_waits_until_its_memory_fits_this_machine(session):
+    """D128: with a job already running here, the next waits when its reservation doesn't fit;
+    alone on the machine, it starts."""
+    from steno.ingestion.resources import Machine
+
+    busy = _repo(session, "queue-test-e")
+    running = enqueue(session, busy.id, JobMode.DRY_RUN)
+    running.status = JobStatus.RUNNING
+    running.host = "queue-test-host"
+    running.memory_reserved_mb = 3000
+    repo = _repo(session, "queue-test-f")
+    enqueue(session, repo.id, JobMode.DRY_RUN)
+    session.flush()
+    small = Machine(memory_mb=5000, available_mb=4000, cpus=8)  # budget 4000: 3000 + 3072 won't fit
+    for other in session.query(IngestionJob).filter(IngestionJob.status == JobStatus.QUEUED):
+        if other.repository_id != repo.id:
+            other.queued_at = other.queued_at.replace(year=2100)  # ours is the oldest
+    session.flush()
+    assert claim_next(session, "queue-test-host", small) is None
+    running.status = JobStatus.SUCCEEDED
+    session.flush()
+    job = claim_next(session, "queue-test-host", small)
+    assert job is not None and job.repository_id == repo.id
+    assert job.memory_reserved_mb == get_settings().job_memory_default_mb
+    assert job.stats["resources"]["estimated_from"].startswith("default")
+
+
+def test_after_running_out_of_jvm_memory_the_next_run_gets_more_and_batches(session):
+    """A repository too big for the defaults recovers instead of failing every night (D128)."""
+    from steno.ingestion.resources import Machine, estimate
+
+    repo = _repo(session, "queue-test-g")
+    failed = enqueue(session, repo.id, JobMode.DRY_RUN)
+    failed.status = JobStatus.FAILED
+    failed.error = (
+        "RuntimeError: symbol resolution failed: Java resolver failed: Exception in thread "
+        '"main" java.lang.OutOfMemoryError: Java heap space'
+    )
+    failed.stats = {"resources": {"jvm_heap_mb": 2048}}
+    session.flush()
+    plan = estimate(session, repo.id, Machine(memory_mb=16000, available_mb=12000, cpus=8))
+    assert plan.batched and plan.jvm_heap_mb == 4096
+    assert plan.reserve_mb == 4096 + get_settings().job_memory_default_mb
+    small = estimate(session, repo.id, Machine(memory_mb=7000, available_mb=5000, cpus=8))
+    assert small.jvm_heap_mb == 5600 - get_settings().job_memory_default_mb  # within the budget

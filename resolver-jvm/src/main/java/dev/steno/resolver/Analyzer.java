@@ -71,6 +71,7 @@ import com.github.javaparser.resolution.declarations.ResolvedReferenceTypeDeclar
 import com.github.javaparser.resolution.model.SymbolReference;
 import com.github.javaparser.resolution.types.ResolvedType;
 import com.github.javaparser.symbolsolver.JavaSymbolSolver;
+import com.github.javaparser.symbolsolver.javaparsermodel.JavaParserFacade;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.JarTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeSolver;
@@ -215,29 +216,39 @@ final class Analyzer {
     // --------------------------------------------------------------------- run
 
     Map<String, Object> run(List<Path> sources) throws IOException {
+        return run(sources, 0);
+    }
+
+    /**
+     * Resolve the repository. With `batchFiles` > 0, in two passes so memory stays bounded
+     * (D127, docs/how-it-works/ingestion/resolvers.md §5.3): every file is parsed and its method bodies dropped,
+     * leaving a declaration index of the whole repository; then bodies are read back and resolved
+     * a batch of files at a time. Resolving a call needs other files' declarations, never their
+     * bodies, so the answers are the same as one pass over everything (constructor bodies are
+     * kept: a field's value may be assigned there).
+     */
+    Map<String, Object> run(List<Path> sources, int batchFiles) throws IOException {
+        return run(sources, batchFiles, null);
+    }
+
+    /** With a `spill`, expressions and calls are written to it after each batch instead of
+     *  returned (D127); the caller writes the output file with it. */
+    Map<String, Object> run(List<Path> sources, int batchFiles, Spill spill) throws IOException {
         long started = System.currentTimeMillis();
         JavaParser parser = new JavaParser(config);
+        Map<CompilationUnit, Path> paths = new IdentityHashMap<>();
+        Map<CompilationUnit, List<MethodDeclaration>> stripped = new IdentityHashMap<>();
         for (Path path : sources) {
             String rel = root.relativize(path).toString().replace('\\', '/');
-            ParseResult<CompilationUnit> result;
-            try {
-                result = parser.parse(Files.readString(path, StandardCharsets.UTF_8));
-            } catch (IOException | RuntimeException e) {
-                errors.add(Map.of("file", rel, "message", "unreadable: " + e.getMessage()));
+            CompilationUnit cu = parse(parser, path, rel, true);
+            if (cu == null) {
                 continue;
             }
-            if (!result.isSuccessful() || result.getResult().isEmpty()) {
-                Problem p = result.getProblems().isEmpty() ? null : result.getProblems().get(0);
-                String line = p == null ? "" : p.getLocation()
-                        .flatMap(l -> l.getBegin().getRange()).map(r -> " (line " + r.begin.line + ")").orElse("");
-                errors.add(Map.of("file", rel, "message",
-                        "syntax error: " + (p == null ? "unparseable" : p.getMessage().split("\n")[0]) + line));
-                if (result.getResult().isEmpty()) {
-                    continue;
-                }
-            }
-            CompilationUnit cu = result.getResult().get();
             files.put(cu, rel);
+            paths.put(cu, path);
+            if (batchFiles > 0) {
+                stripped.put(cu, strip(cu));
+            }
         }
         Lombok lombok = new Lombok(generated);
         for (CompilationUnit cu : files.keySet()) {
@@ -253,7 +264,7 @@ final class Analyzer {
         for (Map.Entry<String, TypeDeclaration<?>> e : types.entrySet()) {
             bases.put(e.getKey(), baseNames(e.getValue()));
         }
-        List<Map<String, Object>> fnOut = new ArrayList<>();
+        Map<String, List<Fn>> fnsByFile = new HashMap<>();
         for (Map.Entry<CompilationUnit, String> e : files.entrySet()) {
             for (CallableDeclaration<?> c : e.getKey().findAll(CallableDeclaration.class)) {
                 if (generated.contains(c) || inAnonymousOrLocal(c)) {
@@ -262,7 +273,9 @@ final class Analyzer {
                 Fn fn = function(c, e.getValue());
                 if (fn != null) {
                     fns.put(c, fn);
-                    bySymbol.putIfAbsent(fn.symbol(), fn);
+                    if (bySymbol.putIfAbsent(fn.symbol(), fn) == null) {
+                        fnsByFile.computeIfAbsent(fn.file(), k -> new ArrayList<>()).add(fn);
+                    }
                 }
             }
         }
@@ -279,27 +292,65 @@ final class Analyzer {
         }
 
         Map<String, Object> callsOut = new LinkedHashMap<>();
+        List<Map<String, Object>> fnOut = new ArrayList<>();
+        List<Map<String, Object>> exprs = new ArrayList<>();
+        Map<String, Object> imports = new TreeMap<>();
         int[] counts = new int[4]; // first-party, library, unresolved, generated
-        for (Fn fn : bySymbol.values()) {
-            List<Map<String, Object>> calls = calls(fn, counts);
-            if (!calls.isEmpty()) {
-                callsOut.put(fn.symbol(), calls);
+        List<CompilationUnit> all = new ArrayList<>(files.keySet());
+        int size = batchFiles > 0 ? batchFiles : Math.max(all.size(), 1);
+        int batches = 0;
+        for (int from = 0; from < all.size(); from += size) {
+            List<CompilationUnit> batch = all.subList(from, Math.min(from + size, all.size()));
+            batches++;
+            for (CompilationUnit cu : batch) {
+                if (stripped.containsKey(cu)) {
+                    restore(parser, cu, paths.get(cu), stripped.get(cu));
+                }
             }
-            fnOut.add(describe(fn));
+            for (CompilationUnit cu : batch) {
+                for (Fn fn : fnsByFile.getOrDefault(files.get(cu), List.of())) {
+                    List<Map<String, Object>> calls = calls(fn, counts);
+                    if (!calls.isEmpty()) {
+                        callsOut.put(fn.symbol(), calls);
+                    }
+                    fnOut.add(describe(fn));
+                }
+            }
+            for (CompilationUnit cu : batch) {
+                String file = files.get(cu);
+                expressions(cu, file, exprs);
+                List<String> names = new ArrayList<>();
+                for (ImportDeclaration imp : cu.getImports()) {
+                    names.add((imp.isStatic() ? "static " : "") + imp.getNameAsString() + (imp.isAsterisk() ? ".*" : ""));
+                }
+                imports.put(file, names);
+            }
+            if (batchFiles > 0) {
+                for (CompilationUnit cu : batch) {
+                    strip(stripped.get(cu));
+                }
+                // What was cached about the bodies just dropped would keep them alive
+                callCache.clear();
+                typeCache.clear();
+                JavaParserFacade.clearInstances();
+            }
+            if (spill != null) {
+                for (Map.Entry<String, Object> e : callsOut.entrySet()) {
+                    @SuppressWarnings("unchecked")
+                    List<Map<String, Object>> list = (List<Map<String, Object>>) e.getValue();
+                    spill.calls(e.getKey(), list);
+                }
+                for (Map<String, Object> e : exprs) {
+                    spill.expr(e);
+                }
+                callsOut.clear();
+                exprs.clear();
+            }
+            Memory.sample();
         }
         List<Map<String, Object>> typesOut = new ArrayList<>();
         for (Map.Entry<String, TypeDeclaration<?>> e : types.entrySet()) {
             typesOut.add(describe(e.getKey(), e.getValue()));
-        }
-        List<Map<String, Object>> exprs = new ArrayList<>();
-        Map<String, Object> imports = new TreeMap<>();
-        for (Map.Entry<CompilationUnit, String> e : files.entrySet()) {
-            expressions(e.getKey(), e.getValue(), exprs);
-            List<String> names = new ArrayList<>();
-            for (ImportDeclaration imp : e.getKey().getImports()) {
-                names.add((imp.isStatic() ? "static " : "") + imp.getNameAsString() + (imp.isAsterisk() ? ".*" : ""));
-            }
-            imports.put(e.getValue(), names);
         }
 
         Map<String, Object> out = new LinkedHashMap<>();
@@ -307,8 +358,10 @@ final class Analyzer {
         out.put("errors", errors);
         out.put("types", typesOut);
         out.put("functions", fnOut);
-        out.put("calls", callsOut);
-        out.put("exprs", exprs);
+        if (spill == null) {
+            out.put("calls", callsOut);
+            out.put("exprs", exprs);
+        }
         out.put("imports", imports);
         Map<String, Object> stats = new LinkedHashMap<>();
         stats.put("files", files.size());
@@ -318,10 +371,73 @@ final class Analyzer {
         stats.put("calls_library", counts[1]);
         stats.put("calls_unresolved", counts[2]);
         stats.put("calls_generated", counts[3]);
-        stats.put("expressions", exprs.size());
+        stats.put("expressions", spill != null ? spill.expressions() : exprs.size());
         stats.put("ms", System.currentTimeMillis() - started);
+        stats.put("batches", batches);
+        stats.put("memory", Memory.peaks());
         out.put("stats", stats);
         return out;
+    }
+
+    private CompilationUnit parse(JavaParser parser, Path path, String rel, boolean report) {
+        ParseResult<CompilationUnit> result;
+        try {
+            result = parser.parse(Files.readString(path, StandardCharsets.UTF_8));
+        } catch (IOException | RuntimeException e) {
+            if (report) {
+                errors.add(Map.of("file", rel, "message", "unreadable: " + e.getMessage()));
+            }
+            return null;
+        }
+        if (report && (!result.isSuccessful() || result.getResult().isEmpty())) {
+            Problem p = result.getProblems().isEmpty() ? null : result.getProblems().get(0);
+            String line = p == null ? "" : p.getLocation()
+                    .flatMap(l -> l.getBegin().getRange()).map(r -> " (line " + r.begin.line + ")").orElse("");
+            errors.add(Map.of("file", rel, "message",
+                    "syntax error: " + (p == null ? "unparseable" : p.getMessage().split("\n")[0]) + line));
+        }
+        return result.getResult().orElse(null);
+    }
+
+    /** Drop the bodies of a file's methods (an empty block, so a method with a body still has
+     *  one); returns the methods dropped. Constructors keep theirs. */
+    private static List<MethodDeclaration> strip(CompilationUnit cu) {
+        List<MethodDeclaration> out = new ArrayList<>();
+        for (MethodDeclaration m : cu.findAll(MethodDeclaration.class)) {
+            // A method inside another body (a local or anonymous class) goes and comes back
+            // with the body it's in; stripping it separately would detach it on the way back
+            if (m.getBody().isPresent() && m.findAncestor(BlockStmt.class).isEmpty()) {
+                out.add(m);
+            }
+        }
+        strip(out);
+        return out;
+    }
+
+    private static void strip(List<MethodDeclaration> methods) {
+        for (MethodDeclaration m : methods) {
+            m.setBody(new BlockStmt());
+        }
+    }
+
+    /** Read a file again and put its methods' bodies back into the declarations every other
+     *  file resolves against, matched by where each method starts. */
+    private void restore(JavaParser parser, CompilationUnit cu, Path path, List<MethodDeclaration> methods) {
+        CompilationUnit fresh = parse(parser, path, files.get(cu), false);
+        if (fresh == null) {
+            return;
+        }
+        Map<String, MethodDeclaration> byStart = new HashMap<>();
+        for (MethodDeclaration m : fresh.findAll(MethodDeclaration.class)) {
+            m.getBegin().ifPresent(b -> byStart.putIfAbsent(b.line + ":" + b.column + ":" + m.getNameAsString(), m));
+        }
+        for (MethodDeclaration m : methods) {
+            MethodDeclaration f = m.getBegin()
+                    .map(b -> byStart.get(b.line + ":" + b.column + ":" + m.getNameAsString())).orElse(null);
+            if (f != null && f.getBody().isPresent()) {
+                m.setBody(f.getBody().get());
+            }
+        }
     }
 
     // --------------------------------------------------------------- functions

@@ -14,7 +14,6 @@ entry point, or an effect at or below them) also become Step nodes, which carry 
 Pure: no database access, so it's testable on its own. `writer.py` sends the plan to Neo4j.
 """
 
-import json
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -34,6 +33,7 @@ from steno.extraction.facts import (
     split_url,
 )
 from steno.graph import ids
+from steno.graph import trace as trace_codec
 from steno.graph.structure import Module, Structure
 from steno.resolvers.base import Function, Invocation, Resolvers, UnresolvedCall, looks_like_io
 from steno.rule_packs.packs import HttpSystem
@@ -228,7 +228,7 @@ class _Builder:
         # Names of first-party functions: an unresolved call by one of these names may be a
         # flow step that's missing (D71)
         self.first_party_names = {f.name for f in self.functions.values()}
-        self.fact_ids: dict[int, str] = {}  # id(NodeFact) → node id
+        self.fact_ids: dict[int, str | None] = {}  # id(NodeFact) → node id (None: dropped)
         self.effects: dict[str, list[Effect]] = defaultdict(list)  # function symbol → effects
         self.graph: dict[Key, list[Call]] = {}
         self.significant: set[Key] = set()
@@ -357,6 +357,12 @@ class _Builder:
             k: v for k, v in n.props.items() if not isinstance(v, (dict, list)) or k == "fields"
         }
         if label == "HttpEndpoint":
+            if not isinstance(n.props.get("path"), str):
+                # No path, even after its controller's prefix (the class couldn't be resolved):
+                # keyed on nothing, it would merge with other endpoints. A visible gap instead
+                self.x.dropped.append((o, "endpoint without a path"))
+                self.fact_ids[id(n)] = None
+                return None
             if "access" not in props:
                 props.update(self._access(n, app))
             nid = p.node(
@@ -900,7 +906,8 @@ class _Builder:
                 entry_end_line=end,
                 functions=len({t["symbol"] for t in trace}),
                 steps=sum(1 for t in trace if t.get("step")),
-                trace=json.dumps(trace, separators=(",", ":")),
+                trace=trace_codec.encode(trace),
+                trace_entries=len(trace),
                 trace_files=sorted({t["file"] for t in trace}),
                 trace_symbols=sorted({t["symbol"] for t in trace}),
                 # Calls Steno couldn't follow: the flow may stop short there (D71)
@@ -950,7 +957,8 @@ class _Builder:
             entry_end_line=end,
             functions=len({t["symbol"] for t in trace}),
             steps=sum(1 for t in trace if t.get("step")),
-            trace=json.dumps(trace, separators=(",", ":")),
+            trace=trace_codec.encode(trace),
+            trace_entries=len(trace),
             trace_files=sorted({t["file"] for t in trace}),
             trace_symbols=sorted({t["symbol"] for t in trace}),
             unresolved_calls=stops or None,

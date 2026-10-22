@@ -143,6 +143,9 @@ class Engine:
         for rule in rules:
             if rule.kind == "code":
                 self._run_code(rule)
+        # Every rule has run: the syntax trees aren't needed again, and on a large repository
+        # they're a large share of the job's memory (D127)
+        self._roots.clear()
         return self.out
 
     def _learn_properties(self) -> None:

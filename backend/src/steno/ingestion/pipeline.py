@@ -51,7 +51,9 @@ from steno.graph.writer import write_plan
 from steno.identity.identify import deployables
 from steno.identity.identify import identify as run_identify
 from steno.identity.registry import SqlRegistry
+from steno.ingestion import memory
 from steno.reconcile.run import reconcile as run_reconcile
+from steno.resolvers.java import JVM_BATCHED, JVM_HEAP_MB
 from steno.rule_packs.packs import is_enabled, load_all_packs
 from steno.rule_packs.versions import dependencies
 
@@ -117,6 +119,10 @@ def parse(ctx: JobContext) -> dict[str, Any]:
     ctx.state["dependencies"] = deps = dependencies(ctx.workspace)
     engine = Engine(ctx.workspace, packs)
     engine.parse()
+    if engine.resolver is not None and engine.resolver.failed:
+        # Every flow in that language would come out hollow, and writing it would remove the
+        # repository's good facts: fail here so nothing is written
+        raise RuntimeError(f"symbol resolution failed: {engine.resolver.failed}")
     ctx.state["engine"] = engine
     return {
         "packs": [p.name for p in packs],
@@ -216,7 +222,7 @@ def flows(ctx: JobContext) -> dict[str, Any]:
         "modules": {m.path: sorted(m.roles) for m in structure.modules},
         "flows": len(flow_nodes),
         "steps": sum(1 for n in plan.nodes.values() if n.labels[0] == "Step"),
-        "trace_entries": sum(n.props.get("trace", "").count('"path"') for n in flow_nodes),
+        "trace_entries": sum(n.props.get("trace_entries") or 0 for n in flow_nodes),
         **plan.stats,
         "unmet_joins": len(plan.stats.get("unmet_joins", [])),
         "unmet_join_samples": plan.stats.get("unmet_joins", [])[:20],
@@ -405,10 +411,17 @@ def run_job(session: Session, job: IngestionJob) -> None:
         connector=session.get_one(Connector, repository.connector_id),
         session=session,
     )
+    # The JVM heap this repository needed last time, with headroom (D128)
+    resources = (job.stats or {}).get("resources") or {}
+    heap = resources.get("jvm_heap_mb")
+    token = JVM_HEAP_MB.set(heap if isinstance(heap, int) else None)
+    batched = JVM_BATCHED.set(bool(resources.get("batched")))
     try:
         for name, fn in STAGES:
             _run_stage(session, ctx, name, fn)
     finally:
+        JVM_HEAP_MB.reset(token)
+        JVM_BATCHED.reset(batched)
         if ctx.workspace is not None and ctx.workspace.exists():
             shutil.rmtree(ctx.workspace, ignore_errors=True)
 
@@ -421,6 +434,7 @@ def _run_stage(session: Session, ctx: JobContext, name: StageName, fn: StageFn) 
     session.commit()
 
     started = time.perf_counter()
+    measured = memory.reset_peak()
     try:
         metrics = fn(ctx)
         stage.status = StageStatus.SUCCEEDED
@@ -433,7 +447,12 @@ def _run_stage(session: Session, ctx: JobContext, name: StageName, fn: StageFn) 
         stage.finished_at = _now()
         session.commit()
         raise
-    stage.metrics = {**metrics, "seconds": round(time.perf_counter() - started, 3)}
+    peak = memory.peak_mb() if measured else None
+    stage.metrics = {
+        **metrics,
+        "seconds": round(time.perf_counter() - started, 3),
+        **({"rss_peak_mb": peak} if peak is not None else {}),
+    }
     stage.finished_at = _now()
     session.commit()
     log.info("job %s: %s %s", ctx.job.id, name, stage.status)

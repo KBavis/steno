@@ -179,10 +179,10 @@ ID_PREFIXES = {
 
 
 def _clean(props: dict[str, Any]) -> dict[str, Any]:
-    """Neo4j properties are scalars or lists of scalars."""
+    """Neo4j properties are scalars, lists of scalars, or bytes (a flow's compressed trace)."""
     out = {}
     for k, v in props.items():
-        if isinstance(v, (str, int, float, bool)) or (
+        if isinstance(v, (str, int, float, bool, bytes)) or (
             isinstance(v, list) and all(isinstance(x, (str, int, float, bool)) for x in v)
         ):
             out[k] = v

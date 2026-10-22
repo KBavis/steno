@@ -3,7 +3,6 @@ every HTTP flow and reaches the user table through a lambda @Bean; a validator r
 where Bean Validation runs it (its validation group); request matchers decide who may call
 each endpoint. Needs the JVM helper (`make resolver`)."""
 
-import json
 import shutil
 from textwrap import dedent
 
@@ -12,6 +11,7 @@ import pytest
 from steno.config import get_settings
 from steno.graph.build import Context, build
 from steno.graph.structure import detect
+from steno.graph.trace import decode as decode_trace
 from steno.ingestion.local import run_folder
 from steno.rule_packs.packs import is_enabled, load_packs
 
@@ -174,7 +174,7 @@ def flows(tmp_path_factory: pytest.TempPathFactory) -> dict:
             out[n.props["name"]] = {
                 **n.props,
                 "reads": reads,
-                "steps": json.loads(n.props["trace"]),
+                "steps": decode_trace(n.props["trace"]),
             }
     return out
 

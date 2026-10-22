@@ -2,13 +2,13 @@
 reassigned per branch, a method only subclasses define, and a function passed through a
 helper's parameter."""
 
-import json
 from pathlib import Path
 from textwrap import dedent
 
 from steno.config import get_settings
 from steno.graph.build import Context, build
 from steno.graph.structure import detect
+from steno.graph.trace import decode as decode_trace
 from steno.ingestion.local import run_folder
 from steno.rule_packs.packs import is_enabled, load_packs
 
@@ -93,7 +93,7 @@ def _calls(tmp_path: Path) -> list[tuple[str, bool]]:
     structure = detect(tmp_path, {ep.origin.file for ep in engine.out.entry_points})
     plan = build(engine.out, engine.resolver, structure, Context("d", None, None, 1, "c"))
     flow = next(n for n in plan.nodes.values() if n.labels[0] == "Flow")
-    trace = json.loads(flow.props["trace"])
+    trace = decode_trace(flow.props["trace"])
     return [(t["symbol"], bool(t.get("candidate"))) for t in trace if t["path"].count(".") == 1]
 
 

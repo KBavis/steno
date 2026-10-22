@@ -68,8 +68,9 @@ def _prefix_chains(x: Extraction) -> None:
 
     for node in x.nodes:
         owner = node.pending.pop("prefixed_by", None)
-        if owner and "path" in node.props:
-            node.props["path"] = _join_path(chain(owner), _text(node.props["path"]))
+        if owner:
+            # No path of its own (`@RequestMapping(method = GET)` alone): the controller's path
+            node.props["path"] = _join_path(chain(owner), _text(node.props.get("path", "")))
 
 
 def _text(value: Any) -> str:

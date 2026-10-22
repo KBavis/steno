@@ -289,6 +289,10 @@ class IngestionJob(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error: Mapped[str | None] = mapped_column(Text)
     stats: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    # The machine running it and the memory it reserved there (D128): a worker claims a job
+    # only when its reservation fits what that machine has left
+    host: Mapped[str | None] = mapped_column(String(200))
+    memory_reserved_mb: Mapped[int | None] = mapped_column(Integer)
 
 
 class IngestionStage(Base):

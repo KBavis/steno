@@ -1,6 +1,5 @@
 """The graph plan: architecture nodes, code nodes, and each flow's trace and steps (D60, D63)."""
 
-import json
 from pathlib import Path
 from textwrap import dedent
 
@@ -8,6 +7,7 @@ from steno.config import get_settings
 from steno.extraction.facts import Extraction, NodeFact, Origin
 from steno.graph.build import Context, build
 from steno.graph.structure import detect
+from steno.graph.trace import decode as decode_trace
 from steno.ingestion.local import run_folder
 from steno.rule_packs.packs import is_enabled, load_packs
 
@@ -97,7 +97,7 @@ def _app(tmp_path: Path) -> Path:
 
 
 def _trace(plan, flow=FLOW):
-    return {t["path"]: t for t in json.loads(plan.nodes[flow].props["trace"])}
+    return {t["path"]: t for t in decode_trace(plan.nodes[flow].props["trace"])}
 
 
 def test_architecture_and_code_nodes_without_function_nodes():

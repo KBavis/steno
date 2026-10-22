@@ -18,6 +18,7 @@ import re
 import subprocess
 import tempfile
 from collections.abc import Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,7 @@ from typing import Any
 from ast_grep_py import SgNode
 
 from steno.config import get_settings
+from steno.ingestion.memory import near_limit
 from steno.resolvers.base import (
     UNRESOLVED,
     Hook,
@@ -118,6 +120,7 @@ class JavaResolver:
     def __init__(self, root: Path, files: list[Path] | None = None, jars: list[Path] | None = None):
         self.root = root
         self.errors: list[tuple[Path, str]] = []
+        self.failed: str | None = None
         self.properties: dict[str, Any] = {}
         self.return_hints: dict[tuple[str, str], str] = {}  # not used yet: no library types
         sources = [
@@ -205,50 +208,14 @@ class JavaResolver:
     # ------------------------------------------------------------- the helper
 
     def _run(self, sources: list[Path], jars: list[Path]) -> dict[str, Any]:
-        settings = get_settings()
-        lib = settings.resolver_jvm_dir / "lib"
-        if not lib.is_dir():
-            self.errors.append(
-                (self.root, f"Java resolver unavailable: {lib} not found (run `make resolver`)")
-            )
-            return {}
-        with tempfile.TemporaryDirectory(prefix="steno-java-") as tmp:
-            listing, out, jar_list = (
-                Path(tmp, "files.txt"),
-                Path(tmp, "out.json"),
-                Path(tmp, "jars.txt"),
-            )
-            listing.write_text("\n".join(str(p) for p in sources))
-            jar_list.write_text("\n".join(str(j) for j in jars))
-            cmd = [
-                settings.java_bin,
-                "-Xss8m",
-                f"-Xmx{settings.resolver_jvm_max_heap}",
-                "-cp",
-                f"{lib}/*",
-                "dev.steno.resolver.Main",
-                "--root",
-                str(self.root),
-                "--files",
-                str(listing),
-                "--out",
-                str(out),
-                "--jars",
-                str(jar_list),
-                *(["--language-level", self.language_level] if self.language_level else []),
-            ]
-            try:
-                done = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=settings.resolver_jvm_timeout
-                )
-            except (OSError, subprocess.TimeoutExpired) as exc:
-                self.errors.append((self.root, f"Java resolver failed: {exc}"))
-                return {}
-            if done.returncode != 0 or not out.exists():
-                tail = (done.stderr or "").strip().splitlines()[-3:]
-                self.errors.append((self.root, f"Java resolver failed: {' | '.join(tail)}"))
-                return {}
-            return json.loads(out.read_text())
+        batch = get_settings().resolver_jvm_batch_files or (
+            DEFAULT_BATCH_FILES if JVM_BATCHED.get() else 0
+        )
+        data, error = run_helper(self.root, sources, jars, self.language_level, batch)
+        if error:
+            self.errors.append((self.root, error))
+            self.failed = error
+        return data
 
     # ------------------------------------------------- reading a rule's match
 
@@ -674,7 +641,11 @@ class JavaResolver:
             return str(path)
 
     def stats(self) -> dict[str, Any]:
-        return {**self._stats, "language_level": self.language_level or "default (21)"}
+        out = {**self._stats, "language_level": self.language_level or "default (21)"}
+        mem = out.get("memory") or {}
+        if near_limit(mem.get("heap_live_peak_mb"), mem.get("heap_limit_mb")):
+            out["memory"] = {**mem, "near_limit": True}  # this repository needs a larger heap soon
+        return out
 
 
 def _group(name: str) -> str:
@@ -782,3 +753,106 @@ def _split_top(text: str) -> list[str]:
     if buf.strip():
         parts.append(buf)
     return [p for p in (p.strip() for p in parts) if p]
+
+
+# The JVM heap for the job running now (MB), sized from its repository's last run (D128);
+# unset: the configured default
+JVM_HEAP_MB: ContextVar[int | None] = ContextVar("jvm_heap_mb", default=None)
+# Resolve the job running now in batches (D127): its last run ran out of memory
+JVM_BATCHED: ContextVar[bool] = ContextVar("jvm_batched", default=False)
+DEFAULT_BATCH_FILES = 200
+
+
+def run_helper(
+    root: Path,
+    sources: list[Path],
+    jars: list[Path],
+    language_level: str | None,
+    batch_files: int = 0,
+) -> tuple[dict[str, Any], str | None]:
+    """Run the JVM helper over `sources`; its output, or why it failed. `batch_files` > 0
+    resolves method bodies that many files at a time (D127)."""
+    settings = get_settings()
+    lib = settings.resolver_jvm_dir / "lib"
+    if not lib.is_dir():
+        return {}, f"Java resolver unavailable: {lib} not found (run `make resolver`)"
+    heap = f"{mb}m" if (mb := JVM_HEAP_MB.get()) else settings.resolver_jvm_max_heap
+    with tempfile.TemporaryDirectory(prefix="steno-java-") as tmp:
+        listing, out, jar_list = (
+            Path(tmp, "files.txt"),
+            Path(tmp, "out.json"),
+            Path(tmp, "jars.txt"),
+        )
+        listing.write_text("\n".join(str(p) for p in sources))
+        jar_list.write_text("\n".join(str(j) for j in jars))
+        cmd = [
+            settings.java_bin,
+            "-Xss8m",
+            f"-Xmx{heap}",
+            "-cp",
+            f"{lib}/*",
+            "dev.steno.resolver.Main",
+            "--root",
+            str(root),
+            "--files",
+            str(listing),
+            "--out",
+            str(out),
+            "--jars",
+            str(jar_list),
+            *(["--language-level", language_level] if language_level else []),
+            *(["--batch-files", str(batch_files)] if batch_files > 0 else []),
+        ]
+        try:
+            done = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=settings.resolver_jvm_timeout
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return {}, f"Java resolver failed: {exc}"
+        if done.returncode != 0 or not out.exists():
+            tail = (done.stderr or "").strip().splitlines()[-3:]
+            return {}, f"Java resolver failed: {' | '.join(tail)}"
+        return json.loads(out.read_text()), None
+
+
+def compare_batched(root: Path, batch_files: int) -> dict[str, Any]:
+    """Resolve a repository in one pass and in batches, and list every difference (D127): the
+    batched path replaces the single pass only when this is empty on real repositories."""
+    sources = [p for p in source_files(root, (".java",)) if not is_test_file(p.relative_to(root))]
+    level = java_version(root)
+    one, err1 = run_helper(root, sources, [], level, 0)
+    many, err2 = run_helper(root, sources, [], level, batch_files)
+    if err1 or err2:
+        raise RuntimeError(err1 or err2)
+    return {
+        "files": len(sources),
+        "one_pass": one.get("stats", {}),
+        "batched": many.get("stats", {}),
+        "differences": helper_differences(one, many),
+    }
+
+
+def helper_differences(a: dict[str, Any], b: dict[str, Any], limit: int = 50) -> list[str]:
+    """Where two helper outputs disagree, ignoring order and stats: by type, function, call
+    site, expression, import, and error."""
+    keyed = {
+        "types": lambda t: t["name"],
+        "functions": lambda f: f["symbol"],
+        "exprs": lambda e: (e["file"], e["sl"], e["sc"], e["el"], e["ec"]),
+        "errors": lambda e: (e.get("file"), e.get("message")),
+    }
+    out: list[str] = []
+    for section, key in keyed.items():
+        left = {key(x): x for x in a.get(section, [])}
+        right = {key(x): x for x in b.get(section, [])}
+        for k in sorted(set(left) | set(right), key=str):
+            if left.get(k) != right.get(k):
+                out.append(f"{section} {k}: {left.get(k)} != {right.get(k)}")
+    for section in ("calls", "imports"):
+        left, right = a.get(section, {}), b.get(section, {})
+        for k in sorted(set(left) | set(right)):
+            if left.get(k) != right.get(k):
+                out.append(f"{section} {k}: {left.get(k)} != {right.get(k)}")
+    return [d if len(d) < 400 else d[:400] + "…" for d in out[:limit]] + (
+        [f"…and {len(out) - limit} more"] if len(out) > limit else []
+    )

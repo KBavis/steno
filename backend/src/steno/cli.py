@@ -43,18 +43,21 @@ def api(reload: bool = typer.Option(False, help="Reload on code changes (develop
 def worker(
     once: bool = typer.Option(False, help="Run at most one job, then exit."),
     processes: int = typer.Option(
-        None, help="Worker processes, each running one job at a time (STENO_WORKER_PROCESSES)."
+        None,
+        help="Worker processes, each running one job at a time (STENO_WORKER_PROCESSES; "
+        "default: one per CPU, up to 8).",
     ),
 ) -> None:
-    """Claim and run ingestion jobs from the Postgres queue. Jobs running at once are capped
-    across all workers by STENO_MAX_PARALLEL_JOBS."""
-    from steno.ingestion.worker import run_forever, run_once, run_pool
+    """Claim and run ingestion jobs from the Postgres queue. A job starts only when its memory
+    fits what this machine has left (D128); STENO_MAX_PARALLEL_JOBS caps jobs across machines."""
+    from steno.ingestion.resources import machine
+    from steno.ingestion.worker import processes_for, run_forever, run_once, run_pool
 
     if once:
         if not run_once():
             typer.echo("queue empty")
     else:
-        n = processes or get_settings().worker_processes
+        n = processes or processes_for(machine())
         run_pool(n) if n > 1 else run_forever()
 
 
@@ -215,3 +218,28 @@ def extract(
     if output:
         Path(output).write_text(json.dumps(to_json(x), indent=2, default=str))
         typer.echo(f"wrote {output}")
+
+
+@app.command("resolver-check")
+def resolver_check(
+    path: str = typer.Argument(..., help="A local Java repository"),
+    batch_files: int = typer.Option(200, help="Files per batch for the batched pass"),
+) -> None:
+    """Resolve a Java repository in one pass and in batches and compare them (D127): the
+    batched path must give the same answers. Prints each pass's time and memory."""
+    import json
+    from pathlib import Path
+
+    from steno.resolvers.java import compare_batched
+
+    out = compare_batched(Path(path).resolve(), batch_files)
+    typer.echo(f"files: {out['files']}")
+    for name in ("one_pass", "batched"):
+        s = out[name]
+        typer.echo(f"{name}: {s.get('ms')} ms, batches {s.get('batches')}, "
+                   f"memory {json.dumps(s.get('memory'))}")  # fmt: skip
+    diffs = out["differences"]
+    typer.echo(f"differences: {len(diffs)}")
+    for d in diffs:
+        typer.echo(f"  {d}")
+    raise typer.Exit(1 if diffs else 0)
