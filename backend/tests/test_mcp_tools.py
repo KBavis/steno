@@ -1,6 +1,7 @@
 """The MCP tools' pure parts: folding a flow into an outline, and fitting a token budget."""
 
-from steno.mcp.tools import _fold, _stops, fit
+from steno.coverage.runs import count_by_application
+from steno.mcp.tools import _completeness, _fold, _source_groups, _stops, fit
 
 
 def _step(path: str, does: list[str] | None = None) -> dict:
@@ -73,3 +74,52 @@ def test_a_base_url_from_config_keeps_its_key_and_the_path():
     assert split_url("${suggestion-engine.base-url}suggestion") == (None, "/suggestion")
     assert split_url("${plaid.api.baseUrl}/link/token/create") == (None, "/link/token/create")
     assert config_keys("${plaid.api.baseUrl}/x/${other:default}") == ["other", "plaid.api.baseUrl"]
+
+
+def test_completeness_never_claims_to_be_complete():
+    """An answer says what it checked and what it couldn't, not that it's complete (D118)."""
+    out = _completeness(["the code of 3 applications"], {}, {})
+    assert out == {"checked": ["the code of 3 applications"], "not_checked": {}}
+    assert "complete" not in out
+
+
+def test_completeness_carries_unexplained_counts():
+    out = _completeness([], {"calls_not_followed": "2 calls"}, {"users-svc": {"hooks": 2}})
+    assert out["unexplained"] == {"users-svc": {"hooks": 2}}
+    assert out["unexplained_note"]
+
+
+def test_sources_group_citations_by_repository():
+    """What a consumer would fetch: each repository's folders and why it matters (D119)."""
+    cites = [
+        {"claim": "POST /orders is handled by A", "repo": "orders", "commit": "a1b2c3d4e5f6",
+         "file": "src/main/java/com/x/orders/A.java"},
+        {"claim": "A writes orders", "repo": "orders", "commit": "a1b2c3d4e5f6",
+         "file": "src/main/java/com/x/orders/api/B.java"},
+        {"claim": "A reads config", "repo": "orders", "file": "src/main/resources/application.yml"},
+        {"claim": "billing consumes it", "repo": "billing", "file": "Consumer.java"},
+        {"claim": "no repository"},
+    ]  # fmt: skip
+    groups = _source_groups(cites)
+    assert list(groups) == ["orders", "billing"]
+    assert groups["orders"]["paths"] == ["src/main/java/com/x/orders/", "src/main/resources/"]
+    assert groups["orders"]["commits"] == {"a1b2c3d4e5f6"}
+    assert groups["orders"]["why"] == [
+        "POST /orders is handled by A",
+        "A writes orders",
+        "A reads config",
+    ]
+    assert groups["billing"]["paths"] == ["Consumer.java"]
+
+
+def test_unexplained_counts_items_per_application_in_words():
+    items = [
+        ("unknown_hook", {"users-svc": 3, "auth-svc": 1}),
+        ("unknown_hook", {"users-svc": 1}),
+        ("external_call", {"users-svc": 5}),
+        ("library", {"other-svc": 1}),
+    ]
+    assert count_by_application(items, {"users-svc", "auth-svc"}) == {
+        "auth-svc": {"framework hooks no rule explains": 1},
+        "users-svc": {"I/O calls no rule explains": 1, "framework hooks no rule explains": 2},
+    }

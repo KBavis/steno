@@ -14,10 +14,11 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from steno.api.deps import SessionDep
 from steno.api.links import source_url
+from steno.coverage.runs import latest_runs
 from steno.db.models import (
     CoverageItem,
     CoverageKind,
@@ -26,8 +27,6 @@ from steno.db.models import (
     IngestionStage,
     Repository,
     Space,
-    StageName,
-    StageStatus,
 )
 
 router = APIRouter(prefix="/coverage", tags=["coverage"])
@@ -46,7 +45,7 @@ class Triage(BaseModel):
 def report(session: SessionDep, scope: str = "org") -> dict[str, Any]:
     """`scope`: `org`, `space:<id>` (or `space:none` for applications no space owns), or
     `app:<name>`."""
-    latest = _latest_runs(session)
+    latest = latest_runs(session)
     repos = {r.id: r for r in session.scalars(select(Repository))}
     spaces = {s.id: s for s in session.scalars(select(Space))}
 
@@ -306,7 +305,7 @@ def _pct(part: int, whole: int) -> float | None:
 @router.put("/triage")
 def triage(body: Triage, session: SessionDep) -> dict[str, int]:
     """Set an item's status in every repository's latest run; later runs carry it over."""
-    jobs = [job.id for job, _ in _latest_runs(session).values()]
+    jobs = [job.id for job, _ in latest_runs(session).values()]
     rows = list(
         session.scalars(
             select(CoverageItem).where(
@@ -321,27 +320,6 @@ def triage(body: Triage, session: SessionDep) -> dict[str, int]:
     for row in rows:
         row.status = body.status
     return {"updated": len(rows)}
-
-
-def _latest_runs(session: Any) -> dict[int, tuple[IngestionJob, IngestionStage]]:
-    """Each repository's latest job whose coverage stage succeeded, with that stage."""
-    last = (
-        select(IngestionJob.repository_id, func.max(IngestionJob.id).label("job_id"))
-        .join(IngestionStage, IngestionStage.job_id == IngestionJob.id)
-        .where(
-            IngestionStage.stage == StageName.COVERAGE,
-            IngestionStage.status == StageStatus.SUCCEEDED,
-        )
-        .group_by(IngestionJob.repository_id)
-        .subquery()
-    )
-    rows = session.execute(
-        select(IngestionJob, IngestionStage)
-        .join(last, last.c.job_id == IngestionJob.id)
-        .join(IngestionStage, IngestionStage.job_id == IngestionJob.id)
-        .where(IngestionStage.stage == StageName.COVERAGE)
-    ).all()
-    return {job.repository_id: (job, stage) for job, stage in rows}
 
 
 def _overall(statuses: list[str]) -> str:
