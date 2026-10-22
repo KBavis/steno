@@ -15,6 +15,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Identity,
     Index,
@@ -141,6 +142,22 @@ class CoverageKind(StrEnum):
     INCONSISTENCY = "inconsistency"  # produced but never consumed, a call to a missing endpoint
     CONFIG = "config"  # a config key that looks like a host, URL, topic, or queue, unread
     UNPARSED = "unparsed"  # a file Steno couldn't read at all
+
+
+class PatternState(StrEnum):
+    """Where a pattern stands in rule curation (D121): kept across runs, so nothing is
+    proposed twice and noise, once decided, stays decided."""
+
+    OPEN = "open"  # not looked at yet
+    QUEUED = "queued"  # taken by the current curation run
+    DRAFTING = "drafting"
+    PROPOSED = "proposed"  # a proven draft awaits review
+    APPROVED = "approved"
+    COVERED = "covered"  # a rule explains it now (approved, or written by hand)
+    REJECTED = "rejected"
+    IGNORED = "ignored"  # noise, decided once
+    BLOCKED_VOCABULARY = "blocked_vocabulary"  # needs a node, edge, or property Steno lacks
+    NEEDS_PERSON = "needs_person"  # the drafter couldn't make a rule work
 
 
 class CoverageStatus(StrEnum):
@@ -346,6 +363,59 @@ class CoverageItem(Base):
     status: Mapped[CoverageStatus] = mapped_column(
         _enum(CoverageStatus, "coverage_status"), default=CoverageStatus.UNEXPLAINED
     )
+
+
+class CoveragePattern(Base):
+    """One kind of thing no rule explains, across the organization (D121): named by what it
+    is (`unknown_hook:com.acme.messaging.AcmeHandler`), never by where. Its reach is counted
+    from the occurrences in each repository's latest run."""
+
+    __tablename__ = "coverage_pattern"
+
+    id: Mapped[int] = _pk()
+    fingerprint: Mapped[str] = mapped_column(Text, unique=True)
+    kind: Mapped[CoverageKind] = mapped_column(_enum(CoverageKind, "coverage_kind"))
+    signal: Mapped[str] = mapped_column(String(32))
+    label: Mapped[str] = mapped_column(Text, default="")
+    # What it belongs to, for clustering into frameworks (D123): a library, a package root,
+    # a config prefix; None for an application's own code
+    owner: Mapped[str | None] = mapped_column(Text)
+    state: Mapped[PatternState] = mapped_column(
+        _enum(PatternState, "pattern_state"), default=PatternState.OPEN
+    )
+    repositories: Mapped[int] = mapped_column(Integer, default=0)
+    applications: Mapped[int] = mapped_column(Integer, default=0)
+    occurrences: Mapped[int] = mapped_column(Integer, default=0)
+    score: Mapped[float] = mapped_column(Float, default=0.0)
+    # Why it may matter beyond its reach (D122): "referenced_by_code", …
+    evidence: Mapped[list[Any]] = mapped_column(default=list)
+    first_seen_job: Mapped[int | None] = mapped_column(Integer)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=_now, onupdate=_now
+    )
+    note: Mapped[str | None] = mapped_column(Text)  # why it's in its state (who, what)
+
+
+class CoverageOccurrence(Base):
+    """One place a pattern occurs, keyed by its file and enclosing symbol, not its line, so an
+    edit that moves lines isn't new code (D121). A repository's rows are replaced with each
+    run's: what's gone is deleted; what's new keeps the job that first saw it."""
+
+    __tablename__ = "coverage_occurrence"
+    __table_args__ = (
+        UniqueConstraint("pattern_id", "repository_id", "file", "symbol"),
+        Index("ix_coverage_occurrence_repository", "repository_id"),
+    )
+
+    id: Mapped[int] = _pk()
+    pattern_id: Mapped[int] = mapped_column(
+        ForeignKey("coverage_pattern.id", ondelete="CASCADE"), index=True
+    )
+    repository_id: Mapped[int] = mapped_column(ForeignKey("repository.id", ondelete="CASCADE"))
+    file: Mapped[str] = mapped_column(Text, default="")
+    symbol: Mapped[str] = mapped_column(Text, default="")
+    application: Mapped[str | None] = mapped_column(String(200))
+    first_seen_job: Mapped[int] = mapped_column(Integer)
 
 
 # ---------------------------------------------------------------------------

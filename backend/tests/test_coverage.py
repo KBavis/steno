@@ -103,3 +103,64 @@ def test_completeness_counts_explained_io(tmp_path):
     _, metrics = _report(tmp_path)
     # The two httpx calls are explained by the httpx rule; redis.publish isn't
     assert (metrics["io_calls"], metrics["io_calls_explained"]) == (3, 2)
+
+
+def test_unread_files_are_grouped_by_convention_and_noise_is_skipped():
+    """D122: files no rule read are one pattern per extension and place; noise isn't listed."""
+    from steno.coverage.collect import _unread_files, convention
+
+    assert convention("svc-a/src/main/resources/flows/order.xyz") == "resources/flows/"
+    assert convention("tools/run.sh") == "tools/"
+    found: dict = {}
+
+    class _It:
+        def __init__(self, key):
+            self.key, self.files = key, []
+
+        def add(self, sample):
+            self.files.append(sample["file"])
+
+    def item(kind, signal, target, label):
+        return found.setdefault(target, _It((kind, signal, label)))
+
+    files = [
+        "a/src/main/resources/flows/order.xyz",
+        "b/src/main/resources/flows/pay.xyz",
+        "a/src/main/resources/db/V1__init.sql",
+        "a/src/main/java/com/x/A.java",  # read by a rule
+        "README.md",
+        "a/pom.xml",
+        ".github/workflows/ci.yml",
+        "a/src/test/resources/flows/fixture.xyz",
+    ]
+    _unread_files(files, {"a/src/main/java/com/x/A.java"}, item, lambda f: "")
+    assert sorted(found) == [".sql@resources/db/", ".xyz@resources/flows/"]
+    assert len(found[".xyz@resources/flows/"].files) == 2
+
+
+def test_code_in_a_language_no_pack_reads_is_one_pattern():
+    from steno.coverage.collect import _unread_files
+
+    found: dict = {}
+
+    def item(kind, signal, target, label):
+        return found.setdefault(target, type("I", (), {"add": lambda self, s: None})())
+
+    _unread_files(["web/src/pages/a.js", "web/src/components/x/b.js", "web/a.css"], set(), item,
+                  lambda f: "")  # fmt: skip
+    assert sorted(found) == [".js@*"]
+
+
+def test_an_unread_file_the_code_names_has_evidence(tmp_path):
+    """D122: `getResource("flows/order.xyz")` makes order.xyz's pattern rank higher."""
+    from steno.coverage.collect import Item, _referenced
+
+    (tmp_path / "A.java").write_text('class A { void f() { load("flows/order.xyz"); } }')
+    named = Item("config", "unread_file", ".xyz@resources/flows/", "x")
+    named.add({"file": "src/main/resources/flows/order.xyz"})
+    other = Item("config", "unread_file", ".conf@nginx/", "y")
+    other.add({"file": "nginx/site.conf"})
+    items = {("config", named.target): named, ("config", other.target): other}
+    _referenced(items, tmp_path, {"A.java"})
+    assert named.evidence == {"referenced_by_code"}
+    assert other.evidence == set()

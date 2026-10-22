@@ -24,6 +24,7 @@ from steno.claims.store import store_claims
 from steno.config import get_settings
 from steno.connectors.git import clone as git_clone
 from steno.coverage.collect import collect as collect_coverage
+from steno.coverage.patterns import record as record_patterns
 from steno.db.models import (
     ChangeKind,
     Connector,
@@ -302,13 +303,18 @@ def coverage(ctx: JobContext) -> dict[str, Any]:
         enabled=ctx.state.get("packs"),
         deps=ctx.state.get("dependencies"),
         **_agreement_items(ctx),
+        files=[p.relative_to(engine.repo).as_posix() for p in engine.files],
+        read=engine.read,
+        root=engine.repo,
     )
     previous = _previous_triage(ctx)
+    statuses: dict[str, CoverageStatus] = {}
     for it in report.items:
         status = previous.get((it.kind, it.target), CoverageStatus.UNEXPLAINED)
         # "Explained" means a rule covers it now; if it's back, it isn't
         if status == CoverageStatus.EXPLAINED:
             status = CoverageStatus.UNEXPLAINED
+        statuses[it.fingerprint] = status
         ctx.session.add(
             CoverageItem(
                 job_id=ctx.job.id,
@@ -323,7 +329,9 @@ def coverage(ctx: JobContext) -> dict[str, Any]:
                 status=status,
             )
         )
-    return report.metrics
+    # The organization's patterns: what rule curation works from (D121)
+    patterns = record_patterns(ctx.session, ctx.repository.id, ctx.job.id, report.items, statuses)
+    return {**report.metrics, "patterns": patterns}
 
 
 def _application_of(ctx: JobContext) -> Any:

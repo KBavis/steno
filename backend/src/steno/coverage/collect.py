@@ -10,9 +10,11 @@ Items are keyed by (kind, target), so the same gap in another run, or another re
 is the same item: that's how triage carries over and how the org-wide report adds up (D62).
 """
 
+import re
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from steno.accounting import Ledger
@@ -21,6 +23,7 @@ from steno.graph.build import GraphPlan
 from steno.resolvers.base import Function, Resolvers
 from steno.rule_packs.packs import Pack
 from steno.rule_packs.versions import Dependency, in_range, versions_of
+from steno.source.files import is_test_file
 
 SAMPLES = 5
 
@@ -55,12 +58,24 @@ class Item:
     occurrences: int = 0
     samples: list[dict[str, Any]] = field(default_factory=list)
     applications: dict[str, int] = field(default_factory=dict)  # application → occurrences
+    # Every place it occurs: (file, enclosing symbol, application). The symbol, not the line,
+    # so an edit that moves lines isn't new code (D121)
+    keys: set[tuple[str, str, str]] = field(default_factory=set)
+    # Why it may matter beyond its reach (D122), e.g. "referenced_by_code"
+    evidence: set[str] = field(default_factory=set)
+
+    @property
+    def fingerprint(self) -> str:
+        """What it is, across the organization: the pattern it belongs to (D121)."""
+        return f"{self.signal}:{self.target}"
 
     def add(self, sample: dict[str, Any]) -> None:
         self.occurrences += 1
         app = sample.get("application")
         if app:
             self.applications[app] = self.applications.get(app, 0) + 1
+        symbol = sample.get("function") or sample.get("detail") or ""
+        self.keys.add((sample.get("file") or "", str(symbol), app or ""))
         if len(self.samples) < SAMPLES:
             self.samples.append(sample)
 
@@ -70,6 +85,31 @@ class Report:
     items: list[Item]
     # Completeness numbers for the repository (D62)
     metrics: dict[str, Any]
+
+
+# Files never worth a rule anywhere (D122): images, docs, lock files, editor and CI settings.
+# Checked against the facets: SQL migrations aren't here (the Data facet reads them)
+NOISE_SUFFIXES = {
+    ".md", ".txt", ".rst", ".adoc", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp",
+    ".pdf", ".lock", ".iml", ".jar", ".class", ".zip", ".gz", ".tar", ".tgz", ".ttf", ".woff",
+    ".woff2", ".eot", ".map", ".gitignore", ".gitattributes", ".gitkeep", ".editorconfig",
+    ".dockerignore", ".bat", ".cmd", ".pyc", ".avif", ".bmp", ".mp4", ".webm", ".mp3", ".css",
+    ".scss", ".less",
+}  # fmt: skip
+# Source code in a language no pack reads: one pattern per language, wherever it sits
+CODE_SUFFIXES = {
+    ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".vue", ".go", ".kt", ".kts", ".scala", ".rb",
+    ".cs", ".php", ".rs", ".swift", ".c", ".cc", ".cpp", ".h", ".hpp", ".m", ".dart", ".ex",
+    ".exs", ".clj", ".groovy", ".py", ".java",
+}  # fmt: skip
+NOISE_DIRS = {".github", ".gitlab", ".idea", ".vscode", ".mvn", "gradle", ".circleci"}
+NOISE_NAMES = {"LICENSE", "NOTICE", "gradlew", "mvnw", "Makefile", "Dockerfile", "Jenkinsfile"}
+# Build files: read for dependencies and versions, not by rules
+BUILD_NAMES = {
+    "pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts",
+    "gradle.properties", "libs.versions.toml", "pyproject.toml", "setup.py", "setup.cfg",
+    "requirements.txt", "package.json",
+}  # fmt: skip
 
 
 def collect(
@@ -82,6 +122,9 @@ def collect(
     deps: list[Dependency] | None = None,
     disagreements: list[dict[str, Any]] | None = None,
     unmatched: list[dict[str, Any]] | None = None,
+    files: list[str] | None = None,
+    read: set[str] | None = None,
+    root: Path | None = None,
 ) -> Report:
     """`app_of`: the application a file belongs to (its service module's), so items and
     numbers can be shown per application, not just per repository. `enabled`: the packs that
@@ -112,6 +155,9 @@ def collect(
         _libraries(resolver, all_packs, items, item)
     _versions(enabled or [], deps or [], item)
     _agreement(disagreements or [], unmatched or [], item)
+    if files is not None:
+        _unread_files(files, read or set(), item, where)
+        _referenced(items, root, read or set())
     gaps = _unresolved_types(resolver) if resolver else 0
 
     stats = plan.stats
@@ -331,6 +377,84 @@ def _libraries(r: Resolvers, packs: list[Pack], items: dict[Any, Item], item: An
         it = item("library", "library", lib, lib)
         for f in sorted(where):
             it.add({"file": f, "detail": f"imports {lib}"})
+
+
+def _unread_files(
+    files: list[str], read: set[str], item: Any, where: Callable[[str | None], str]
+) -> None:
+    """Files no rule looked at (D122), grouped by extension and where they sit, so 40
+    repositories' `*.xyz under resources/flows/` is one pattern. Noise and build files aren't
+    listed; everything else is, ranked low until something says it matters."""
+    for rel in files:
+        if rel in read:
+            continue
+        p = PurePosixPath(rel)
+        if (
+            p.suffix.lower() in NOISE_SUFFIXES
+            or p.name in NOISE_NAMES
+            or p.name in BUILD_NAMES
+            or p.name.startswith(".")
+            or NOISE_DIRS & set(p.parts[:-1])
+            or is_test_file(Path(rel))
+        ):
+            continue
+        kind = p.suffix.lower() or p.name
+        if kind in CODE_SUFFIXES:
+            target, label = f"{kind}@*", f"Code in a language no pack reads · *{kind}"
+        else:
+            place = convention(rel)
+            target = f"{kind}@{place}"
+            label = (
+                f"Unread files · *{kind} under {place}"
+                if p.suffix
+                else f"Unread · {p.name} in {place}"
+            )
+        item("config", "unread_file", target, label).add(
+            {"file": rel, "function": "", "application": where(rel)}
+        )
+
+
+def _referenced(items: dict[Any, Item], root: Path | None, read: set[str]) -> None:
+    """An unread file whose name the code mentions (`getResource("flows/order.xyz")`) is
+    probably wiring, not noise: evidence that ranks its pattern higher (D122)."""
+    unread = [i for (_, _), i in items.items() if i.signal == "unread_file"]
+    if root is None or not unread:
+        return
+    names: dict[str, list[Item]] = defaultdict(list)
+    for it in unread:
+        for file, _, _ in it.keys:
+            name = PurePosixPath(file).name
+            if len(name) > 4:  # too short to tell apart from ordinary words
+                names[name].append(it)
+    if not names:
+        return
+    pattern = re.compile("|".join(re.escape(n) for n in sorted(names, key=len, reverse=True)))
+    for rel in sorted(read):
+        if PurePosixPath(rel).suffix not in CODE_SUFFIXES:
+            continue
+        try:
+            text = (root / rel).read_text(errors="replace")
+        except OSError:
+            continue
+        for m in set(pattern.findall(text)):
+            for it in names.pop(m, []):
+                it.evidence.add("referenced_by_code")
+        if not names:
+            return
+        pattern = re.compile("|".join(re.escape(n) for n in sorted(names, key=len, reverse=True)))
+
+
+def convention(rel: str) -> str:
+    """Where a file sits, as a convention shared across repositories: the folders after
+    `src/main/` or `src/` (`resources/flows/`), else its parent folder's name."""
+    parts = PurePosixPath(rel).parts[:-1]
+    for marker in (("src", "main"), ("src",)):
+        n = len(marker)
+        for i in range(len(parts) - n + 1):
+            if tuple(parts[i : i + n]) == marker:
+                rest = parts[i + n :]
+                return "/".join(rest) + "/" if rest else "/"
+    return (parts[-1] + "/") if parts else "/"
 
 
 def _agreement(

@@ -20,6 +20,7 @@ from steno.api.routes import (
     health,
     jobs,
     organization,
+    patterns,
     repositories,
     spaces,
 )
@@ -44,7 +45,17 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    for module in (health, organization, spaces, connectors, repositories, jobs, graph, coverage):
+    for module in (
+        health,
+        organization,
+        spaces,
+        connectors,
+        repositories,
+        jobs,
+        graph,
+        coverage,
+        patterns,
+    ):
         app.include_router(module.router, prefix="/api")
 
     @app.exception_handler(IntegrityError)

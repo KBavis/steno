@@ -113,6 +113,9 @@ class Engine:
         # One symbol resolver per language the enabled packs read (D70)
         self.resolver: Resolvers | None = None
         self.files: list[Path] = []
+        # Files some rule looked at (relative paths): the rest are the coverage report's unread
+        # files (D122)
+        self.read: set[str] = set()
         self._roots: dict[Path, SgNode] = {}
 
     def parse(self) -> None:
@@ -172,6 +175,7 @@ class Engine:
             root = self._root(path, rule.language)
             if root is None:
                 continue
+            self.read.add(path.relative_to(self.repo).as_posix())
             try:
                 matches = root.find_all(config)  # type: ignore[arg-type]
             except Exception as exc:  # an invalid rule: report once, skip the rule
@@ -244,6 +248,7 @@ class Engine:
                 for g in globs
             ):
                 out.append((path, rel))
+                self.read.add(rel)
         return out
 
     def _run_config(self, rule: Rule) -> None:
