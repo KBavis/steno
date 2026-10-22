@@ -8,6 +8,7 @@ How agents get context out of Steno quickly and accurately: the MCP tools, searc
 > - **Every result carries citations** and lists the scopes searched, and a **completeness block** says what Steno couldn't see.
 > - **How the tools work together** ([§5](#how-the-tools-work-together-built)): top-down, `search` → `where` → `scope` → `get_node` → `get_flow` → `view_flow_code`, reading `completeness` and `agreement` before claiming anything is complete. The server sends this to agents as its MCP instructions when they connect.
 > - **No file contents are stored:** code is read from the git host at the ingested commit; code search goes through the git host's search API.
+> - **Breadth, not depth** ([§4](#breadth-and-depth-decided-d119)): Steno answers *what and where* and serves the code; the consuming agent reasons, and clones only when a task needs it. Every answer that cites code says which `sources` to fetch.
 > - **Later:** LLM-written flow cards and vector search (after the cost dry run), and Jev as a navigator for routing and verification (`v2`). The routing design below describes that end state.
 
 ```mermaid
@@ -25,8 +26,10 @@ flowchart LR
 | Piece | Scope |
 |---|---|
 | MCP tools listed as built in §5 | `POC` (built) |
-| Completeness block on impact answers (D89) | `POC` stage A |
-| `find_paths`, `analyze_change`, `get_interface`, `get_changes`, `find_symbols`, `glossary` | `POC` stages B–D / `v1`, as needed |
+| Completeness block on impact answers (D89), with `checked` / `not_checked` and unexplained counts (D118) | Built |
+| `sources` block; the depth rule in the server instructions (D119) | Built |
+| `get_interface` with effective contracts (D115, D117) | `POC` stage B |
+| `find_paths`, `analyze_change`, `get_changes`, `find_symbols`, `glossary`, `view_file`, `list_directory`, `search_code` | `POC` stages B–D / `v1`, as needed |
 | LLM cards, embeddings, vector search | After the cost dry run (stage D) |
 | Jev routing, verification, navigation (Q0–Q4, N1–N5) | `v2`; stand-ins (global search, ranking by score) until then |
 | MCP authentication and scoping by role | `v1` |
@@ -175,7 +178,36 @@ Code usually **isn't local** to the agent. Steno **stores no file contents**. Ev
 - An in-memory cache in the MCP server absorbs repeated reads.
 - The cost: git credentials live in the MCP server, and there's some latency and rate-limit risk. Revisit only if measurements show a problem.
 
-**Code search (Decided, D90).** The graph usually tells an agent *where* to look, and the code tools read it, so broad searching should be rare. When the graph has no lead, a `search_code` tool goes through the **git host's own search API** (Bitbucket, GitHub, GitLab), not an index Steno builds, which would mean storing file contents. Where Steno has a gap, its answer points to the exact unresolved call site (D71), and the agent reads that one spot. Not built yet.
+**Code search (Decided, D90).** The graph usually tells an agent *where* to look, and the code tools read it, so broad searching should be rare. When the graph has no lead, a `search_code` tool goes through the **git host's own search API** (Bitbucket, GitHub, GitLab), not an index Steno builds, which would mean storing file contents. It takes a repository or application as scope, so an agent can search one place it was pointed to without cloning it. Where Steno has a gap, its answer points to the exact unresolved call site (D71), and the agent reads that one spot. Not built yet.
+
+### Breadth and depth (Decided, D119)
+
+Steno is the **map**: it answers *what and where* across the organization. The consuming agent (Claude Code, Copilot) does the **reasoning**. Steno never runs an agent to answer a question. Going deeper is a ladder, and the consumer chooses the rung:
+
+| Rung | What | Who |
+|---|---|---|
+| 1. Facts | Flows, dependents, contracts (`get_interface`), completeness | Steno |
+| 2. Code | `view_flow_code`, `view_file`, `list_directory`, `search_code` in one repository, read from the git host | Steno serves, the agent reads |
+| 3. Clone | Only the sources an answer cited, at the cited commit, sparse when possible | The consumer, or the harness it runs in |
+
+**Clone when** the task edits code, builds, or runs tests; needs a toolchain (compiling, type checking, git history); needs more than a handful of files or wide exploration with no pointer; or concerns code newer than the ingested commit (`head_moved: true` and the change matters). **Don't clone** to find consumers or impact, to understand a flow, or to build a request when the contract has no gaps.
+
+**Every answer that cites code carries `sources`**, so the consumer knows exactly what to fetch. It summarizes the citations by source; `kind` makes it work for connectors that aren't repositories:
+
+```json
+"sources": [{
+  "kind": "git",
+  "repo": "acme/order-service",
+  "clone_url": "git@github.com:acme/order-service.git",
+  "branch": "main",
+  "commit": "a1b2c3d4e5f6…",
+  "head_moved": true,
+  "paths": ["src/main/java/com/acme/orders/", "src/main/resources/"],
+  "why": ["consumes orders.created", "writes orders (insert)"]
+}]
+```
+
+Steno computes `sources` from the answer's citations (built: `Tools.sources`, attached to every answer that cites code): one entry per repository, its cited folders with nested ones dropped (at most 8), and up to three of the claims citing it. `head_moved` compares the ingested commit with the branch's head, read with `git ls-remote` and trusted for five minutes; it's left out when the host can't be reached. How many commits behind isn't shown: that needs the git host's compare API. Steno decides nothing here. The harness that clones and manages workspaces belongs to the SDLC layer, not to Steno (D98). The server instructions carry the rule: Steno answers *what and where*; for *exactly how*, read the cited code before concluding; clone the cited sources when a task needs it.
 
 ## 5. MCP tools (Decided)
 
@@ -219,7 +251,8 @@ flowchart TD
 |---|---|---|
 | `where` (search) | Every space and application with matches, with counts | Check it before saying "only" or "all" |
 | `more` (search, flows) | There's more than shown | Narrow with `scope`, or open with `under` |
-| `completeness` | What the answer can't vouch for: calls not followed, hosts set outside the repository, framework hooks no rule explains, unconfirmed callers, declared-only uses. `complete: false` means "maybe more" | Say so in the answer; don't present it as complete |
+| `completeness` | What the answer can't vouch for: calls not followed, hosts set outside the repository, framework hooks no rule explains, unconfirmed callers, declared-only uses. `checked` is what Steno looked at (the flow's functions, every ingested application's code, other witnesses); `not_checked` is what it couldn't (each entry says why); `unexplained` counts the applications' open coverage items (D118). No answer claims to be complete | Say so in the answer; don't present it as complete |
+| `sources` (D119) | Which repositories (or other sources) the citations come from, at which commit, which paths, how far behind their head | Read the cited code from there; clone only when the task needs it |
 | `agreement` | Where another witness (an ACL file, a manifest) checked a fact: `confirmed`, `code_only` (no grant or declaration), `declared_only` (stated, no code found) | Report `code_only` and `declared_only` as findings, not facts |
 | `possible_callers`, `possible_targets` | Calls whose host isn't in any repository, matched by method and path | Hints, never facts: say "possibly" |
 | `ingested: false`, `stub` | Known only from another witness | Don't describe its behavior; Steno hasn't read its code |
@@ -243,7 +276,7 @@ flowchart TD
 | Treating `possible_callers` as callers | They're unconfirmed; the host comes from config outside the repository |
 | Searching business words ("charge the customer") | Use the words the code uses (`payment`, `charge`, `billing`); semantic search comes later |
 
-**How agents learn this.** The MCP server's `instructions` (in `backend/src/steno/mcp/server.py`) are a condensed form of this section; MCP clients receive them when they connect, and Claude Code puts them in the agent's system prompt. Each tool's description says what it returns. Keep the three in step: a change to what a tool returns goes in its description, and in the instructions when it changes the pattern.
+**How agents learn this.** The MCP server's `instructions` (in `backend/src/steno/mcp/server.py`) are a condensed form of this section and the depth rule ([§4](#breadth-and-depth-decided-d119)); MCP clients receive them when they connect, and Claude Code puts them in the agent's system prompt. Each tool's description says what it returns. Keep the three in step: a change to what a tool returns goes in its description, and in the instructions when it changes the pattern.
 
 ### Citations (Decided; built)
 
@@ -308,7 +341,27 @@ Built: `find_dependents` (`via`: `http`, `messaging`, `data`; `depth`; upstream 
 | `find_dependents(id, direction: upstream\|downstream, depth?, via?)` | "Who consumes X?" and blast radius. `via` filters by transport. | Dependents grouped by app and space; each lists every way it touches the target (`how`: a flow that reads and writes a table is a reader and a writer), with a citation per call site. For a topic, `agreement` for every application; a declared-only use (granted, no code found) makes the answer incomplete |
 | `find_paths(from, to, max_hops?)` | How two things are connected: every chain of flows and interfaces from one node to another | Ordered paths, each hop labeled sync or async |
 | `analyze_change(prs[] \| branch \| diff)` | **PR review and CI.** What a change affects, **including related PRs** (see below) | Affected flows, contract changes, consumers, which of them are covered by related PRs, and the order to deploy |
-| `get_interface(id)` | **Integration guide.** The contract, request/response entities, how to trigger it, and existing callers as examples | Contract + entities + example callers |
+| `get_interface(id)` | **Integration guide and test input** (D117). Everything needed to call an interface, in order (below) | Trigger, interceptor requirements, effective contracts, validation, a skeleton example, callers, completeness |
+
+### `get_interface`: what it takes to call an interface (Decided, D117)
+
+Built from facts stored at ingestion ([graph reference: contracts and interceptors](./graph-reference.md#contracts-decided-d115)); one call, in the order an agent needs to build a request:
+
+```
+get_interface("POST /orders")
+  trigger:      POST /orders   (a topic: its name and consumer group)
+  requires:     what interceptors require: X-Tenant-Id header, bearer token
+  request:      effective contract as JSON Schema: structure, nesting, required, constraints, enums, discriminators
+  response:     effective contract, after interceptors that wrap it ({data, meta}); error shape from error handlers
+  validators:   custom constraint annotations → pointers to their code
+  validation:   pointers to `validates` trace entries in the flow (checks in code)
+  example:      a deterministic skeleton: valid shape, placeholder values
+  callers:      real call sites in other applications, cited
+  completeness: unresolved fields, unexplained hooks, interceptors from libraries not ingested
+  sources:      where to read more
+```
+
+**Steno finds validation; the agent reads it.** A check written in code (`if (amount > limit) throw …`) is listed as a pointer, and the agent reads what it checks with `view_flow_code`. The agent also turns the skeleton and the callers into realistic values. If a contract can't be resolved (a `Map<String, Object>` body, a type from a library Steno can't read), the answer says so in completeness instead of leaving it out.
 
 **`find_paths` examples.** `from` and `to` are any two nodes:
 
@@ -361,7 +414,7 @@ To be validated against real usage. Every tool call is logged in `tool_call` (gr
 
 ## 7. LLM use and cost
 
-- **An LLM only writes text:** flow purposes and narratives, application, space, and organization cards, glossary definitions on request. Nothing else. Steno runs no LLM at query time. (Decided)
+- **An LLM writes text and drafts rules, never facts:** flow purposes and narratives, application, space, and organization cards, glossary definitions on request, and rule drafts that a person approves after Steno proves them ([rule curation](./ingestion/rule-curation.md), D120). Steno runs no LLM at query time. (Decided)
 - **Every flow gets an LLM-written purpose and narrative** at initial ingestion, on top of its deterministic signature (D24). Applications, spaces, and the organization get LLM cards. Interfaces, entities, and tables get deterministic cards. Functions get none.
 - **Levers for scale:** a small model by default, the Batch API (50% cheaper), and prompt caching (flows in one application share a cached prefix). On re-ingestion, a decision (Jev I5 later, a stand-in now) checks whether a flow's purpose is still accurate before anything is regenerated.
 - **Output is cached by the hash of its inputs** (`llm_output`), so unchanged inputs are never paid for twice, and Neo4j can be rebuilt without re-spending.

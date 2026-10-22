@@ -5,8 +5,9 @@ After every ingestion, Steno reports **what no rule explained**, so gaps are mea
 > **In one minute**
 > - Eight signals, each a place a fact could hide: unknown hosts, unexplained external calls, libraries with no pack, unknown triggers, unreachable code, matches Steno couldn't check, unparsed files, unresolved library types.
 > - Items are **aggregated across the organization** (one fix helps every repository that has the gap) and **ranked by reach**: applications, then spaces, then occurrences.
-> - Every item has a **triage state** (unexplained / ignored / explained) that persists, so the report converges instead of staying noisy.
+> - Every item has a **triage state** (unexplained / ignored / explained) that persists, so the report converges instead of staying noisy. Planned (D121): items become org-wide **patterns** with occurrence keys and states that [rule curation](./rule-curation.md) works from.
 > - Disagreements between witnesses (code only, declared only) and unmatched names are items like any other; a dedicated **agreement view** next to the report is planned.
+> - **The report feeds rule curation** (D120): Steno drafts rules for its top patterns, and a person approves them.
 
 ```mermaid
 flowchart LR
@@ -14,7 +15,7 @@ flowchart LR
     C --> R["Org-wide report<br/>ranked by reach"]
     R --> T{"Triage"}
     T -- "not I/O, noise" --> IG["ignored<br/>(stays hidden)"]
-    T -- "real gap" --> FX["write a rule, add a pack,<br/>declare an alias, ingest the library"]
+    T -- "real gap" --> FX["rule curation drafts a rule;<br/>or add a pack, declare an alias,<br/>ingest the library"]
     FX --> NX["next run: explained"]
     NX -. "comes back" .-> R
 ```
@@ -52,7 +53,8 @@ UNEXPLAINED (org-wide, top 3)
 | **Unparsed files** | Files Steno couldn't read at all: nothing in them is in the graph | Yes |
 | **Unresolved library types** | A number in the metrics, not items (D101): calls that ran through a library type Steno can't see. The library call each chain starts from is what's accounted for; the count informs the dependency-JAR decision (D69). | Yes (metric) |
 | **Cross-app inconsistencies** | A topic or channel produced but never consumed, or consumed but never produced; a call to an endpoint the target app doesn't expose. Each means one side was missed. | Later: needs several applications (POC stage B) |
-| **Config no rule read** | Config keys that look like hosts, URLs, topics, or queues that no rule read | Later: needs config rules |
+| **Config no rule read** (D122) | Config keys no rule read, grouped by prefix (`acme.messaging.*`) | Planned |
+| **Unread files** (D122) | Files no rule looked at, grouped by extension and location convention across the organization (`*.xyz under resources/flows/`); source code in a language no pack reads is one item per language (`*.js`). Noise (images, Markdown, lock files, CSS, editor and CI settings), build files, and test code aren't listed; SQL is, because the Data facet reads migrations. Ranked low until something says it matters. | Yes |
 
 **By application, at any scope (D67).** Each item records the applications it occurs in (from its files' service modules), and the stage records each application's numbers. The report reads like the graph: the organization (its spaces, worst first), a space (its sub-spaces and applications), or one application, each with rolled-up numbers. Items are ranked by reach: how many applications, then spaces, one fix would help.
 
@@ -83,29 +85,57 @@ Once a facet has a second witness, every disagreement is an item, triaged the sa
 
 It's read by scope like the coverage report. Many disagreements in one direction for one framework point at a rule; scattered ones point at stale declarations. See [Trust](../../concepts/trust.md#3-agreement-between-witnesses).
 
-## 4. Turning a coverage item into a rule (Deferred)
+## 4. Turning a coverage item into a rule (Decided, D120–D122)
 
-**In the POC, a person writes each rule,** by hand or with the `rule-pack-author` skill ([Rules §8](./rules-and-packs.md#8-writing-rules-by-hand-or-with-the-skill-decided)), and the coverage report says which rule to write next. **AI suggestions during onboarding** (an LLM reading samples and drafting rules for a person to approve) are `v1`; see [Onboarding](../../plan/onboarding.md). Steno never generates rules on its own without approval. The template approach below is a later enhancement for when many organizations write their own rules:
+Rules for coverage items are drafted by Steno's **[rule curation](./rule-curation.md)** job and approved by a person. In short:
 
-There's **no LLM scanning the repository.** It works like this:
+- Items become **patterns** across the organization, named by what's unexplained (an annotation, a type, a library call, a file convention), with **occurrence keys** so reach reflects today's code and new code is exactly what changed since the last run (D121). Pattern states replace per-item triage.
+- Patterns are **scored, not excluded**: signals such as "the code refers to this file" or "this file names topics already in the graph" rank them, noise is decided once per pattern, and low scorers stay visible at no cost (D122).
+- Patterns are **clustered into frameworks**, investigated once per framework, drafted per pattern, **proven deterministically**, and reviewed as plain-English outcomes sorted by impact (D120, D123).
 
-1. **Deterministic ingestion runs** with the enabled rule packs.
-2. **The coverage report is computed deterministically**, then filtered by a decision (a naming heuristic today; Jev I8 in `v2`):
-   - call sites whose target is an external or unresolved method **and** that look like I/O (the target's package, method names like `send` / `publish` / `invoke` / `execute`, networking or messaging imports)
-   - public methods with annotations no rule recognizes
+A person can still write any rule by hand, or with the `rule-pack-author` skill ([Rules §8](./rules-and-packs.md#8-writing-rules-by-hand-with-the-skill-or-by-curation-decided)); a hand-written rule closes any proposal it covers.
 
-   Items are grouped by target and ranked by how often they occur.
-3. **A person reviews the report** and says what an item means, using a form, not a prompt.
-4. **Most org rules fit a few templates**, so the rule is generated **without an LLM**:
+## 5. Patterns, as built (D121, D122; built 2026-10-21)
 
-| Template | The person fills in | Example |
-|---|---|---|
-| **Call → interaction** | Method, fact type (`PRODUCES` / `CALLS` / `READS_FROM` / `WRITES_TO`), which argument holds the topic, URL, or table | `Publisher#send`, `PRODUCES`, topic = arg 0 |
-| **Annotation → entry point** | Annotation, trigger kind, which attribute holds the topic or path | `@PxMessageHandler`, consumes topic, topic = `value` |
-| **Annotation → entity / table** | Annotation, which attribute holds the table name | `@PxTable`, table = `name` |
-| **Config key → fact** | Key pattern, fact type | `px.messaging.topics.*` → `KafkaTopic` |
+Every coverage stage folds its items into the organization's **patterns**: what's unexplained across every repository, kept from run to run. This is what rule curation works from, and it's all deterministic.
 
-5. **Steno validates the rule automatically:** it must match every example from the report, and it shows how many other places it matches, to catch false positives.
-6. A person approves it, and it's added to the org pack.
+```mermaid
+flowchart LR
+    R["A repository's run:<br/>coverage items, each with<br/>every place it occurs"] --> U["Upsert one pattern<br/>per fingerprint"]
+    U --> O["Replace this repository's<br/>occurrences: insert new,<br/>delete what's gone"]
+    O --> C["Recount reach from<br/>occurrences; rescore;<br/>move states"]
+    C --> A["GET /api/patterns:<br/>grouped by owner,<br/>ranked by score"]
+```
 
-**An LLM is only a fallback** for patterns no template fits. Even then it translates the person's stated intent plus the concrete examples into rule syntax, once per pattern, for a negligible cost. Hand-written rules are always supported.
+**Fingerprint: what it is, never where.** `signal:target`, for example `unknown_hook:com.acme.messaging.AcmeHandler`, `external_call:psycopg2.connect`, `unread_file:.xyz@resources/flows/`. The same gap in another repository or another run is the same pattern.
+
+**Occurrence key: each place it occurs.** `(file, enclosing symbol, application)`, stored per repository in `coverage_occurrence`. The symbol, not the line, so an edit that moves lines isn't new code. A coverage item keeps every key, not just its five samples.
+
+**Recording a run** (`coverage/patterns.py`, `record`):
+
+1. Upsert a `coverage_pattern` row per fingerprint (label refreshed, owner set on creation, evidence merged).
+2. Replace this repository's occurrences: rows for keys seen for the first time are inserted with the job that first saw them (`first_seen_job`), and rows this run didn't see are deleted.
+3. Recount reach for every pattern touched (from this run, or losing rows): distinct repositories, distinct applications, occurrences.
+4. Rescore, and move states (below).
+
+**Reach is the current state, never a running total.** Re-reading old code inserts nothing; deleted code deletes rows. "New code since a date" is the occurrences whose `first_seen_job` is newer.
+
+**States.** A pattern starts `open`. With no occurrences left, an `open`, `queued`, `drafting`, `proposed`, or `needs_person` pattern becomes `covered` (a rule explains it now, or the code is gone); a `covered` or `approved` pattern that occurs again goes back to `open`, with a note saying so. Ignoring an item in the coverage report ignores its pattern. The other states belong to rule curation ([rule curation §2](./rule-curation.md#2-patterns-decided-d121)).
+
+**Score.** `weight(signal) × (100 × repositories + 10 × applications + ln(1 + occurrences)) × (1 + 4 × pieces of evidence)`. Repositories count most, since one rule fixes every repository with the pattern; the weight favors what can change the map (framework hooks and I/O calls 3, disagreements 2.5, inferred triggers and libraries 2, … unread files 0.5).
+
+**Owner: what clusters patterns into a framework** (D123):
+
+| Signal | Owner |
+|---|---|
+| Unexplained I/O call | The library the call goes into (`psycopg2`), else the target's package root |
+| Library with no pack, untested or unknown version | The library |
+| Config set outside the repository | `config:` plus the key's first two segments |
+| Framework hook, and anything else naming a type | The package root: the first three package segments (`com.acme.messaging`) |
+| The application's own code (inferred triggers, unreachable effects, unknown hosts, dropped matches, unparsed or unread files) | None: stands alone |
+
+**Unread files** (a coverage signal since 2026-10-21): files no rule looked at (the engine records every file a code or config rule reads), grouped by extension and location convention (`*.xyz under resources/flows/`). Code in a language no pack reads is one pattern per language (`*.js`). A built-in noise list skips images, Markdown, lock files, CSS, editor and CI files; build files and test code aren't listed; SQL is, because migrations matter to the Data facet.
+
+**Evidence** (D122): an unread file whose name appears in the code (`getResource("flows/order.xyz")`) gets `referenced_by_code`, which multiplies its score by five.
+
+**Reading them:** `GET /api/patterns?state=open&limit=50` returns patterns grouped by owner, each group ranked by its summed score; patterns no library owns stand alone.

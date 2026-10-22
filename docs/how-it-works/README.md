@@ -47,8 +47,9 @@ flowchart LR
 | **Rule engine + symbol resolvers** | Runs rule packs over the clone; Python and Java resolvers answer what names and types mean | Built | `extraction/`, `resolvers/`, `assemblers/` |
 | **Graph builder + writer** | Stable IDs, structure, call graph, flows, traces, steps; writes only differences | Built | `graph/build.py`, `graph/writer.py`, `graph/ids.py` |
 | **resolver-jvm** | Resolves a repository's Java in one pass from source and the JDK, Lombok included (D69, D72) | Built | `resolver-jvm/` |
-| **Decision model and LLM** | Stand-ins, then Jev (`v2`); LiteLLM for text (D52) | Not built: everything is deterministic today | `decisions/`, `llm/` |
-| **Identity registry, reconcile, other connectors** | See [identify and reconcile](./ingestion/identify-and-reconcile.md) | Designed, not built | — |
+| **Identity registry, claims, reconcile** | Steno IDs and names; what other witnesses say, compared with the code. See [identify and reconcile](./ingestion/identify-and-reconcile.md) | Built | `identity/`, `claims/`, `reconcile/` |
+| **Rule curation** | A job that drafts rules for what coverage couldn't explain, proves them, and queues them for approval; commits approved rules (D120) | Not built | — |
+| **Decision model and LLM** | Stand-ins, then Jev (`v2`); LiteLLM for text and for rule drafting (D52); the Claude Agent SDK as the default rule drafter (D124) | Not built: everything is deterministic today | `decisions/`, `llm/` |
 
 ## 2. Pages
 
@@ -58,12 +59,14 @@ flowchart LR
 | ↳ [Connectors and sources](./ingestion/connectors.md) | Access, selection, placement; cloning; what config produces; connectors to other systems |
 | ↳ [Stages, step by step](./ingestion/stages.md) | Each stage taken apart, with real output: parse, extract, assemble, flows, write, coverage |
 | ↳ [Rules and rule packs](./ingestion/rules-and-packs.md) | The rule format (ast-grep `match` + Steno `emit`), clues, config rules, packs, tests, the pack catalog |
+| ↳ [Rule curation](./ingestion/rule-curation.md) | How Steno drafts rules for what no rule explains, proves them, and has a person approve them |
+| ↳ [Large repositories](./ingestion/large-repositories.md) | How a very large repository is ingested within memory, and how work fits the machine |
 | ↳ [Symbol resolvers](./ingestion/resolvers.md) | How Python and Java resolution work, the questions they answer, DI, config values, hosts |
 | ↳ [Joins across applications](./ingestion/joins.md) | Senders, receivers, shared keys, stubs, HTTP targets; artifacts and routing joins |
 | ↳ [Identify and reconcile](./ingestion/identify-and-reconcile.md) | The identity registry and the identify step; claims, the claim store, and reconcile |
-| ↳ [Coverage report](./ingestion/coverage-report.md) | What no rule explained, triage, the agreement view, turning an item into a rule |
+| ↳ [Coverage report](./ingestion/coverage-report.md) | What no rule explained, triage, the agreement view, and patterns across the organization |
 | [Graph reference](./graph-reference.md) | Every node, property, and relationship; traces; flows; data stores; example queries |
-| [Retrieval and MCP](./retrieval-and-mcp.md) | The MCP tools and how they work together, search, cards, citations, code access, latency, LLM use and cost |
+| [Retrieval and MCP](./retrieval-and-mcp.md) | The MCP tools and how they work together, breadth vs. depth, search, cards, citations, code access, latency, LLM use and cost |
 | [Storage](./storage.md) | Postgres and Neo4j: what each holds, how they meet, every table, rebuilding |
 | [Security and privacy](./security.md) | Source code, secrets, data leaving the organization, access control |
 
@@ -82,6 +85,7 @@ flowchart LR
 | Code search at query time | **The git host's search API** when the graph has no lead | No stored index, consistent with no stored contents (D90) | Decided |
 | Decisions | Stand-ins in the POC; **Jev** later | Typed, calibrated, fast decisions | Jev: `v2` |
 | Text (cards) | LLM via **LiteLLM**; small model by default, Batch API, prompt caching; model chosen after the dry run | Flow purposes decide whether flows can be found | Proposed; **Open**: model |
+| Rule drafting | **Claude Agent SDK** by default, or a fixed sequence of calls through LiteLLM (`STENO_RULE_DRAFTER`); proof and approval outside both | Agents work out unfamiliar frameworks; rules then run deterministically | Decided (D124) |
 | Embeddings | Stored in Neo4j's vector index | One store for vectors and traversal | Decided; **Open**: model |
 | Agent interface | **MCP** over Streamable HTTP | Claude Code, Copilot, custom agents | Decided |
 | Implementation language | **Python** (backend), TypeScript (UI), a small JVM helper | MCP SDK, Neo4j driver, ast-grep bindings, LiteLLM | Decided |

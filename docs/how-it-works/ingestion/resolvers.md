@@ -218,6 +218,31 @@ The helper takes a list of JARs that starts empty, so adding them later is confi
 
 Each step is taken only when the **Unresolved library types** signal shows it's worth it.
 
+### 5.3 Large repositories (Decided, D127; partly built)
+
+The whole story, with every mechanism and the measurements, is on its own page: [Large repositories](./large-repositories.md). In short:
+
+**Today, memory grows with the whole repository, more than once.** The helper keeps every file's syntax tree for the whole run, its caches have no limit, and it builds the entire result before writing it (`resolver-jvm/.../Analyzer.java`, `Main.java`). Python then loads that whole JSON file (`resolvers/java.py`), and the flows stage holds the whole call graph. The helper runs as one process per repository with a capped heap (`STENO_RESOLVER_JVM_MAX_HEAP`, 2 GB by default, D99), so nothing builds up across runs, but a very large monorepo fails as a whole.
+
+**The design: split the work so memory stays under the budget by construction.**
+
+| Part | How | Why it stays correct |
+|---|---|---|
+| **Pass 1: a declaration index** | Parse every file and keep only declarations: types, fields, method signatures, annotations, Lombok members. Method bodies are dropped. | Resolving a call needs other files' *declarations*, never their bodies |
+| **Pass 2: bodies in batches** | Resolve method bodies a batch of files (or one module, in dependency order) at a time, against a type solver backed by the index; free each batch and its caches before the next. Batch size comes from the index's size and the heap budget. | Each batch sees the same declarations a single pass would |
+| **Streamed output** | The helper writes results file by file (JSON Lines); Python reads them into an on-disk index instead of one structure in memory | Same results, read the same way |
+| **Flows per application** | In a monorepo, the call graph is built per application, with shared library code read from the index | A flow never leaves its application's code anyway |
+| **A module that still fails** | Recorded as a gap (its calls unresolved, a coverage item); the rest of the repository continues | Gaps stay visible (D71) |
+| **Heap sized from the repository** | From the file and line counts known at clone time, up to a ceiling | |
+
+**Memory is measured on every run.** The helper reports its peak heap (the JVM's memory-pool peaks) and peak resident memory (`VmHWM` in `/proc/self/status`); the worker records its own peak per stage. Both go into `ingestion_stage.metrics` (`jvm_heap_peak_mb`, `jvm_heap_limit_mb`, `rss_peak_mb`, `batches`, `modules_failed`), and a stage above 80% of its limit is flagged, so a repository that's outgrowing its budget shows up before it fails.
+
+**Built so far:** the two passes (`--batch-files`, `STENO_RESOLVER_JVM_BATCH_FILES`; on automatically for a repository whose last run ran out of JVM memory, D128); the helper's expressions and calls streamed to disk after each batch; memory recorded per stage (`rss_peak_mb`; the helper's `heap_live_peak_mb`, the heap that survived a collection, and `rss_peak_mb`); the differential check (`steno resolver-check <folder>`, and a test); traces stored compact (graph reference, D63). **Not built:** flows per application, per-module isolation, an on-disk index on the Python side.
+
+**Measured on ThingsBoard** (5,494 Java files, 466k lines; 2 GB heap): the single pass ran out of memory, so the run had no entry points; in batches of 200 files the helper finished in about 3.5 minutes (28 batches, 1.9 GB live heap at its peak). The whole run then took about 16 minutes: 942 entry points, 1,623 flows (many incomplete, as expected without dependency JARs), and a 4.6 GB peak in the worker's flows stage, almost all of it traces (2.5 GB of trace JSON; one flow had 47,803 entries). **Storing traces compact brought that peak to 1.5 GB** (traces: 61 MB, 40 times smaller) with the same graph, and streaming the helper's output cut its live heap from 1.9 to 1.6 GB. The largest remaining costs: the helper itself (2.4 GB resident at a 2 GB heap) and extraction in the worker (about 1 GB). budgeting-app shows no difference between the two passes, even with every file in its own batch.
+
+**Proven before it replaces the single pass.** On repositories the single pass can handle, the two passes must produce the same results, call site by call site; any difference is a bug. Then it's benchmarked on very large public Java repositories ([roadmap §4](../../plan/roadmap.md#4-evaluation)). Only if it fails that benchmark is Eclipse JDT (an IDE compiler front end that resolves on demand, without running builds) evaluated as a replacement (Open).
+
 
 ## 6. DI rules are per-framework
 

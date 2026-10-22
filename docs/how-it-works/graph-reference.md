@@ -6,6 +6,7 @@ How Steno represents an organization's architecture in Neo4j: every label, prope
 > - Every node has three independent aspects: **labels** (what it is), **one `BELONGS_TO`** (where it lives), and **interaction edges** (what it does).
 > - Node types (§3), relationship types (§4), and the properties every fact carries are defined here; nothing else may be emitted.
 > - Flows store a **trace** (every function, in order) instead of Function nodes; significant functions become `Step` nodes.
+> - **Contracts** are stored per class (`Entity`) and per usage (`USES_ENTITY`), so one class can be used differently by different endpoints; **interceptors** are nodes that applications activate (planned, D115, D116).
 > - Applications are keyed by a permanent **Steno ID** ([Identity](../concepts/identity.md)); where another witness checked a topic, an application's use of it carries **agreement and sources** ([claims and reconcile](./ingestion/claims-and-reconcile.md)). Planned: **kind labels** on applications.
 
 ---
@@ -48,7 +49,7 @@ Organization                              ← layer 1
  └ Space  (can nest)                      ← layer 2
     ├ DataStore → Schema → Table, KafkaTopic / Queue
     ├ Application                         ← layer 3
-    │   ├ Interface, Entity, Schedule
+    │   ├ Interface, Entity, Schedule, Interceptor
     │   └ Flow  {trace: every function, in order}      architecture nodes: what it DOES
     │      └ Step  {symbol, file, lines}
     └ Repository ─────── Module (:Service ◀──BUILT_FROM── Application)
@@ -79,13 +80,13 @@ After a refactor, only the code pointers (a step's `symbol` and lines, the flow'
 
 **What the split controls**, and nothing more: (1) search, cards, and routing never cover code nodes; (2) change history logs architecture nodes in full and trace changes per flow.
 
-**Search is narrower than "all architecture nodes".** It covers the `:Searchable` nodes (Flow, Application, Space, Organization, Interface, Entity, Table, DataStore, ExternalSystem; D104) by name, plus **function names in every flow's trace**, which return the flow. Steps, schedules, and Kafka clusters aren't searchable, though `get_node` opens any node by name or ID. See [Retrieval §5](./retrieval-and-mcp.md#5-mcp-tools-decided).
+**Search is narrower than "all architecture nodes".** It covers the `:Searchable` nodes (Flow, Application, Space, Organization, Interface, Entity, Table, DataStore, ExternalSystem, Interceptor; D104, D116) by name, plus **function names in every flow's trace**, which return the flow. Steps, schedules, and Kafka clusters aren't searchable, though `get_node` opens any node by name or ID. See [Retrieval §5](./retrieval-and-mcp.md#5-mcp-tools-decided).
 
 | | Architecture nodes | Code nodes |
 |---|---|---|
 | **Kinds** | Organization, Space, Application, Interface, Flow, Step, Entity, DataStore, Table, ExternalSystem, … | Repository, Module, File (functions live in flow traces) |
 | **Answers** | What exists, what it does, what it touches, flows step by step | Exactly what code runs at each step |
-| **Queried** | Search covers the searchable ones (flows, applications, spaces, organization, interfaces, entities, tables, data stores, external systems); every query starts here | Only after narrowing to one app or flow, through its steps and trace |
+| **Queried** | Search covers the searchable ones (flows, applications, spaces, organization, interfaces, entities, tables, data stores, external systems, interceptors); every query starts here | Only after narrowing to one app or flow, through its steps and trace |
 | **Effects** | On the Step that performs them (`Step -WRITES_TO-> Table`), rolled up onto Flows | Listed on the trace entry of the function that performs them |
 | **Change history** | Every change logged | Trace changes logged per flow (functions added, removed, moved) |
 
@@ -121,7 +122,8 @@ Other points:
 | `Schema` | DataStore | `name` | Not built: a property of the table today; a node in Data V2 (`v2`) |
 | `Table` | Schema, or DataStore when there's no schema | `name`, `kind` (table / collection / index), `stub` | Today: stubs, under the application's database when its config names exactly one (`spring.datasource.url`), otherwise under a placeholder data store per repository ("{repo} relational store (not identified yet)") until the store is identified. Data V2 (`v2`) fills them in. See [Data stores](#7-data-stores). |
 | `Column` | Table | `name`, `type`, `nullable`, `purpose` | Data V2 (`v2`) |
-| `Entity` | Application | `name`, `symbol`, `fields` [{name, type}] | Domain models and payloads in any language: JPA classes, SQLAlchemy / Pydantic models, protobuf / Avro messages, DTOs |
+| `Entity` | Application (or the library module that defines it) | `name`, `symbol`, `fields` (JSON; see [Contracts](#contracts-decided-d115)) | Domain models and payloads in any language: JPA classes, SQLAlchemy / Pydantic models, protobuf / Avro messages, DTOs. One node per class; whether it's a persistence model or a payload is read from its edges (`MAPS_TO`, `USES_ENTITY`). Today `fields` is `[{name, type}]`. |
+| `Interceptor` | Application, or the library `Module` that defines it | `kind` (filter / request / validation / aspect / response / error), `phase` (before / after / on_error), `scope`, `requires`, `adds`, `activation`, `symbol`, `file`, `lines` | Code a framework runs around entry points without their code calling it (D103, D116). Searchable. See [Interceptors](#interceptors-decided-d116). Not built: interceptors are steps today. |
 | `ExternalSystem` | Organization | `host`, `name`, `called_from` (when the host is unknown) | Vendor and third-party APIs. Keyed by host, or by service name when an [HTTP signature](./ingestion/rules-and-packs.md#http-signatures-decided-d64) recognizes the host. |
 | `KafkaCluster` (and other brokers) | Organization | `name` | Infrastructure, attached with `HOSTED_ON`. Not built: topics are keyed by name alone today. |
 
@@ -129,7 +131,9 @@ Later (`v2`): `Team` (the Ownership facet), `Environment` (the Environments face
 
 ### Trace entries
 
-A flow's **trace** (L3) is the ordered list of every first-party function it runs: a depth-first walk of the call graph from the entry function, ordered by call site. It's stored **on the `Flow` node**, not as nodes of its own (D60, D63): `trace` holds the ordered entries as a JSON string (Neo4j properties can't nest), and `trace_files` and `trace_symbols` are string lists for lookups such as "which flows touch this file?". It's rebuilt on every run and replaced as a whole.
+A flow's **trace** (L3) is the ordered list of every first-party function it runs: a depth-first walk of the call graph from the entry function, ordered by call site. It's stored **on the `Flow` node**, not as nodes of its own (D60, D63): `trace` holds the ordered entries, compact and compressed (below), `trace_entries` their count, and `trace_files` and `trace_symbols` are string lists for lookups such as "which flows touch this file?". It's rebuilt on every run and replaced as a whole.
+
+**Stored compact (D63, refined 2026-10-21).** A trace lists each function once per call site, so a large flow repeats the same functions thousands of times: ThingsBoard has a flow of 47,803 entries, and its 1,623 flows came to 2.5 GB of trace JSON. So everything about a function (name, file, lines, doc, hash, effects, unfollowed calls) is stored once per flow, each call site is a short row (its parent, its number, the function, the call line, flag bits, the step), and the result is zlib-compressed into a byte array. Readers decode it (`graph/trace.py`) into exactly the entries described below; the older JSON-string form still reads.
 
 **What's in it (D63):** every first-party function the flow calls, helpers included, once per call site. A function tagged `utility` (high fan-in, no interaction below it) appears at its call site, but its own callees aren't expanded: nothing architectural is below it, and this is what keeps traces bounded. The UI shows significant steps by default and expands to the full trace.
 
@@ -147,7 +151,7 @@ A flow's **trace** (L3) is the ordered list of every first-party function it run
 | `call_line` | The line of the call site in the caller | `61` | `128` | Citations |
 | `conditional`, `in_loop`, `async`, `ambiguous`, `candidate` | How it's called (from the call site) | | | Branches, async steps, DI uncertainty |
 | `effects` | What this function does directly: `[{edge: WRITES_TO, target: table:…}]` | | | The step it belongs to, rollups |
-| `significant`, `utility` | Derived tags (see [Significance](#significance-is-a-derived-tag-decided)) | | | Presentation |
+| `significant`, `utility`, `validates` | Derived tags (see [Significance](#significance-is-a-derived-tag-decided)) | | | Presentation; `get_interface` |
 | `step` | On a significant entry: which occurrence of that function's Step this is (its Step node is `step:{flow}:{symbol}[@bound_to][#n]`, keyed by function, not position, so inserting a step doesn't renumber the others) | `1` | `1` | Links L3 to L2 |
 | `unresolved` | The calls this function makes that Steno couldn't follow and that may matter (named like a first-party function or like I/O): each call, its line, why, and the library when it's a library type (D71). The Flow carries `incomplete` and `unresolved_calls`, so a flow that stopped partway never looks complete. | `[{call: "web.post().uri(…).retrieve()", line: 61, reason: "library type", library: "org.springframework.web"}]` | `[{call: "session.commit()", line: 88, reason: "unknown type"}]` | Gaps are visible, never silent |
 | `repeat`, `recursive` | Called again after it was already expanded in this flow (listed, not expanded again); or called while already on the current path | | | Keeps traces bounded |
@@ -198,7 +202,7 @@ Which Project introduced or changed a fact isn't a property. It's recorded later
 
 ### Card properties (searchable nodes only)
 
-**Not built yet:** the cards stage is skipped, so no node has a card today and search matches names only. Cards will exist **only** on node types that search covers: **Flow, Application, Space, Organization, Interface, Entity, Table** (data stores and external systems are searched by name, D104). Steps, traces, modules, files, and edges have no card. These nodes also carry the `:Searchable` label, so one vector index and one full-text index cover them all.
+**Not built yet:** the cards stage is skipped, so no node has a card today and search matches names only. Cards will exist **only** on node types that search covers: **Flow, Application, Space, Organization, Interface, Entity, Table** (data stores, external systems, and interceptors are searched by name, D104, D116). Steps, traces, modules, files, and edges have no card. These nodes also carry the `:Searchable` label, so one vector index and one full-text index cover them all.
 
 | Property | Purpose |
 |---|---|
@@ -257,6 +261,32 @@ Kafka, HTTP, and gRPC are special cases of one pattern (D61). Any communication 
 
 An organization's own messaging framework, whether or not it wraps Kafka, gets an **org-defined `Interface` label** (`:PxChannel`) and **two rules** in the org pack, one for the sender and one for the receiver. Applications connect automatically when their keys match, exactly as with Kafka topics. Communication through shared state (one app writes a table, another polls it) needs nothing extra: both point at the same `Table` node.
 
+### Contracts (Decided, D115)
+
+A contract is what another application must send or can expect back. It's stored in two places, so one class can be used differently by different interfaces:
+
+| Where | Holds |
+|---|---|
+| `Entity.fields` (the class, once) | Per field: `name`, `json_name` (`@JsonProperty`, or the naming strategy from config), `type`, `enum` values, `required` (`@NotNull`, `@NotBlank`, a non-`Optional` Kotlin type), `constraints` (`@Size`, `@Min`, `@Pattern`, `@Email`, custom annotations with a pointer to their validator), each tagged with its validation `groups` and JSON `views`; `hidden` / `read_only` (`@JsonIgnore`, `access = READ_ONLY`). A superclass's fields are merged in. |
+| `Entity -HAS_FIELD-> Entity` | Nesting: field name, `many` (a list or set), `cascade` (`@Valid` on the field, so the nested class's constraints apply). A class that refers to itself stops expanding. |
+| `Interface -USES_ENTITY-> Entity` (the usage) | `role` (request / response / message), `validated` (`@Valid` / `@Validated` present; without it no annotation constraint is enforced), active `groups`, active `view`, and the response `wrapper` (`ResponseEntity`, `Mono`, `Optional`, a generic envelope such as `ApiResponse<T>`, whose type argument is substituted) |
+
+**The effective contract** of an interface is computed when read (`get_interface`, [Retrieval §5](./retrieval-and-mcp.md#dependencies-and-impact)): start at the `USES_ENTITY` target, follow `HAS_FIELD`, keep the constraints in the edge's active groups and the fields in its view, and add what interceptors require or add (below). Two endpoints sharing `OrderRequest` can disagree, one requiring `id` and the other forbidding it, and both answers are right.
+
+**When the request decides what runs:** routing conditions (`@PostMapping(params = "type=express")`, `headers=`, `consumes=`) make **separate interfaces**, each with its condition; a polymorphic payload (`@JsonTypeInfo` + `@JsonSubTypes`, or one `@KafkaHandler` per message type) is a `oneOf` with its **discriminator**, each subtype its own `Entity`; a branch inside one flow is already on its steps (`conditional`, `branch_raw`); runtime dispatch lists every implementation as a `candidate` (D58).
+
+### Interceptors (Decided, D116)
+
+An interceptor is defined once and runs around many entry points, possibly in many applications. Three things are kept apart:
+
+| Concern | In the graph |
+|---|---|
+| **What it is** | An `Interceptor` node belonging to the application or library module that defines it: `kind`, `phase`, `scope` (path patterns, every HTTP entry point, or `validates`), `requires` (headers, auth) and `adds` (a response envelope, an error shape) where a rule states them, `activation` (the conditions that turn it on), and its code's `symbol`, `file`, `lines` |
+| **Who turns it on** | `Application -ACTIVATES {how, evidence}-> Interceptor`. `local` when the application defines it (a `JwtAuthenticationFilter` in its own code); otherwise the library's conditions are checked against each application that depends on it (Artifacts A1): on by dependency alone (auto-configuration), by annotation (`@EnableAcmeAuth`), or by config (`acme.auth.enabled: true`); off by config or an exclusion |
+| **Where it runs** | `Interface -INTERCEPTED_BY {phase, order}-> Interceptor`, derived from activation and scope. Flows keep listing interceptors as their first steps (D103); each interceptor step links to its node. |
+
+"Which endpoints does the tenant filter guard?" is one hop, and "6 of 30 applications turn it on" is a count of `ACTIVATES` edges. An interceptor from a library Steno hasn't ingested (a JAR only) can't be seen: the application's completeness says so, and an unexplained local hook stays a coverage item (D101).
+
 ---
 
 ## 4. Relationship types
@@ -278,12 +308,15 @@ Every relationship is either **extracted** (read directly from code or config by
 | `SUBSTEP` | Step → Step | | **L2**: the first step nested inside this one (step 1 → step 1.1) | Derived |
 | `WRITES_TO` / `READS_FROM` / `CALLS` / `PRODUCES` (on a Flow) | Flow → Table / ExternalSystem / Interface / Topic | `conditional` | **L1 rollups**: everything the flow's steps touch, lifted onto the flow | Derived |
 | `LEADS_TO` | Flow → Flow | `mode: sync\|async`, `via` | **This flow leads to that one.** Exists exactly when a step in Flow A `CALLS` or `PRODUCES` to an interface that `STARTS` Flow B. | **Derived** |
-| `USES_ENTITY` | Interface / Flow → Entity | `role: request\|response\|message` | Payload contracts | Extracted |
+| `USES_ENTITY` | Interface → Entity | `role` (request / response / message), `validated`, `groups`, `view`, `wrapper` | **How this interface uses the class** (D115): the top-level payload only; nesting is `HAS_FIELD` | Extracted |
+| `HAS_FIELD` | Entity → Entity | `field`, `many`, `cascade` | A field whose type is another entity: `CreateOrderRequest.items` → `LineItem` (`many: true`; `cascade: true` when `@Valid`, so `LineItem`'s constraints apply) | Extracted |
+| `ACTIVATES` | Application → Interceptor | `how` (local / dependency / annotation / config), `evidence` | The application turns this interceptor on (D116) | Extracted |
+| `INTERCEPTED_BY` | Interface → Interceptor | `phase`, `order` | The interceptor runs around this endpoint or consumer | Derived (from `ACTIVATES` and the interceptor's scope) |
 | `MAPS_TO` | Entity → Table | | **ORM mapping**: the `User` class maps to the `users` table (`@Table(name="users")`) | Extracted |
 | `HOSTED_ON` | KafkaTopic → KafkaCluster | | Infrastructure placement | Extracted (config) |
 | `PRODUCES` / `CONSUMES` (on an Application) | Application → KafkaTopic / Queue | `agreement`, `sources`, `witness_types`, `reconciled` | **Reconciled**: an application's use of a channel another witness checked, compared with the code: confirmed, code only, or declared only (no flow behind it). Written and owned by reconcile (`repo: reconcile`) | Reconcile ([claims and reconcile](./ingestion/claims-and-reconcile.md#7-reconcile)) |
 
-**Built today:** `BELONGS_TO`, `BUILT_FROM`, `EXPOSES`, `CALLS`, `PRODUCES`, `CONSUMES`, `READS_FROM`, `WRITES_TO`, `STARTS`, `FIRST_STEP`, `NEXT`, `SUBSTEP`, `MAPS_TO`, the rollups onto flows, and reconciled application-level `PRODUCES` / `CONSUMES`. **Not built:** `DEPENDS_ON` (Artifacts A1, POC stage B), `USES_ENTITY`, `HOSTED_ON`. **`LEADS_TO` isn't stored:** it's computed when read (a flow's rollup `CALLS` / `PRODUCES` to an interface that `STARTS` another flow), by `get_flow` and `find_dependents`; materializing it is an option if traversal gets slow.
+**Built today:** `BELONGS_TO`, `BUILT_FROM`, `EXPOSES`, `CALLS`, `PRODUCES`, `CONSUMES`, `READS_FROM`, `WRITES_TO`, `STARTS`, `FIRST_STEP`, `NEXT`, `SUBSTEP`, `MAPS_TO`, the rollups onto flows, and reconciled application-level `PRODUCES` / `CONSUMES`. **Not built:** `DEPENDS_ON` (Artifacts A1, POC stage B), `USES_ENTITY`, `HAS_FIELD`, `ACTIVATES`, `INTERCEPTED_BY` (POC stage B), `HOSTED_ON`. **`LEADS_TO` isn't stored:** it's computed when read (a flow's rollup `CALLS` / `PRODUCES` to an interface that `STARTS` another flow), by `get_flow` and `find_dependents`; materializing it is an option if traversal gets slow.
 
 Extracted effects are found on a function during the run and attached to the **Step** for that function (every function with an effect is a significant step, so every effect has one). They're also listed on its trace entry.
 
@@ -492,6 +525,7 @@ The graph stores **architecture nodes plus a trace per flow**. Functions are not
 |---|---|---|
 | `significant` | An entry point, **or** it performs an interaction directly (`CALLS`, `PRODUCES`, `READS_FROM`, `WRITES_TO`), **or** an interaction happens somewhere below it | Shown first |
 | `utility` | High fan-in **and** no interaction below it (string/date helpers) | Collapsed, still viewable |
+| `validates` | Checks input before the flow's first effect: calls a validator (`Validator.validate`, the organization's validation library) or throws a validation exception or a 400 (D117) | Listed by `get_interface` as validation to read; not built |
 
 ### Order (Decided)
 

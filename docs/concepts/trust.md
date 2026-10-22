@@ -3,7 +3,7 @@
 What "accurate" means for Steno, and how it's achieved and measured. When agents act on Steno's answers, a confidently wrong answer is the worst outcome: an impact analysis that leaves out a consumer leads straight to a broken release.
 
 > **In one minute**
-> - **Deterministic first:** rules produce facts; nothing is guessed silently; an LLM only writes text.
+> - **Deterministic first:** rules produce facts; nothing is guessed silently; an LLM writes text and drafts rules, and every drafted rule is proven and approved before it runs.
 > - **Every claim is cited** to a file, line, and commit, or to the system it came from.
 > - **Gaps are never silent:** a call Steno couldn't follow, a send that joins no receiver, a receiver nothing sends to, a disagreement between witnesses all show up, in answers and in the coverage report.
 > - **Independent witnesses are compared.** A topic consumer found in code *and* granted in XLD is confirmed; one found in only one place is flagged.
@@ -18,6 +18,7 @@ What "accurate" means for Steno, and how it's achieved and measured. When agents
 | Extracting facts | Deterministic rules in rule packs | Ingestion |
 | Decisions rules can't make (which implementation DI injects, whether a host is internal) | A decision model: stand-ins in the POC, [Jev](../plan/later/jev.md) later (`v2`) | Ingestion and query |
 | Writing text: flow purposes and narratives, cards | An LLM | Ingestion only |
+| Drafting rules for what no rule explains | An LLM, then deterministic proof (tests, a shadow run), then a person's approval ([rule curation](../how-it-works/ingestion/rule-curation.md)) | The curation job, after ingestion |
 | Reasoning and the final answer | The client's own LLM (Claude Code, Copilot) | Query |
 
 Steno runs no LLM at query time. A decision a model makes carries its confidence, and every decision can be switched off.
@@ -74,7 +75,7 @@ Steno models the **map**: what starts work, what work touches, the route between
 
 ## 5. What an agent sees
 
-Impact and dependents answers carry a **completeness block** (Proposed; `POC` stage A), so an incomplete answer never looks complete:
+Impact and dependents answers carry a **completeness block** (built, D118), so an incomplete answer never looks complete. It says what was **checked** and what **wasn't**, never that an answer is "complete", because that would be a claim about what Steno can't see. It also carries the application's **unexplained counts** from the coverage report ("3 unexplained beans, including a `Filter`"): something Steno can see but can't explain is never silent.
 
 ```
 find_dependents(payment.settled, downstream)
@@ -86,7 +87,11 @@ find_dependents(payment.settled, downstream)
   Incomplete: 1 publish in Fraud Screening may target this topic
   (topic name comes from an unresolved config value).
   XLD as of 2026-10-09 02:10. Searched: Finance, Risk, Payments.
+  Checked: code in 14 applications, XLD grants. Not checked: Fraud Screening's config
+  (set where it runs). Unexplained in Ledger: 2 framework hooks.
 ```
+
+**Can Steno still be confidently wrong?** Yes, when it misses something no signal detects: a pattern that looks ordinary (validation inside a custom deserializer), or a fact outside every repository (a gateway rule, data in a table). Cloning every repository doesn't remove this: an agent misses what it never thinks to read. What limits it: answers say what was checked (above); the coverage report surfaces what Steno can see but not explain; reality corrects the rest (a test request that fails with a missing header becomes a coverage item, then a rule); and the question set measures how often it happens.
 
 ## 6. How accuracy is measured
 

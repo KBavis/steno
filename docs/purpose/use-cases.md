@@ -55,11 +55,11 @@ A tester or test agent needs to know how a flow starts, what it touches, and wha
 
 | | |
 |---|---|
-| **Questions** | What triggers this flow, and with what input (method and path with the request entity, a topic and its message, a schedule)? What does it read and write, and call? What changed in it (before and after)? What's downstream to regression-test? How does this team already test similar flows? |
-| **Tools** | Today: `get_flow` (trigger, steps, effects), `view_flow_code`, `find_dependents` (downstream). Planned: `get_interface` (contract, entities, example callers), `get_changes` (before and after). |
-| **A correct answer contains** | The trigger and its input shape, every effect (tables, topics, calls), the downstream flows, the change, and the existing tests or conventions to copy (test conventions come from a standards source outside Steno). |
+| **Questions** | What triggers this flow, and with what input (method and path with the request entity, a topic and its message, a schedule)? What makes a request valid: required fields, constraints, nested objects, headers an interceptor requires? What comes back? What does it read and write, and call? What changed in it (before and after)? What's downstream to regression-test? How does this team already test similar flows? |
+| **Tools** | Today: `get_flow` (trigger, steps, effects), `view_flow_code`, `find_dependents` (downstream). Planned: `get_interface` (effective request and response contracts, interceptor requirements, validation pointers, a skeleton example, example callers; D117), `get_changes` (before and after). |
+| **A correct answer contains** | The trigger and its **effective contract** (structure, required fields, constraints, discriminators, headers interceptors require), enough for an agent to write a valid request or message; what can't be resolved, said so; every effect (tables, topics, calls), the downstream flows, the change, and the existing tests or conventions to copy (test conventions come from a standards source outside Steno). |
 | **Needs** | Graph; Δ; Projects for attribution |
-| **Testable from** | POC stage A (triggers and effects), stage B (downstream) |
+| **Testable from** | POC stage A (triggers and effects), stage B (downstream, contracts, interceptors) |
 
 ### 17 ★ From a stack trace to a flow
 

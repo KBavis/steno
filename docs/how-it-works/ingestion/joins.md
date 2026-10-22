@@ -76,7 +76,7 @@ flowchart LR
     L -- "publishes (its own build file)" --> K["com.acme:payments-client"]
 ```
 
-Today a dependency on another repository's library is a name with nothing behind it. With Artifacts A1, the producing repository's build file says it publishes the coordinate, and the consumer's build file says it depends on it: the coordinate is the shared key, joined like a topic. "Which services use this library?" and "what does a change to `payments-platform` affect?" then work across repositories. An artifact repository (PLATFORM, `v1`) can confirm. **A2** (flows continuing into the library's code) is a separate, later design.
+Today a dependency on another repository's library is a name with nothing behind it. With Artifacts A1, the producing repository's build file says it publishes the coordinate, and the consumer's build file says it depends on it: the coordinate is the shared key, joined like a topic. "Which services use this library?" and "what does a change to `payments-platform` affect?" then work across repositories. An artifact repository (PLATFORM, `v1`) can confirm. The same join tells Steno which applications turn on a library's **interceptors** (a shared JWT filter, a response wrapper): each dependent is checked against the interceptor's activation conditions (D116). Library **entities** (DTOs in a shared model library) join the same way, so a contract defined once is found from every interface that uses it (D115). **A2** (flows continuing into the library's code) is a separate, later design.
 
 ### Routing: the URL the caller uses isn't the endpoint's path (POC stages B–C)
 
