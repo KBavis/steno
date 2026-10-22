@@ -130,18 +130,37 @@ def test_a_provider_that_isnt_built_fails_the_run(session, no_git):
 # ------------------------------------------------------------------ approval
 
 
+def _git(cwd, *args):
+    import subprocess
+
+    return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True,
+                          check=True).stdout.strip()  # fmt: skip
+
+
 @pytest.fixture
 def packs_dir(tmp_path, monkeypatch):
+    """An organization's rule-pack repository: a bare remote and the clone Steno loads."""
     from steno.config import get_settings
 
-    monkeypatch.setattr(get_settings(), "rule_pack_dirs", [tmp_path])
-    return tmp_path
+    remote, clone = tmp_path / "remote.git", tmp_path / "org-packs"
+    _git(tmp_path, "init", "--quiet", "--bare", "-b", "main", str(remote))
+    _git(tmp_path, "clone", "--quiet", str(remote), str(clone))
+    (clone / "README.md").write_text("org packs\n")
+    _git(clone, "add", ".")
+    _git(clone, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "init")
+    _git(clone, "push", "--quiet", "origin", "main")
+    _git(clone, "remote", "set-head", "origin", "main")
+    settings = get_settings()
+    monkeypatch.setattr(settings, "rule_pack_dirs", [clone])
+    monkeypatch.setattr(settings, "cache_dir", tmp_path / "cache")
+    monkeypatch.setattr(settings, "rules_publish_org", "pr")
+    return clone
 
 
-def _ready(session, p, **kw):
+def _ready(session, p, rule=RULE, **kw):
     proposal = RuleProposal(kind=ProposalKind.RULE, status=ProposalStatus.READY,
                             fingerprints=[p.fingerprint], owner=p.owner, title="acme handler",
-                            summary="AcmeHandler methods consume channels", rule=RULE,
+                            summary="AcmeHandler methods consume channels", rule=rule,
                             tests=CASES, pack={"name": "acme-messaging", "language": "java",
                                                "source": "org"}, **kw)  # fmt: skip
     session.add(proposal)
@@ -149,33 +168,57 @@ def _ready(session, p, **kw):
     return proposal
 
 
-def test_approving_a_rule_writes_it_with_its_tests_into_a_new_org_pack(session, packs_dir):
+def test_approved_rules_collect_on_one_branch_for_one_pull_request(session, packs_dir):
+    """D131: each approval is a commit by Steno on steno/rules; the default branch and the
+    checkout people use are untouched until the pull request merges."""
     from steno.curation.approve import approve
 
     p = _pattern(session)
-    proposal = _ready(session, p)
-    out = approve(session, proposal, by="reviewer")
-    pack = packs_dir / "acme-messaging"
-    assert out["created_pack"] and (pack / "pack.yaml").exists()
-    assert (pack / "rules" / "acme-handler.yaml").read_text().startswith("id: acme-handler")
-    assert (pack / "tests" / "acme-handler" / "one" / "input" / "com/x/H.java").exists()
-    assert proposal.status == ProposalStatus.APPROVED and p.state == PatternState.APPROVED
+    out = approve(session, _ready(session, p), by="reviewer")
+    assert (out["mode"], out["branch"], out["created_pack"]) == ("pr", "steno/rules", True)
+    remote = packs_dir.parent / "remote.git"
+    files = _git(remote, "ls-tree", "-r", "--name-only", "steno/rules")
+    assert "acme-messaging/rules/acme-handler.yaml" in files
+    assert "acme-messaging/tests/acme-handler/one/input/com/x/H.java" in files
+    assert "acme-messaging" not in _git(remote, "ls-tree", "-r", "--name-only", "main")
+    assert not (packs_dir / "acme-messaging").exists()  # the working checkout is untouched
+    assert _git(remote, "log", "-1", "--format=%an", "steno/rules") == "Steno"
+    assert p.state == PatternState.APPROVED
+
+    # A second approval adds to the same branch
+    q = _pattern(session, "unknown_hook:com.acme.test.Other")
+    approve(
+        session, _ready(session, q, rule=RULE.replace("acme-handler", "acme-handler-2")), by="r"
+    )
+    assert _git(remote, "rev-list", "--count", "main..steno/rules") == "2"
 
 
-def test_a_rule_whose_cases_fail_is_refused_and_leaves_nothing(session, packs_dir):
+def test_a_destination_set_to_push_commits_to_its_default_branch(session, packs_dir, monkeypatch):
+    from steno.config import get_settings
+    from steno.curation.approve import approve
+
+    monkeypatch.setattr(get_settings(), "rules_publish_org", "push")
+    out = approve(session, _ready(session, _pattern(session)), by="reviewer")
+    assert out["mode"] == "push"
+    remote = packs_dir.parent / "remote.git"
+    assert "acme-messaging/rules/acme-handler.yaml" in _git(
+        remote, "ls-tree", "-r", "--name-only", "main"
+    )
+
+
+def test_a_rule_whose_cases_fail_publishes_nothing(session, packs_dir):
     from steno.curation.approve import ApprovalError, approve
 
-    p = _pattern(session)
-    wrong = {"one": {**CASES["one"], "expected": {"entry_points": []}}}
-    proposal = _ready(session, p)
-    proposal.tests = wrong
+    proposal = _ready(session, _pattern(session))
+    proposal.tests = {"one": {**CASES["one"], "expected": {"entry_points": []}}}
     with pytest.raises(ApprovalError):
         approve(session, proposal, by="reviewer")
-    assert not (packs_dir / "acme-messaging").exists()
+    remote = packs_dir.parent / "remote.git"
+    assert _git(remote, "ls-remote", "--heads", ".", "steno/rules") == ""
     assert proposal.status == ProposalStatus.READY
 
 
-def test_approving_ignore_ignores_the_pattern_and_rejecting_records_why(session, packs_dir):
+def test_approving_ignore_ignores_the_pattern_and_rejecting_records_why(session):
     from steno.curation.approve import approve, reject
 
     p = _pattern(session)

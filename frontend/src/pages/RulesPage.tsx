@@ -1,4 +1,4 @@
-import { CheckCircle2, ChevronRight, Loader2, Search, Sparkles } from 'lucide-react'
+import { CheckCircle2, ChevronRight, ExternalLink, Loader2, Search, Sparkles } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { api, type CurationRun, type Proposal, type ProposalSummary } from '../api/client'
 import { Drawer, EmptyState, ErrorAlert, Notice, PageHeader } from '../components/ui'
@@ -148,7 +148,6 @@ function Review({ id, onClose, onDone }: { id: number; onClose: () => void; onDo
   const [loadError, setLoadError] = useState<string>()
   const [rejecting, setRejecting] = useState(false)
   const [why, setWhy] = useState('')
-  const [commit, setCommit] = useState(false)
   const { run, busy, error } = useAction()
 
   useEffect(() => {
@@ -158,8 +157,14 @@ function Review({ id, onClose, onDone }: { id: number; onClose: () => void; onDo
   const open = p && (p.status === 'ready' || p.status === 'needs_person')
   const approve = () =>
     run(async () => {
-      await api.curation.approve(id, commit)
-      onDone(p?.kind === 'rule' ? `Rule ${p.rule_id} added to ${String(p.pack?.name)}` : 'Approved')
+      const out = await api.curation.approve(id)
+      onDone(
+        p?.kind !== 'rule'
+          ? 'Approved'
+          : out.mode === 'push'
+            ? `${p.rule_id} pushed to ${out.base ?? 'the default branch'}`
+            : `${p.rule_id} added to the pull request`,
+      )
     })
   const reject = () =>
     run(async () => {
@@ -189,11 +194,6 @@ function Review({ id, onClose, onDone }: { id: number; onClose: () => void; onDo
             </>
           ) : (
             <>
-              {p?.kind === 'rule' && p.status === 'ready' && (
-                <label className="small muted rules-commit">
-                  <input type="checkbox" checked={commit} onChange={(e) => setCommit(e.target.checked)} /> Also commit it to git
-                </label>
-              )}
               <button className="btn btn-secondary" onClick={() => setRejecting(true)}>
                 Reject
               </button>
@@ -219,6 +219,11 @@ function Review({ id, onClose, onDone }: { id: number; onClose: () => void; onDo
           <section className="rules-effect">
             <h3>{open ? 'If you approve' : p.status === 'approved' ? 'What approving did' : 'Rejected'}</h3>
             <p>{p.status === 'rejected' ? `${p.reviewed_by ?? 'Someone'} rejected it: ${p.comment}` : effect(p, passed)}</p>
+            {p.status === 'approved' && (p.publish?.pr_url || p.publish?.compare_url) && (
+              <a className="rules-pr" href={(p.publish.pr_url ?? p.publish.compare_url) as string} target="_blank" rel="noreferrer">
+                {p.publish.pr_url ? 'Open the pull request' : 'Open a pull request for steno/rules'} <ExternalLink size={13} />
+              </a>
+            )}
           </section>
 
           {p.rule && (
@@ -277,10 +282,17 @@ function effect(p: Proposal, passed: number): string {
   switch (p.kind) {
     case 'rule': {
       const pack = String(p.pack?.name ?? 'a pack')
-      const where = p.pack_exists
-        ? `the existing pack ${pack}`
-        : `the new ${p.pack?.source === 'core' ? 'core' : 'organization'} pack ${pack}`
-      return `Adds ${p.rule_id} to ${where} (${passed} of ${passed} tests pass). It runs from each repository's next ingestion.`
+      const where = p.pack_exists ? `the existing pack ${pack}` : `a new ${p.pack?.source === 'core' ? 'core' : 'organization'} pack, ${pack}`
+      const pub = p.publish
+      if (pub?.error) return `Adds ${p.rule_id} to ${where}. Publishing isn't set up: ${pub.error}`
+      const repo = pub?.repository ?? 'its repository'
+      if (p.status === 'approved')
+        return pub?.mode === 'push'
+          ? `Added ${p.rule_id} to ${where} and pushed it to ${pub.base} on ${repo}.`
+          : `Added ${p.rule_id} to ${where} on the ${pub?.branch} pull request (${repo}). It runs once the pull request is merged.`
+      return pub?.mode === 'push'
+        ? `Adds ${p.rule_id} to ${where} and pushes it to ${pub.base} on ${repo} (${passed} tests pass). It runs from the next ingestion.`
+        : `Adds ${p.rule_id} to ${where} on the pull request from ${pub?.branch ?? 'steno/rules'} into ${pub?.base ?? 'main'} (${repo}). ${passed} tests pass; it runs once merged.`
     }
     case 'enable_pack':
       return 'Records that an existing pack covers this; turning it on is still yours to do.'

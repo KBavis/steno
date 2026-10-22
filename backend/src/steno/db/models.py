@@ -488,6 +488,8 @@ class RuleProposal(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     comment: Mapped[str | None] = mapped_column(Text)
     commit_sha: Mapped[str | None] = mapped_column(String(64))
+    # Where an approved rule went (D131): mode, branch, commit, and its pull request
+    published: Mapped[dict[str, Any]] = mapped_column(default=dict)
 
 
 # ---------------------------------------------------------------------------

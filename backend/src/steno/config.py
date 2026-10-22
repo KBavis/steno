@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     rule_drafter_max_turns: int = 30
     rule_drafter_max_usd: float = 2.0  # per pattern
     curation_budget_usd: float = 10.0  # per run
+    # Publishing approved rules (D131): `pr` collects them on one `steno/rules` branch with one
+    # open pull request per destination; `push` commits straight to the default branch
+    rules_publish_core: str = "pr"  # Steno's own rule-packs/ (rules for public libraries)
+    rules_publish_org: str = "pr"  # the organization's rule-pack repository
+    # Steno's own working files (the worktrees it publishes rules from)
+    cache_dir: Path = Path.home() / ".cache" / "steno"
 
     # A ceiling on ingestion jobs running at once across every machine. Within it, each
     # machine takes only what fits its memory and CPUs (D128; docs: storage.md)

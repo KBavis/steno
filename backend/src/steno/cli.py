@@ -319,10 +319,10 @@ def proposal(proposal_id: int) -> None:
 def approve(
     proposal_id: int,
     by: str = typer.Option(None, help="Who approves (default: your git user)"),
-    commit: bool = typer.Option(False, help="Commit the new rule as Steno (D125)"),
 ) -> None:
     """Approve a ready proposal: a rule is written into its pack with its tests, which must
-    pass; "ignore" ignores the pattern; "vocabulary" sends it to the backlog."""
+    pass, and published (D131: the steno/rules pull request, or a push, per destination);
+    "ignore" ignores the pattern; "vocabulary" sends it to the backlog."""
     from steno.curation.approve import approve as approve_proposal
     from steno.db.models import RuleProposal
     from steno.db.session import session_scope
@@ -331,7 +331,7 @@ def approve(
         p = session.get(RuleProposal, proposal_id)
         if p is None:
             raise typer.BadParameter(f"no proposal #{proposal_id}")
-        out = approve_proposal(session, p, by or _git_user(), commit=commit)
+        out = approve_proposal(session, p, by or _git_user())
         typer.echo(f"#{p.id} approved ({p.kind.value})")
         for k, v in out.items():
             typer.echo(f"  {k}: {v}")

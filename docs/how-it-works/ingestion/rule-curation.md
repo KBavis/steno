@@ -177,12 +177,13 @@ The English summary is an LLM's description and could be wrong. The impact, evid
 
 **Vocabulary proposals.** When a pattern needs a node, edge, or property Steno doesn't have, the drafter files a vocabulary proposal instead of a rule: what's needed, which facet or use case it serves, and samples. It never applies automatically. A new type needs code (an assembler) and is a design decision, so it goes to the engineering backlog. Its patterns wait as `blocked_vocabulary` and resume once it's built.
 
-## 7. Committing approved rules (Decided, D125)
+## 7. Publishing approved rules (Decided, D125, D129, D131)
 
-- **Where (D129):** a rule for a public library goes to that ecosystem's core pack in Steno's `rule-packs/`. A rule for an internal framework goes to the organization's pack repository when one is configured (`STENO_RULE_PACK_DIRS` points at a clone of it), where Steno commits and pushes; otherwise to `rule-packs/org/`.
-- **Authored by Steno.** Every commit names Steno as its author and links the proposal, so history shows which rules a person wrote and which Steno drafted and a person approved.
+- **Where (D129):** a rule for a public library goes to that ecosystem's core pack in Steno's `rule-packs/`; a rule for an internal framework goes to the organization's pack repository when one is configured (`STENO_RULE_PACK_DIRS` points at a clone of it), otherwise `rule-packs/org/`. A dedicated Steno rules repository is Open for `v1`.
+- **How (D131):** approving writes the rule and its test cases into its pack in **Steno's own git worktree** of the destination (under `~/.cache/steno/publish/`), never a checkout someone is using; the pack's tests must pass, or nothing is published. Then it's committed **as Steno** on the `steno/rules` branch, and Steno keeps **one open pull request per destination**, adding each approval to it (`gh` opens or finds it; without `gh`, the result links to a pre-filled pull request). A destination set to `push` (`STENO_RULES_PUBLISH_CORE`, `STENO_RULES_PUBLISH_ORG`) commits straight to its default branch instead, and the UI review is the only review.
+- **When it runs:** where it's merged. Once the pull request merges and the checkout Steno loads packs from is updated, the next ingestion runs it.
 - **Rules stay YAML.** Nothing about a rule lives only in Postgres. A rule written by hand is loaded on the next run like any other, and any pending proposal it now explains closes as `covered`.
-- Steno needs **write access to that one repository**, and only that one ([Security](../security.md)).
+- Steno needs **write access to each destination**, and only those ([Security](../security.md)).
 
 ## 8. Rule health (Decided, D126)
 

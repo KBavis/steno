@@ -1365,4 +1365,4 @@ textarea {
 .rules-sample { padding: 2px 0; }
 .rules-meta { color: var(--muted); font-size: 12px; margin-top: 18px !important; }
 .rules-why { flex: 1; min-width: 220px; height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: inherit; font: inherit; }
-.rules-commit { margin-right: auto; display: inline-flex; gap: 6px; align-items: center; }
+.rules-pr { display: inline-flex; gap: 4px; align-items: center; margin-top: 8px; font-weight: 600; color: var(--accent-text); }

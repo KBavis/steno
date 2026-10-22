@@ -1,20 +1,21 @@
-"""Approving or rejecting a proposal (D120, D125, D129).
+"""Approving or rejecting a proposal (D120, D125, D129, D131).
 
-Approving a rule writes it, with its test cases, into the pack it belongs in, and runs that
-pack's tests before anything is kept:
+Approving a rule writes it, with its test cases, into the pack it belongs in, runs that pack's
+tests, and publishes it (`publish.py`), all in Steno's own worktree of the destination, never
+in a checkout someone is using:
 
 - an existing pack with the suggested name: the rule is added to it;
 - otherwise a new pack: a **core** pack under `rule-packs/<ecosystem>/` for a public library,
   an **organization** pack (the first `STENO_RULE_PACK_DIRS` folder, else `rule-packs/org/`)
   for an internal framework (D129).
 
-With `commit`, the files are committed as Steno in the repository that holds the pack (D125).
+Publishing collects approved rules on the `steno/rules` branch with one open pull request per
+destination, or pushes to its default branch, as the destination is set (D131).
 Approving "ignore" ignores the pattern; approving "vocabulary" sends it to the backlog (the
 pattern stays blocked until the vocabulary is built); "enable the pack" is noted for a person
 to act on. Rejecting records why, and the pattern is `rejected`.
 """
 
-import shutil
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from steno.config import get_settings
 from steno.coverage.patterns import triage
+from steno.curation.publish import PublishError, destination, publish, worktree
 from steno.db.models import (
     CoveragePattern,
     PatternState,
@@ -36,24 +38,19 @@ from steno.db.models import (
 from steno.rule_packs.packs import load_all_packs, load_pack
 from steno.rule_packs.testing import run_pack_tests
 
-STENO_AUTHOR = "Steno <steno@localhost>"
-
 
 class ApprovalError(ValueError):
     pass
 
 
-def approve(
-    session: Session, proposal: RuleProposal, by: str, commit: bool = False
-) -> dict[str, Any]:
+def approve(session: Session, proposal: RuleProposal, by: str) -> dict[str, Any]:
     if proposal.status != ProposalStatus.READY:
         raise ApprovalError(f"proposal #{proposal.id} is {proposal.status.value}, not ready")
     out: dict[str, Any] = {}
     if proposal.kind == ProposalKind.RULE:
-        out = _write_rule(proposal)
-        if commit:
-            out["commit"] = _commit(out["pack_dir"], proposal, by)
-            proposal.commit_sha = out["commit"]
+        out = _publish_rule(proposal, by)
+        proposal.commit_sha = out["commit"]
+        proposal.published = out
         state = PatternState.APPROVED
     elif proposal.kind == ProposalKind.IGNORE:
         triage(session, list(proposal.fingerprints), PatternState.IGNORED,
@@ -111,28 +108,40 @@ def pack_meta(proposal: RuleProposal) -> dict[str, Any]:
     }
 
 
-def _write_rule(proposal: RuleProposal) -> dict[str, Any]:
+def target(proposal: RuleProposal) -> tuple[Path, str, bool]:
+    """Where an approved rule goes: its pack's folder (as it is in the checkout Steno loads
+    packs from), the pack's source (core or org), and whether the pack is new."""
+    meta = pack_meta(proposal)
+    existing = {p.name: p for p in load_all_packs()}
+    if meta["name"] in existing:
+        pack = existing[meta["name"]]
+        return pack.path, pack.source, False
+    return _new_pack_dir(meta), meta["source"], True
+
+
+def _publish_rule(proposal: RuleProposal, by: str) -> dict[str, Any]:
     if not proposal.rule:
         raise ApprovalError(f"proposal #{proposal.id} has no rule")
     rule = yaml.safe_load(proposal.rule)
-    existing = {p.name: p for p in load_all_packs()}
     meta = pack_meta(proposal)
-    created = meta["name"] not in existing
-    pack_dir = existing[meta["name"]].path if not created else _new_pack_dir(meta)
-    rule_file = pack_dir / "rules" / f"{rule['id']}.yaml"
+    pack_dir, source, created = target(proposal)
+    try:
+        dest = destination(source, pack_dir)
+        tree = worktree(dest)
+    except PublishError as exc:
+        raise ApprovalError(f"can't publish: {exc}") from exc
+    pack_in_tree = tree / pack_dir.resolve().relative_to(dest.repo.resolve())
+    rule_file = pack_in_tree / "rules" / f"{rule['id']}.yaml"
     if rule_file.exists():
-        raise ApprovalError(f"{rule_file} already exists")
-    written: list[Path] = []
+        raise ApprovalError(f"a rule {rule['id']} already exists in {meta['name']}")
     try:
         if created:
-            pack_dir.mkdir(parents=True)
-            (pack_dir / "pack.yaml").write_text(yaml.safe_dump(meta, sort_keys=False))
-            written.append(pack_dir)
+            pack_in_tree.mkdir(parents=True, exist_ok=True)
+            (pack_in_tree / "pack.yaml").write_text(yaml.safe_dump(meta, sort_keys=False))
         rule_file.parent.mkdir(parents=True, exist_ok=True)
         rule_file.write_text(proposal.rule.strip() + "\n")
-        written.append(rule_file)
         for case, body in (proposal.tests or {}).items():
-            case_dir = pack_dir / "tests" / rule["id"] / case
+            case_dir = pack_in_tree / "tests" / rule["id"] / case
             for rel, text in (body.get("files") or {}).items():
                 path = case_dir / "input" / rel
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -141,22 +150,36 @@ def _write_rule(proposal: RuleProposal) -> dict[str, Any]:
             (case_dir / "expected.yaml").write_text(
                 yaml.safe_dump(body.get("expected") or {}, sort_keys=False)
             )
-        written.append(pack_dir / "tests" / rule["id"])
-        pack = load_pack(pack_dir)
-        results = run_pack_tests(
-            pack, [*[p for p in existing.values() if p.name != pack.name], pack]
-        )
-        failed = [f"{r.rule}/{r.case}" for r in results if not r.passed]
+        pack = load_pack(pack_in_tree)
+        others = [p for p in load_all_packs() if p.name != pack.name]
+        failed = [
+            f"{r.rule}/{r.case}" for r in run_pack_tests(pack, [*others, pack]) if not r.passed
+        ]
         if failed:
             raise ApprovalError(f"the pack's tests fail with the rule in place: {failed}")
+        title = f"rules: {rule['id']} in {meta['name']} (proposal #{proposal.id})"
+        body = (
+            f"{proposal.summary}\n\nDrafted by Steno's rule curation ({proposal.drafter}), "
+            f"proven by its {len(proposal.tests or {})} test cases, approved by {by}."
+        )
+        published = publish(dest, tree, [pack_in_tree], title, body)
     except Exception:
-        for path in reversed(written):  # leave the packs as they were
-            shutil.rmtree(path, ignore_errors=True) if path.is_dir() else path.unlink(
-                missing_ok=True
-            )
+        # Leave Steno's worktree as the remote has it; nothing half-written survives
+        subprocess.run(["git", "-C", str(tree), "reset", "--quiet", "--hard"], check=False)
+        subprocess.run(["git", "-C", str(tree), "clean", "-fdq"], check=False)
         raise
-    return {"pack": meta["name"], "pack_dir": pack_dir, "created_pack": created,
-            "rule_file": rule_file, "cases": len(proposal.tests or {})}  # fmt: skip
+    return {
+        "pack": meta["name"],
+        "created_pack": created,
+        "rule": rule["id"],
+        "destination": dest.name,
+        "repository": str(dest.repo),
+        "mode": published.mode,
+        "branch": published.branch,
+        "commit": published.commit,
+        "pr_url": published.pr_url,
+        "compare_url": published.compare_url,
+    }
 
 
 def _new_pack_dir(meta: dict[str, Any]) -> Path:
@@ -167,22 +190,3 @@ def _new_pack_dir(meta: dict[str, Any]) -> Path:
         settings.rule_pack_dirs[0] if settings.rule_pack_dirs else settings.rule_packs_dir / "org"
     )
     return root / meta["name"]
-
-
-def _commit(pack_dir: Path, proposal: RuleProposal, by: str) -> str:
-    """Commit the pack's changes as Steno in the repository that holds it (D125)."""
-    top = subprocess.run(
-        ["git", "-C", str(pack_dir), "rev-parse", "--show-toplevel"],
-        capture_output=True, text=True, check=True,
-    )  # fmt: skip
-    repo = Path(top.stdout.strip())
-    subprocess.run(["git", "-C", str(repo), "add", "--", str(pack_dir)], check=True)
-    message = (
-        f"rules: {proposal.title} (proposal #{proposal.id})\n\n{proposal.summary}\n\n"
-        f"Drafted by Steno's rule curation ({proposal.drafter}), proven by its test cases, "
-        f"approved by {by}."
-    )
-    subprocess.run(["git", "-C", str(repo), "commit", "-q", "--author", STENO_AUTHOR,
-                    "-m", message, "--", str(pack_dir)], check=True)  # fmt: skip
-    return subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True,
-                          text=True, check=True).stdout.strip()  # fmt: skip

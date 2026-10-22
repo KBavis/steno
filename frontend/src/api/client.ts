@@ -339,7 +339,21 @@ export interface CaseResult {
   errors: string[]
 }
 
+export interface PublishInfo {
+  destination?: string
+  repository?: string
+  mode?: 'pr' | 'push'
+  branch?: string
+  base?: string
+  created_pack?: boolean
+  commit?: string
+  pr_url?: string | null
+  compare_url?: string | null
+  error?: string
+}
+
 export interface Proposal extends ProposalSummary {
+  publish: PublishInfo | null
   rule_id: string | null
   pack_exists: boolean
   rule: string | null
@@ -434,8 +448,8 @@ export const api = {
       request<CurationRun>('/curation/runs', { method: 'POST', body: JSON.stringify({ limit, fingerprints, budget_usd }) }),
     proposals: (status?: ProposalStatus) => request<ProposalSummary[]>(`/proposals${status ? `?${q({ status })}` : ''}`),
     proposal: (id: number) => request<Proposal>(`/proposals/${id}`),
-    approve: (id: number, commit: boolean) =>
-      request<{ proposal: ProposalSummary } & Record<string, unknown>>(`/proposals/${id}/approve`, { method: 'POST', body: JSON.stringify({ commit }) }),
+    approve: (id: number) =>
+      request<{ proposal: ProposalSummary } & PublishInfo>(`/proposals/${id}/approve`, { method: 'POST', body: JSON.stringify({}) }),
     reject: (id: number, why: string) =>
       request<ProposalSummary>(`/proposals/${id}/reject`, { method: 'POST', body: JSON.stringify({ why }) }),
   },

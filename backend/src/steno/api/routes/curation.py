@@ -13,7 +13,8 @@ from sqlalchemy import select
 
 from steno.api.deps import SessionDep
 from steno.config import get_settings
-from steno.curation.approve import ApprovalError, approve, pack_meta, reject
+from steno.curation.approve import ApprovalError, approve, pack_meta, reject, target
+from steno.curation.publish import BRANCH, destination
 from steno.curation.run import queue_run
 from steno.db.models import CurationRun, ProposalStatus, RuleProposal
 from steno.rule_packs.packs import load_all_packs
@@ -29,7 +30,6 @@ class RunIn(BaseModel):
 
 class ApproveIn(BaseModel):
     by: str = "ui"
-    commit: bool = False
 
 
 class RejectIn(BaseModel):
@@ -76,6 +76,7 @@ def proposal(proposal_id: int, session: SessionDep) -> dict[str, Any]:
     rule_id = (yaml.safe_load(p.rule) or {}).get("id") if p.rule else None
     pack = pack_meta(p) if p.rule else None
     return {
+        "publish": p.published or (_preview(p) if p.rule else None),
         "rule_id": rule_id,
         "pack_exists": bool(pack and pack["name"] in {k.name for k in load_all_packs()}),
         **_summary(p),
@@ -96,7 +97,7 @@ def proposal(proposal_id: int, session: SessionDep) -> dict[str, Any]:
 def approve_one(proposal_id: int, body: ApproveIn, session: SessionDep) -> dict[str, Any]:
     p = _get(session, proposal_id)
     try:
-        out = approve(session, p, body.by, commit=body.commit)
+        out = approve(session, p, body.by)
     except ApprovalError as exc:
         raise HTTPException(409, str(exc)) from exc
     return {"proposal": _summary(p), **{k: str(v) for k, v in out.items()}}
@@ -112,6 +113,31 @@ def reject_one(proposal_id: int, body: RejectIn, session: SessionDep) -> dict[st
     except ApprovalError as exc:
         raise HTTPException(409, str(exc)) from exc
     return _summary(p)
+
+
+def _preview(p: RuleProposal) -> dict[str, Any] | None:
+    """Where approving would publish the rule (D131), before anything is written."""
+    try:
+        pack_dir, source, created = target(p)
+        dest = destination(source, pack_dir)
+    except Exception as exc:  # noqa: BLE001 - shown instead of a preview
+        return {"error": str(exc)}
+    return {
+        "destination": dest.name,
+        "repository": _remote_name(dest.repo),
+        "mode": dest.mode,
+        "branch": BRANCH if dest.mode == "pr" else dest.base,
+        "base": dest.base,
+        "created_pack": created,
+    }
+
+
+def _remote_name(repo: Any) -> str:
+    import subprocess
+
+    url = subprocess.run(["git", "-C", str(repo), "remote", "get-url", "origin"],
+                         capture_output=True, text=True).stdout.strip()  # fmt: skip
+    return url.rsplit(":", 1)[-1].removesuffix(".git") if url else repo.name
 
 
 def _get(session: Any, proposal_id: int) -> RuleProposal:
