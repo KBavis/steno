@@ -111,7 +111,7 @@ Patterns left over are worked on alone.
 
 **A framework becomes a pack.** The organization's pack repository holds one pack per internal framework (`acme-messaging/`), with a `framework` block in `pack.yaml` (name, plain-English description, library coordinates, source repository). That makes the framework a named thing: the review shows it as one unit, and its pack links to the library's artifact node, so "what is Acme Messaging and who uses it?" can be answered over MCP. See [rules and packs §6](./rules-and-packs.md#6-packs-and-layout-decided).
 
-**Tier.** A pattern from an organization's own library (its group ID, or a repository ingested in the organization) goes to the **organization pack**. One from a public library goes there too at first, marked **generic candidate**, so it can be contributed to Steno's core packs later. Core packs ship with Steno and run only where `enabled_when` matches (D25), so shipping all of them costs nothing at runtime.
+**Tier (D129).** A pattern from an organization's own library (its group ID, or a repository ingested in the organization) goes to the **organization pack**. One from a **public library** (Maven Central, PyPI: Spring, Kafka clients) goes to that ecosystem's **core pack** in Steno's `rule-packs/`, so every organization benefits. In a client deployment (`v1`), where Steno can't push to its own repository, generic rules land in a core-extension pack in the client's pack repository, marked for upstreaming. Core packs ship with Steno and run only where `enabled_when` matches (D25), so shipping all of them costs nothing at runtime.
 
 ## 5. The curation job (Decided, D120, D124)
 
@@ -150,6 +150,8 @@ Code is read from the git host. For near misses, the job makes a shallow, sparse
 | `agent_sdk` | The Claude Agent SDK runs the investigate and draft steps as an agent with the authoring kit as its tools, capped by turns and budget | Default when Claude is the provider |
 | `state_machine` | A fixed sequence of LLM calls through `steno/llm` (LiteLLM, any provider), one bounded call per step | Fallback; any provider |
 
+**The tools are internal (D129).** The authoring kit is a Python module of plain functions. The `state_machine` backend calls them directly; the Agent SDK gets them as in-process tools; a local-only command can serve them to Claude Code for the `rule-pack-author` skill. None of them is on the public MCP server.
+
 Both receive the same input (the pattern or framework, its samples and signals, the vocabulary) and return the same output (rule YAML, tests, summary, facet). **The proof sits outside both**, so the backend can't let an unproven rule through. Running both on the same patterns compares their quality and cost.
 
 ## 6. Proof and review (Decided, D120)
@@ -177,7 +179,7 @@ The English summary is an LLM's description and could be wrong. The impact, evid
 
 ## 7. Committing approved rules (Decided, D125)
 
-- **Where:** the organization's pack repository when one is configured (`STENO_RULE_PACK_DIRS` points at a clone of it): Steno commits and pushes there. Otherwise Steno commits to its own repository's `rule-packs/org/`.
+- **Where (D129):** a rule for a public library goes to that ecosystem's core pack in Steno's `rule-packs/`. A rule for an internal framework goes to the organization's pack repository when one is configured (`STENO_RULE_PACK_DIRS` points at a clone of it), where Steno commits and pushes; otherwise to `rule-packs/org/`.
 - **Authored by Steno.** Every commit names Steno as its author and links the proposal, so history shows which rules a person wrote and which Steno drafted and a person approved.
 - **Rules stay YAML.** Nothing about a rule lives only in Postgres. A rule written by hand is loaded on the next run like any other, and any pending proposal it now explains closes as `covered`.
 - Steno needs **write access to that one repository**, and only that one ([Security](../security.md)).
