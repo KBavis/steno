@@ -89,7 +89,7 @@ erDiagram
 | `application_identity`, `application_alias`, `application_link`, `unmatched_name` | The identity registry: Steno IDs, names and their sources, lifecycle, conflicts, admin renames, names no application matched | [Identify and reconcile §2](./ingestion/identify-and-reconcile.md#2-identify) |
 | `claim` | What PLATFORM, DECLARED, and ADMIN witnesses say, per facet and subject, with witness type, witness, citation, and as-of jobs (D109) | [Claims and reconcile §5](./ingestion/claims-and-reconcile.md#5-the-claim-store) |
 
-**Rule curation** (D120–D126; [rule curation](./ingestion/rule-curation.md)). Rules themselves stay YAML in git; these tables hold only what Steno knows and did about them. `coverage_pattern` and `coverage_occurrence` are built (written by every coverage stage, read at `GET /api/patterns`); the rest are planned:
+**Rule curation** (D120–D126; [rule curation](./ingestion/rule-curation.md)). Rules themselves stay YAML in git; these tables hold only what Steno knows and did about them. `coverage_pattern`, `coverage_occurrence`, `curation_run`, and `rule_proposal` are built; `rule_health` is planned:
 
 | Table | Holds |
 |---|---|

@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     # repository, so memory stays bounded (D127); 0 resolves everything in one pass
     resolver_jvm_batch_files: int = 0
 
+    # Rule curation (D120, D130): which provider drafts rules, and the caps on each pattern.
+    # claude_agent_sdk uses this machine's Claude Code login, or ANTHROPIC_API_KEY when set
+    rule_drafter: str = "claude_agent_sdk"  # claude_agent_sdk | openai | gemini | azure_openai
+    rule_drafter_model: str = "claude-opus-5-5"
+    rule_drafter_effort: str = "high"
+    rule_drafter_max_turns: int = 30
+    rule_drafter_max_usd: float = 2.0  # per pattern
+    curation_budget_usd: float = 10.0  # per run
+
     # A ceiling on ingestion jobs running at once across every machine. Within it, each
     # machine takes only what fits its memory and CPUs (D128; docs: storage.md)
     max_parallel_jobs: int = 16
