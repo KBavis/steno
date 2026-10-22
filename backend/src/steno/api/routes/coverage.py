@@ -22,9 +22,11 @@ from steno.coverage.runs import latest_runs
 from steno.db.models import (
     CoverageItem,
     CoverageKind,
+    CoveragePattern,
     CoverageStatus,
     IngestionJob,
     IngestionStage,
+    PatternState,
     Repository,
     Space,
 )
@@ -319,6 +321,15 @@ def triage(body: Triage, session: SessionDep) -> dict[str, int]:
         raise HTTPException(404, f"no coverage item {body.kind.value} {body.target!r}")
     for row in rows:
         row.status = body.status
+    # The pattern follows (D121): ignored here is ignored everywhere; reopened is open again
+    fingerprints = {f"{row.signal}:{row.target_symbol}" for row in rows}
+    for pattern in session.scalars(
+        select(CoveragePattern).where(CoveragePattern.fingerprint.in_(fingerprints))
+    ):
+        if body.status == CoverageStatus.IGNORED:
+            pattern.state, pattern.note = PatternState.IGNORED, "ignored in the coverage report"
+        elif pattern.state in (PatternState.IGNORED, PatternState.REJECTED):
+            pattern.state, pattern.note = PatternState.OPEN, "reopened in the coverage report"
     return {"updated": len(rows)}
 
 

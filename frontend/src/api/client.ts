@@ -340,6 +340,8 @@ export interface CaseResult {
 }
 
 export interface Proposal extends ProposalSummary {
+  rule_id: string | null
+  pack_exists: boolean
   rule: string | null
   tests: Record<string, ProposalCase>
   proof: { cases?: CaseResult[] }

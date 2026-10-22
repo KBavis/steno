@@ -6,6 +6,7 @@ drafting is LLM work and never runs in the API process.
 
 from typing import Any
 
+import yaml
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -15,6 +16,7 @@ from steno.config import get_settings
 from steno.curation.approve import ApprovalError, approve, pack_meta, reject
 from steno.curation.run import queue_run
 from steno.db.models import CurationRun, ProposalStatus, RuleProposal
+from steno.rule_packs.packs import load_all_packs
 
 router = APIRouter(tags=["curation"])
 
@@ -71,13 +73,17 @@ def proposals(session: SessionDep, status: ProposalStatus | None = None) -> list
 @router.get("/proposals/{proposal_id}")
 def proposal(proposal_id: int, session: SessionDep) -> dict[str, Any]:
     p = _get(session, proposal_id)
+    rule_id = (yaml.safe_load(p.rule) or {}).get("id") if p.rule else None
+    pack = pack_meta(p) if p.rule else None
     return {
+        "rule_id": rule_id,
+        "pack_exists": bool(pack and pack["name"] in {k.name for k in load_all_packs()}),
         **_summary(p),
         "rule": p.rule,
         "tests": p.tests,
         "proof": p.proof,
         "samples": p.samples,
-        "pack": pack_meta(p) if p.rule else None,
+        "pack": pack,
         "flags": p.flags,
         "comment": p.comment,
         "reviewed_by": p.reviewed_by,
