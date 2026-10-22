@@ -1335,3 +1335,20 @@ textarea {
   color: var(--text-2);
   word-break: break-all;
 }
+
+
+/* ------------------------------------------------------------- rule curation */
+.curation-actions { display: flex; gap: 8px; align-items: center; }
+.curation-actions select { margin-left: 4px; }
+.curation-group { margin-bottom: 14px; }
+.curation-group-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.curation-row { align-items: flex-start; gap: 12px; }
+.curation-row input[type='checkbox'] { margin-top: 4px; }
+.curation-row .badge, .curation-proposal .badge { margin-right: 4px; }
+.curation-proposal { width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; color: inherit; }
+.curation-proposal:hover { background: var(--hover, rgba(127, 127, 127, 0.06)); }
+.curation-detail h3 { font-size: 13px; margin: 18px 0 6px; display: flex; gap: 6px; align-items: center; }
+.curation-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.45; background: var(--code-bg, rgba(127, 127, 127, 0.08)); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; overflow: auto; max-height: 360px; white-space: pre; }
+.curation-case { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+.curation-why { flex: 1; min-width: 200px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
+.segmented { margin: 4px 0 14px; }

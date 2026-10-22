@@ -91,32 +91,71 @@ def curate(
     budget_usd: float | None = None,
     trigger: str = "manual",
 ) -> CurationRun:
-    settings = get_settings()
+    """Create a run and execute it now (the command line)."""
     drafter = drafter or get_drafter()
-    budget = budget_usd if budget_usd is not None else settings.curation_budget_usd
+    run = queue_run(session, limit, fingerprints, budget_usd, trigger, drafter.name)
+    run.status = "running"
+    session.commit()
+    return execute(session, run, drafter)
+
+
+def queue_run(
+    session: Session,
+    limit: int = 5,
+    fingerprints: list[str] | None = None,
+    budget_usd: float | None = None,
+    trigger: str = "manual",
+    drafter: str | None = None,
+) -> CurationRun:
+    """A run waiting for a worker (the UI's "Curate"): drafting is slow LLM work, so it runs
+    in the worker, never in the API process."""
+    settings = get_settings()
     run = CurationRun(
         trigger=trigger,
-        drafter=drafter.name,
+        drafter=drafter or settings.rule_drafter,
         model=settings.rule_drafter_model,
-        budget_usd=budget,
-        stats={},
+        status="queued",
+        budget_usd=budget_usd if budget_usd is not None else settings.curation_budget_usd,
+        stats={"params": {"limit": limit, "fingerprints": fingerprints or []}},
     )
     session.add(run)
     session.commit()
+    return run
+
+
+def claim_run(session: Session) -> CurationRun | None:
+    """The oldest queued run, marked running; two workers never claim the same one."""
+    run = session.scalar(
+        select(CurationRun)
+        .where(CurationRun.status == "queued")
+        .order_by(CurationRun.id)
+        .limit(1)
+        .with_for_update(skip_locked=True)
+    )
+    if run is not None:
+        run.status = "running"
+        session.commit()
+    return run
+
+
+def execute(session: Session, run: CurationRun, drafter: Drafter | None = None) -> CurationRun:
+    drafter = drafter or get_drafter(run.drafter)
+    params = (run.stats or {}).get("params") or {}
     counts: dict[str, int] = {}
     try:
-        _work(session, run, drafter, budget, limit, fingerprints, counts)
+        _work(session, run, drafter, run.budget_usd or 0.0, int(params.get("limit", 5)),
+              params.get("fingerprints") or None, counts)  # fmt: skip
     except Exception as exc:
         # Every proposal so far is committed; record why the run stopped
         run.status = "failed"
         run.error = f"{type(exc).__name__}: {exc}"
         run.finished_at = datetime.now(UTC)
-        run.stats = counts
+        run.stats = {"params": params, **counts}
         session.commit()
         raise
     run.status = "succeeded"
     run.finished_at = datetime.now(UTC)
-    run.stats = counts
+    run.stats = {"params": params, **counts}
     session.commit()
     return run
 
@@ -148,6 +187,7 @@ def _work(
         run.spent_usd = round(run.spent_usd + proposal.cost_usd, 4)
         key = f"{proposal.kind.value}:{proposal.status.value}"
         counts[key] = counts.get(key, 0) + 1
+        run.stats = {**(run.stats or {}), **counts}  # progress, visible while it runs
         session.commit()
 
 

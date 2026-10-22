@@ -22,11 +22,12 @@ log = logging.getLogger(__name__)
 
 
 def run_once() -> bool:
-    """Claim and run one job. Returns False if the queue was empty."""
+    """Claim and run one ingestion job, or else one queued curation run. Returns False if
+    there was nothing to do."""
     with session_scope() as session:
         job = claim_next(session, host(), machine())
         if job is None:
-            return False
+            return run_curation()
         session.commit()
         job_id = job.id
 
@@ -44,6 +45,24 @@ def run_once() -> bool:
             log.exception("job %s: failed", job_id)
         job.finished_at = datetime.now(UTC)
     log.info("job %s: %s", job_id, job.status)
+    return True
+
+
+def run_curation() -> bool:
+    """Run one queued rule curation run (D120), if any: drafting is LLM work, kept out of the
+    API process like ingestion."""
+    from steno.curation.run import claim_run, execute
+
+    with session_scope() as session:
+        run = claim_run(session)
+        if run is None:
+            return False
+        log.info("curation run %s: started", run.id)
+        try:
+            execute(session, run)
+        except Exception:
+            log.exception("curation run %s: failed", run.id)
+        log.info("curation run %s: %s", run.id, run.status)
     return True
 
 
