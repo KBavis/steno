@@ -139,3 +139,16 @@ flowchart LR
 **Evidence** (D122): an unread file whose name appears in the code (`getResource("flows/order.xyz")`) gets `referenced_by_code`, which multiplies its score by five.
 
 **Reading them:** `GET /api/patterns?state=open&limit=50` returns patterns grouped by owner, each group ranked by its summed score; patterns no library owns stand alone.
+
+### Limitations of fingerprints and occurrence keys
+
+| Change to the code | Effect | Severity |
+|---|---|---|
+| Lines shift (code added above, reformatting) | None: the key has no line numbers | — |
+| A function's implementation changes but it keeps its name and file | None: same key | — |
+| **A function is renamed, its file is renamed or moved, or the code is extracted into a new helper** | The place counts as one occurrence removed and one new: its `first_seen_job` becomes this run's, so old code looks new | Low today: reach stays correct, and a known pattern never goes back to the LLM. It matters once anything reads "new since" (the curation job's nightly comparison) |
+| Two uses of a pattern inside one function | One occurrence: the unit is the enclosing function, not the call site | Low: fine for ranking, not call-site precise |
+| **A rule's target is renamed** (a framework renames `AcmeHandler` to `MessageHandler`) | A new fingerprint: a new pattern, while the old one becomes `covered` | Medium: the new pattern is proposed again, though a person may have decided on the old one. Rule health (D126) should catch the old rule's drop in matches |
+| A repository's first run | Every occurrence is new | Intended: that's the first run |
+
+**To investigate (Open):** carrying an occurrence's history across renames and moves, the way identity carries an application's Steno ID (D83). Within one run and one pattern, pair each removed occurrence with an added one when the enclosing function's body is unchanged (its `body_hash`, already computed for traces) or its symbol differs only by name or path, and keep the original `first_seen_job`. Ambiguous pairs stay unpaired, so a mistake can only make old code look new, never hide new code. A renamed fingerprint is harder: it could be linked to the old one when the old rule's matches drop as the new pattern appears in the same places.

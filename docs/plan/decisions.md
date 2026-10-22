@@ -152,6 +152,7 @@ Every numbered design decision, and the questions still open. Part of [Plan](./R
 - [ ] Rule curation defaults: the budget per run, caps per pattern and framework, and how much a rejected pattern's reach must grow before it's proposed again (D121); set from the pilot.
 - [ ] How far `requires` on an interceptor is read by rules (headers read with `request.getHeader`, scopes checked) versus left to the agent reading its code (D116).
 - [ ] If the two-pass JavaParser helper fails the large-repository benchmark, whether to evaluate Eclipse JDT as its replacement (D127).
+- [ ] How occurrences keep their history across renames and moves (D121): pairing a removed and an added occurrence by unchanged body hash or a symbol that differs only by name or path, and linking a renamed fingerprint to the old one ([coverage report §5](../how-it-works/ingestion/coverage-report.md#limitations-of-fingerprints-and-occurrence-keys)).
 
 **Carried over**
 - [ ] The format for declaring glossary terms (a `glossary.yaml` per space, or the UI)

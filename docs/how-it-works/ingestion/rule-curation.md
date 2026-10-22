@@ -52,7 +52,7 @@ A **pattern** is one kind of thing no rule explains, named by what it is, never 
 
 - **Reach is the current state**, not a running total: the number of distinct occurrence keys in the latest run of every repository. Re-ingesting old code produces the same keys, so reach doesn't grow; deleted code removes keys.
 - **New code is a set difference:** keys in tonight's snapshot that weren't in the last one. Each key keeps `first_seen`, so "new since date X" is a query.
-- **A rename** shows as one key removed and one added; reach stays right.
+- **A rename or move** shows as one key removed and one added: reach stays right, but the place looks new. Limitations and the improvement to investigate are in [coverage report §5](./coverage-report.md#limitations-of-fingerprints-and-occurrence-keys).
 
 **A pattern's state** persists across runs and replaces per-item triage (refines D62):
 
