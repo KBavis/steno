@@ -1,6 +1,9 @@
-"""A rule curation run (D120): turn the top open patterns into proposals a person reviews.
+"""A rule curation run (D120): turn open patterns into proposals a person reviews.
 
-For each pattern, in score order, until the run's budget is spent:
+By default a run works on every open pattern (what a first ingestion needs: account for
+everything Steno can't explain yet), optionally capped at a number. Its patterns are drafted
+in parallel by any workers, in score order, until the run's budget is spent; the rest wait for
+the next run. For each pattern:
 
 1. Gather samples: varied occurrences across repositories, read from the git host at the
    commit Steno ingested.
@@ -20,6 +23,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from steno.config import get_settings
@@ -27,7 +31,13 @@ from steno.connectors.source import read_file
 from steno.coverage.patterns import frameworks
 from steno.coverage.runs import latest_runs
 from steno.curation import kit
-from steno.curation.drafters import Drafter, DraftRequest, Sample, get_drafter
+from steno.curation.drafters import (
+    Drafter,
+    DrafterUnavailable,
+    DraftRequest,
+    Sample,
+    get_drafter,
+)
 from steno.db.models import (
     Connector,
     CoverageItem,
@@ -42,17 +52,20 @@ from steno.db.models import (
 
 log = logging.getLogger(__name__)
 
-# Signals a rule could explain; the rest are fixed another way (a parse error, a version)
+# Signals a rule could explain; the rest are fixed another way (a parse error, a version).
+# Not `inferred_entry` or `unreachable_effect`: their pattern is one function in one
+# application (dead code, an unfinished stub), not something a rule would match elsewhere.
+# They stay in the coverage report; when a framework is what starts such code, its annotation
+# or base type shows up as an `unknown_hook` pattern, and that is drafted.
 DRAFTABLE = {
     "unknown_hook",
     "external_call",
-    "inferred_entry",
-    "unreachable_effect",
     "library",
     "unread_file",
     "unread_config",
 }
 SAMPLES = 6
+MIN_HISTORY = 5  # past drafts with a model before its cost is projected
 CONTEXT = 30  # lines either side of an occurrence
 
 
@@ -62,7 +75,9 @@ class Picked:
     siblings: list[str]
 
 
-def pick(session: Session, limit: int, fingerprints: list[str] | None = None) -> list[Picked]:
+def pick(
+    session: Session, limit: int | None, fingerprints: list[str] | None = None
+) -> list[Picked]:
     """The patterns to work on: the ones asked for, or open draftable patterns in score order,
     taken framework by framework (D123), with their framework's other patterns as context."""
     query = select(CoveragePattern)
@@ -80,40 +95,44 @@ def pick(session: Session, limit: int, fingerprints: list[str] | None = None) ->
         labels = [p.label for p in group["patterns"]]
         for p in group["patterns"]:
             out.append(Picked(p, [lbl for lbl in labels if lbl != p.label]))
-    return out[:limit]
+    return out if limit is None else out[:limit]
 
 
 def curate(
     session: Session,
-    limit: int = 5,
+    limit: int | None = None,
     fingerprints: list[str] | None = None,
     drafter: Drafter | None = None,
     budget_usd: float | None = None,
     trigger: str = "manual",
+    model: str | None = None,
 ) -> CurationRun:
-    """Create a run and execute it now (the command line)."""
-    drafter = drafter or get_drafter()
-    run = queue_run(session, limit, fingerprints, budget_usd, trigger, drafter.name)
-    run.status = "running"
-    session.commit()
-    return execute(session, run, drafter)
+    """Create a run and work it to the end in this process (the command line). Errors that
+    stop a run (the provider unavailable or not built) are raised after it's recorded."""
+    drafter = drafter or get_drafter(model=model)
+    run = queue_run(session, limit, fingerprints, budget_usd, trigger, drafter.name, model)
+    while (work := claim(session, run.id)) is not None:
+        draft_one(session, work, drafter)
+    session.refresh(run)
+    return run
 
 
 def queue_run(
     session: Session,
-    limit: int = 5,
+    limit: int | None = None,
     fingerprints: list[str] | None = None,
     budget_usd: float | None = None,
     trigger: str = "manual",
     drafter: str | None = None,
+    model: str | None = None,
 ) -> CurationRun:
-    """A run waiting for a worker (the UI's "Curate"): drafting is slow LLM work, so it runs
-    in the worker, never in the API process."""
+    """A run waiting for workers (the UI's "Find missing rules"): drafting is slow LLM work,
+    so it runs in workers, never in the API process."""
     settings = get_settings()
     run = CurationRun(
         trigger=trigger,
         drafter=drafter or settings.rule_drafter,
-        model=settings.rule_drafter_model,
+        model=model or settings.rule_drafter_model,
         status="queued",
         budget_usd=budget_usd if budget_usd is not None else settings.curation_budget_usd,
         stats={"params": {"limit": limit, "fingerprints": fingerprints or []}},
@@ -123,72 +142,280 @@ def queue_run(
     return run
 
 
-def claim_run(session: Session) -> CurationRun | None:
-    """The oldest queued run, marked running; two workers never claim the same one."""
-    run = session.scalar(
-        select(CurationRun)
-        .where(CurationRun.status == "queued")
-        .order_by(CurationRun.id)
-        .limit(1)
-        .with_for_update(skip_locked=True)
+# ---------------------------------------------------------------- the cost check
+
+
+def estimate(session: Session, model: str | None = None) -> dict[str, Any]:
+    """What a search over every open pattern would cost (§9): the worst case (each pattern at
+    the per-pattern cap), and a projection from the cost of past drafts with this model. With
+    too little history there's no projection; a pilot of the top patterns gives one."""
+    settings = get_settings()
+    model = model or settings.rule_drafter_model
+    picks = pick(session, None)
+    costs = sorted(
+        c
+        for (c,) in session.execute(
+            select(RuleProposal.cost_usd)
+            .join(CurationRun, CurationRun.id == RuleProposal.run_id)
+            .where(CurationRun.model == model, RuleProposal.cost_usd > 0)
+        )
     )
-    if run is not None:
-        run.status = "running"
+    n = len(picks)
+    out: dict[str, Any] = {
+        "model": model,
+        "patterns": n,
+        "frameworks": len({p.pattern.owner for p in picks if p.pattern.owner}),
+        "worst_usd": round(n * settings.rule_drafter_max_usd, 2),
+        "budget_usd": settings.curation_budget_usd,
+        "pilot": settings.curation_pilot,
+        "history": len(costs),
+    }
+    if len(costs) >= MIN_HISTORY:
+        mean = sum(costs) / len(costs)
+        p90 = costs[min(len(costs) - 1, int(0.9 * len(costs)))]
+        out |= {"mean_usd": round(mean, 4), "p90_usd": round(p90, 4),
+                "expected_usd": round(n * mean, 2), "high_usd": round(n * p90, 2)}  # fmt: skip
+    return out
+
+
+# ---------------------------------------------------------------- parallel drafting
+#
+# A run is a queue of patterns. The first worker to see a queued run lists its patterns and
+# marks them `queued` (so no other run takes them). Then any worker process, on any machine,
+# claims the next one, drafts it, and records the result, so a run's patterns are drafted in
+# parallel up to `curation_parallel` at once. Claiming locks the run's row briefly and reserves
+# the per-pattern cap against the budget, so parallel drafts never spend past it. A claim a
+# worker never finished (it crashed) goes back to the queue after `rule_drafter_timeout_min`.
+# The run finishes when nothing is in flight and nothing more can be claimed.
+
+
+@dataclass
+class Work:
+    run_id: int
+    fingerprint: str
+
+
+def claim(session: Session, run_id: int | None = None) -> Work | None:
+    """The next pattern to draft, from the oldest run with one to give (or from `run_id`),
+    or None. Starts queued runs and finishes runs that are done along the way."""
+    query = select(CurationRun).where(CurationRun.status.in_(("queued", "running")))
+    if run_id is not None:
+        query = query.where(CurationRun.id == run_id)
+    for rid in list(
+        session.scalars(query.with_only_columns(CurationRun.id).order_by(CurationRun.id))
+    ):
+        run = _locked(session, rid)
+        if run is None or run.status not in ("queued", "running"):
+            session.commit()
+            continue
+        if run.status == "queued":
+            _start(session, run)
+        _recover(session, run)
+        work = _next(session, run)
+        if work is None and not _stats(run).get("inflight"):
+            _finish(session, run)
         session.commit()
-    return run
+        if work is not None:
+            return work
+    return None
 
 
-def execute(session: Session, run: CurationRun, drafter: Drafter | None = None) -> CurationRun:
-    drafter = drafter or get_drafter(run.drafter)
-    params = (run.stats or {}).get("params") or {}
-    counts: dict[str, int] = {}
+def draft_one(session: Session, work: Work, drafter: Drafter | None = None) -> None:
+    """Draft one claimed pattern and record what came of it."""
+    run = session.get_one(CurationRun, work.run_id)
+    drafter = drafter or get_drafter(run.drafter, run.model)
+    p = session.scalar(
+        select(CoveragePattern).where(CoveragePattern.fingerprint == work.fingerprint)
+    )
     try:
-        _work(session, run, drafter, run.budget_usd or 0.0, int(params.get("limit", 5)),
-              params.get("fingerprints") or None, counts)  # fmt: skip
-    except Exception as exc:
-        # Every proposal so far is committed; record why the run stopped
-        run.status = "failed"
-        run.error = f"{type(exc).__name__}: {exc}"
-        run.finished_at = datetime.now(UTC)
-        run.stats = {"params": params, **counts}
-        session.commit()
-        raise
-    run.status = "succeeded"
-    run.finished_at = datetime.now(UTC)
-    run.stats = {"params": params, **counts}
-    session.commit()
-    return run
-
-
-def _work(
-    session: Session,
-    run: CurationRun,
-    drafter: Drafter,
-    budget: float,
-    limit: int,
-    fingerprints: list[str] | None,
-    counts: dict[str, int],
-) -> None:
-    reader = _reader(session)
-    for picked in pick(session, limit, fingerprints):
-        if run.spent_usd >= budget:
-            counts["stopped_at_budget"] = 1
-            break
-        p = picked.pattern
-        log.info("curation %s: %s", run.id, p.fingerprint)
+        if p is None:
+            raise ValueError(f"pattern {work.fingerprint} is gone")
+        log.info("curation %s: %s", work.run_id, work.fingerprint)
+        reader = _reader(session)
         samples, files = gather(session, p, reader)
         proposal = _existing_rule(p, samples, files) or _draft(
-            drafter, p, samples, picked.siblings, reader
+            drafter, p, samples, _siblings(session, run, p), reader
         )
-        proposal.run_id = run.id
-        session.add(proposal)
-        p.state = _state_after(proposal)
-        p.note = f"curation run {run.id}: {proposal.kind.value}, {proposal.status.value}"
-        run.spent_usd = round(run.spent_usd + proposal.cost_usd, 4)
-        key = f"{proposal.kind.value}:{proposal.status.value}"
-        counts[key] = counts.get(key, 0) + 1
-        run.stats = {**(run.stats or {}), **counts}  # progress, visible while it runs
+    except Exception as exc:
+        # Nothing more can be drafted (the provider is unavailable or not built, or the run's
+        # own machinery failed): this pattern goes back to the queue and the run stops
+        if isinstance(exc, SQLAlchemyError):
+            session.rollback()  # the session can't be used until it is
+        run = _locked(session, work.run_id)
+        if p is not None and p.state == PatternState.DRAFTING:
+            p.state = PatternState.QUEUED
+        _release(run, work.fingerprint)
+        stats = _stats(run)
+        stats["stopping"] = "error"
+        run.stats = stats
+        run.error = run.error or (
+            str(exc) if isinstance(exc, DrafterUnavailable) else f"{type(exc).__name__}: {exc}"
+        )
+        if not stats.get("inflight"):
+            _finish(session, run)
         session.commit()
+        raise
+    run = _locked(session, work.run_id)
+    proposal.run_id = run.id
+    session.add(proposal)
+    p.state = _state_after(proposal)
+    p.note = f"curation run {run.id}: {proposal.kind.value}, {proposal.status.value}"
+    run.spent_usd = round((run.spent_usd or 0.0) + proposal.cost_usd, 4)
+    _release(run, work.fingerprint)
+    stats = _stats(run)
+    key = f"{proposal.kind.value}:{proposal.status.value}"
+    stats[key] = stats.get(key, 0) + 1  # progress, visible while it runs
+    run.stats = stats
+    if not stats.get("inflight") and _next_fingerprint(session, run) is None:
+        _finish(session, run)
+    session.commit()
+
+
+def _locked(session: Session, run_id: int) -> CurationRun | None:
+    """The run, re-read and locked for this transaction: claims and results on the same run
+    from several workers take turns."""
+    return session.scalar(
+        select(CurationRun)
+        .where(CurationRun.id == run_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+
+
+def _stats(run: CurationRun) -> dict[str, Any]:
+    """A copy of the run's stats to change and assign back (JSON columns aren't tracked)."""
+    stats = dict(run.stats or {})
+    stats["inflight"] = dict(stats.get("inflight") or {})
+    return stats
+
+
+def _start(session: Session, run: CurationRun) -> None:
+    params = (run.stats or {}).get("params") or {}
+    picks = pick(session, params.get("limit"), params.get("fingerprints") or None)
+    for picked in picks:
+        picked.pattern.state = PatternState.QUEUED
+        picked.pattern.note = f"curation run {run.id}: queued"
+    run.status = "running"
+    run.started_at = datetime.now(UTC)  # until now it was waiting
+    run.stats = {
+        **(run.stats or {}),
+        "total": len(picks),
+        "queue": [picked.pattern.fingerprint for picked in picks],
+        "inflight": {},
+        "reserved_usd": 0.0,
+    }
+
+
+def _next_fingerprint(session: Session, run: CurationRun) -> CoveragePattern | None:
+    queue = (run.stats or {}).get("queue") or []
+    if not queue:
+        return None
+    waiting = {
+        p.fingerprint: p
+        for p in session.scalars(
+            select(CoveragePattern).where(
+                CoveragePattern.fingerprint.in_(queue),
+                CoveragePattern.state == PatternState.QUEUED,
+            )
+        )
+    }
+    return next((waiting[fp] for fp in queue if fp in waiting), None)
+
+
+def _next(session: Session, run: CurationRun) -> Work | None:
+    """Claim the run's next queued pattern, if the run may take one more: it isn't stopping,
+    fewer than `curation_parallel` are in flight, and a worst-case draft still fits the budget."""
+    settings = get_settings()
+    stats = _stats(run)
+    if stats.get("stopping") or len(stats["inflight"]) >= settings.curation_parallel:
+        return None
+    p = _next_fingerprint(session, run)
+    if p is None:
+        return None
+    cap = settings.rule_drafter_max_usd
+    committed = (run.spent_usd or 0.0) + float(stats.get("reserved_usd") or 0.0)
+    if committed > 0 and committed + min(cap, run.budget_usd or 0.0) > (run.budget_usd or 0.0):
+        if not stats["inflight"]:  # otherwise wait: what's in flight may cost less than its cap
+            stats["stopping"] = "budget"
+            run.stats = stats
+        return None
+    p.state = PatternState.DRAFTING
+    stats["inflight"][p.fingerprint] = {
+        "label": p.label or p.fingerprint,
+        "since": datetime.now(UTC).isoformat(),
+        "host": _host(),
+    }
+    stats["reserved_usd"] = round(float(stats.get("reserved_usd") or 0.0) + cap, 4)
+    run.stats = stats
+    return Work(run.id, p.fingerprint)
+
+
+def _release(run: CurationRun, fingerprint: str) -> None:
+    stats = _stats(run)
+    if stats["inflight"].pop(fingerprint, None) is not None:
+        cap = get_settings().rule_drafter_max_usd
+        stats["reserved_usd"] = max(0.0, round(float(stats.get("reserved_usd") or 0.0) - cap, 4))
+    run.stats = stats
+
+
+def _recover(session: Session, run: CurationRun) -> None:
+    """Claims older than the timeout, from a worker that died mid-draft, go back to the queue."""
+    limit = get_settings().rule_drafter_timeout_min * 60
+    now = datetime.now(UTC)
+    for fp, claim_ in list(((run.stats or {}).get("inflight") or {}).items()):
+        if (now - datetime.fromisoformat(claim_["since"])).total_seconds() < limit:
+            continue
+        log.warning("curation %s: %s was never finished; back to the queue", run.id, fp)
+        p = session.scalar(select(CoveragePattern).where(CoveragePattern.fingerprint == fp))
+        if p is not None and p.state == PatternState.DRAFTING:
+            p.state = PatternState.QUEUED
+        _release(run, fp)
+
+
+def _finish(session: Session, run: CurationRun) -> None:
+    """Close a run: what it didn't get to goes back to open, for the next run."""
+    stats = _stats(run)
+    queue = stats.get("queue") or []
+    left = 0
+    if queue:
+        for p in session.scalars(
+            select(CoveragePattern).where(
+                CoveragePattern.fingerprint.in_(queue),
+                CoveragePattern.state.in_((PatternState.QUEUED, PatternState.DRAFTING)),
+            )
+        ):
+            p.state, p.note = PatternState.OPEN, None
+            left += 1
+    if left:
+        stats["left_for_next_run"] = left
+    stats.pop("inflight", None)
+    stats.pop("reserved_usd", None)
+    run.stats = stats
+    run.status = "failed" if run.error else "succeeded"
+    run.finished_at = datetime.now(UTC)
+
+
+def _siblings(session: Session, run: CurationRun, p: CoveragePattern) -> list[str]:
+    """The labels of the run's other patterns from the same framework, as context."""
+    if not p.owner:
+        return []
+    queue = (run.stats or {}).get("queue") or []
+    return [
+        q.label
+        for q in session.scalars(
+            select(CoveragePattern).where(
+                CoveragePattern.fingerprint.in_(queue),
+                CoveragePattern.owner == p.owner,
+                CoveragePattern.fingerprint != p.fingerprint,
+            )
+        )
+    ]
+
+
+def _host() -> str:
+    import socket
+
+    return socket.gethostname()
 
 
 # ---------------------------------------------------------------- samples
@@ -315,7 +542,7 @@ def _draft(
     )
     try:
         result = drafter.draft(request, read)
-    except NotImplementedError:
+    except (NotImplementedError, DrafterUnavailable):
         raise
     except Exception as exc:  # noqa: BLE001 - recorded, and the run goes on
         log.exception("curation: drafting %s failed", p.fingerprint)
@@ -339,6 +566,7 @@ def _draft(
         fingerprints=[p.fingerprint],
         owner=p.owner,
         title=p.label,
+        name=result.title or None,
         summary=result.summary,
         facet=result.facet,
         rule=result.rule,

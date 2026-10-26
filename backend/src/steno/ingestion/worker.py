@@ -49,20 +49,19 @@ def run_once() -> bool:
 
 
 def run_curation() -> bool:
-    """Run one queued rule curation run (D120), if any: drafting is LLM work, kept out of the
-    API process like ingestion."""
-    from steno.curation.run import claim_run, execute
+    """Draft one pattern of a rule curation run (D120), if there's one to claim. Drafting is
+    LLM work, kept out of the API process like ingestion; each worker process drafts one
+    pattern at a time, so a run's patterns are drafted in parallel across workers."""
+    from steno.curation.run import claim, draft_one
 
     with session_scope() as session:
-        run = claim_run(session)
-        if run is None:
+        work = claim(session)
+        if work is None:
             return False
-        log.info("curation run %s: started", run.id)
         try:
-            execute(session, run)
+            draft_one(session, work)
         except Exception:
-            log.exception("curation run %s: failed", run.id)
-        log.info("curation run %s: %s", run.id, run.status)
+            log.exception("curation run %s: stopped", work.run_id)
     return True
 
 

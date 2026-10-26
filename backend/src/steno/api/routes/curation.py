@@ -9,13 +9,13 @@ from typing import Any
 import yaml
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from steno.api.deps import SessionDep
 from steno.config import get_settings
 from steno.curation.approve import ApprovalError, approve, pack_meta, reject, target
 from steno.curation.publish import BRANCH, destination
-from steno.curation.run import queue_run
+from steno.curation.run import estimate, pick, queue_run
 from steno.db.models import CurationRun, ProposalStatus, RuleProposal
 from steno.rule_packs.packs import load_all_packs
 
@@ -23,9 +23,10 @@ router = APIRouter(tags=["curation"])
 
 
 class RunIn(BaseModel):
-    limit: int = 3
+    limit: int | None = None  # every open pattern, within the budget
     fingerprints: list[str] = []
     budget_usd: float | None = None
+    model: str | None = None  # one of the allowed models; default: the setting
 
 
 class ApproveIn(BaseModel):
@@ -39,34 +40,59 @@ class RejectIn(BaseModel):
 
 @router.get("/curation")
 def settings_and_runs(session: SessionDep) -> dict[str, Any]:
-    """The drafter in use and its caps, and the latest runs."""
+    """The drafter in use and its caps, the open patterns a run would work on, and the latest
+    runs."""
     s = get_settings()
     runs = session.scalars(select(CurationRun).order_by(CurationRun.id.desc()).limit(20))
+    waiting = len(pick(session, None))
+    total = session.scalar(select(func.coalesce(func.sum(CurationRun.spent_usd), 0.0)))
+    count = session.scalar(select(func.count()).select_from(CurationRun))
     return {
         "drafter": s.rule_drafter,
         "model": s.rule_drafter_model,
+        "models": [{"id": k, "name": v} for k, v in s.rule_drafter_models.items()],
         "effort": s.rule_drafter_effort,
         "max_turns": s.rule_drafter_max_turns,
         "max_usd_per_pattern": s.rule_drafter_max_usd,
         "budget_usd": s.curation_budget_usd,
+        "open_patterns": waiting,
+        "spent_total_usd": round(total or 0.0, 4),  # every search so far
+        "searches": count,
         "runs": [_run(r) for r in runs],
     }
 
 
+@router.get("/curation/estimate")
+def cost_estimate(session: SessionDep, model: str | None = None) -> dict[str, Any]:
+    """What a search over every open pattern would cost with `model`: worst case, and a
+    projection from past drafts (§9)."""
+    return estimate(session, model)
+
+
 @router.post("/curation/runs", status_code=201)
 def start(body: RunIn, session: SessionDep) -> dict[str, Any]:
-    """Queue a run over the top open patterns (or the ones named); a worker executes it."""
-    if body.limit < 1 or body.limit > 50:
-        raise HTTPException(422, "limit is 1 to 50")
-    run = queue_run(session, body.limit, body.fingerprints, body.budget_usd, "manual")
+    """Queue a run over the open patterns (or the ones named); a worker executes it."""
+    if body.limit is not None and body.limit < 1:
+        raise HTTPException(422, "limit is at least 1")
+    models = get_settings().rule_drafter_models
+    if body.model is not None and body.model not in models:
+        raise HTTPException(422, f"model is one of {', '.join(models)}")
+    run = queue_run(
+        session, body.limit, body.fingerprints, body.budget_usd, "manual", model=body.model
+    )
     return _run(run)
 
 
 @router.get("/proposals")
-def proposals(session: SessionDep, status: ProposalStatus | None = None) -> list[dict[str, Any]]:
+def proposals(
+    session: SessionDep, status: ProposalStatus | None = None, run_id: int | None = None
+) -> list[dict[str, Any]]:
+    """Suggestions, newest first: all, in one status, or from one search."""
     q = select(RuleProposal).order_by(RuleProposal.id.desc()).limit(200)
     if status is not None:
         q = q.where(RuleProposal.status == status)
+    if run_id is not None:
+        q = q.where(RuleProposal.run_id == run_id)
     return [_summary(p) for p in session.scalars(q)]
 
 
@@ -115,6 +141,42 @@ def reject_one(proposal_id: int, body: RejectIn, session: SessionDep) -> dict[st
     return _summary(p)
 
 
+class ManyIn(BaseModel):
+    ids: list[int]
+    why: str = ""  # for reject
+    by: str = "ui"
+
+
+@router.post("/proposals/approve")
+def approve_many(body: ManyIn, session: SessionDep) -> list[dict[str, Any]]:
+    """Approve several suggestions (a framework's, reviewed as one unit), one after another;
+    each result says whether it went through, so one failure doesn't hide the rest."""
+    out = []
+    for pid in body.ids:
+        p = _get(session, pid)
+        try:
+            approve(session, p, body.by)
+            out.append({"id": pid, "ok": True})
+        except ApprovalError as exc:
+            out.append({"id": pid, "ok": False, "error": str(exc)})
+    return out
+
+
+@router.post("/proposals/reject")
+def reject_many(body: ManyIn, session: SessionDep) -> list[dict[str, Any]]:
+    if not body.why.strip():
+        raise HTTPException(422, "say why")
+    out = []
+    for pid in body.ids:
+        p = _get(session, pid)
+        try:
+            reject(session, p, body.by, body.why)
+            out.append({"id": pid, "ok": True})
+        except ApprovalError as exc:
+            out.append({"id": pid, "ok": False, "error": str(exc)})
+    return out
+
+
 def _preview(p: RuleProposal) -> dict[str, Any] | None:
     """Where approving would publish the rule (D131), before anything is written."""
     try:
@@ -129,6 +191,8 @@ def _preview(p: RuleProposal) -> dict[str, Any] | None:
         "branch": BRANCH if dest.mode == "pr" else dest.base,
         "base": dest.base,
         "created_pack": created,
+        # The pack's folder in that repository, e.g. rule-packs/platform/steno-pack-compose
+        "path": str(pack_dir.resolve().relative_to(dest.repo.resolve())),
     }
 
 
@@ -155,6 +219,7 @@ def _summary(p: RuleProposal) -> dict[str, Any]:
         "kind": p.kind.value,
         "status": p.status.value,
         "title": p.title,
+        "name": p.name,
         "summary": p.summary,
         "fingerprints": p.fingerprints,
         "owner": p.owner,
@@ -166,6 +231,9 @@ def _summary(p: RuleProposal) -> dict[str, Any]:
         "cost_usd": round(p.cost_usd or 0.0, 4),
         "turns": p.turns,
         "created_at": p.created_at,
+        "reviewed_at": p.reviewed_at,
+        # Where an approved rule went: its pull request, or a link that opens one
+        "link": (p.published or {}).get("pr_url") or (p.published or {}).get("compare_url"),
     }
 
 

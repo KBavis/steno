@@ -117,6 +117,23 @@ def test_a_pattern_the_drafter_cant_settle_needs_a_person(session, no_git):
     assert p.state == PatternState.NEEDS_PERSON
 
 
+def test_a_run_never_spends_more_than_its_budget(session, no_git):
+    # Each draft may cost up to the per-pattern cap ($2), so a $5 run drafts while $2 is left:
+    # three $1.50 drafts, then $0.50 is left and the fourth waits for the next run
+    fps = [_pattern(session, f"unknown_hook:com.acme.test.H{i}").fingerprint for i in range(4)]
+    fake = Fake(DraftResult(kind="ignore", summary="in-process", cost_usd=1.5))
+    run = curation.curate(session, fingerprints=fps, drafter=fake, budget_usd=5)
+    assert len(fake.seen) == 3 and run.spent_usd == 4.5
+    assert run.stats["total"] == 4 and run.stats["left_for_next_run"] == 1
+
+
+def test_a_run_takes_every_open_pattern_unless_limited(session, no_git):
+    for i in range(3):
+        _pattern(session, f"unknown_hook:com.acme.test.H{i}")
+    assert len(curation.pick(session, None)) >= 3
+    assert len(curation.pick(session, 2)) == 2
+
+
 def test_a_provider_that_isnt_built_fails_the_run(session, no_git):
     p = _pattern(session)
     with pytest.raises(NotImplementedError):
@@ -235,3 +252,123 @@ def test_approving_ignore_ignores_the_pattern_and_rejecting_records_why(session)
     reject(session, proposal, by="reviewer", why="not how Acme works")
     assert (proposal.status, q.state) == (ProposalStatus.REJECTED, PatternState.REJECTED)
     assert proposal.comment == "not how Acme works"
+
+
+def test_a_usage_limit_stops_the_run_and_leaves_patterns_open(session, no_git):
+    from steno.curation.drafters import DrafterUnavailable
+
+    class OutOfUsage(Fake):
+        def draft(self, request, read_file):
+            if self.seen:
+                raise DrafterUnavailable("Claude's five hour limit is reached")
+            return super().draft(request, read_file)
+
+    ps = [_pattern(session, f"unknown_hook:com.acme.test.L{i}") for i in range(3)]
+    fake = OutOfUsage(DraftResult(kind="ignore", summary="in-process", cost_usd=0.2))
+    with pytest.raises(DrafterUnavailable):
+        curation.curate(session, fingerprints=[p.fingerprint for p in ps], drafter=fake)
+    run = session.query(CurationRun).order_by(CurationRun.id.desc()).first()
+    assert run.status == "failed" and run.error == "Claude's five hour limit is reached"
+    assert run.stats["left_for_next_run"] == 2
+    assert sorted(p.state for p in ps).count(PatternState.OPEN) == 2
+
+
+def test_a_search_drafts_with_the_model_it_was_started_with(session, no_git):
+    run = curation.queue_run(session, model="claude-haiku-5-5")
+    assert run.model == "claude-haiku-5-5"
+    assert get_drafter(run.drafter, run.model).model == "claude-haiku-5-5"
+    default = curation.queue_run(session)
+    assert get_drafter(default.drafter, default.model).model == "claude-opus-5-5"
+
+
+def test_only_allowed_models_can_be_chosen():
+    from fastapi.testclient import TestClient
+
+    from steno.api.app import create_app
+
+    out = TestClient(create_app()).post("/api/curation/runs", json={"model": "gpt-9"})
+    assert out.status_code == 422
+
+
+def test_a_new_core_pack_goes_in_the_folder_the_drafter_chose(monkeypatch, tmp_path):
+    from steno.curation import approve
+
+    monkeypatch.setattr(
+        approve, "get_settings", lambda: type("S", (), {"rule_packs_dir": tmp_path})()
+    )
+    meta = {"name": "steno-pack-compose", "language": "any", "source": "core"}
+    assert approve._new_pack_dir(meta, "platform") == tmp_path / "platform" / "steno-pack-compose"
+    # No folder, or one a drafted core pack can't use: its language's, or platform
+    assert approve._new_pack_dir(meta) == tmp_path / "platform" / "steno-pack-compose"
+    assert approve._new_pack_dir(meta, "core") == tmp_path / "platform" / "steno-pack-compose"
+    assert approve._new_pack_dir({**meta, "language": "python"}, "../x") == (
+        tmp_path / "python" / "steno-pack-compose"
+    )
+
+
+def test_publishing_finds_the_repository_for_a_folder_that_doesnt_exist_yet(tmp_path):
+    from steno.curation.publish import destination
+
+    remote, work = tmp_path / "remote.git", tmp_path / "work"
+    _git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
+    _git(tmp_path, "clone", "-q", str(remote), str(work))
+    _git(work, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty",
+         "-m", "first")  # fmt: skip
+    _git(work, "push", "-q", "origin", "main")
+    dest = destination("core", work / "rule-packs" / "platform" / "steno-pack-compose")
+    assert dest.repo.resolve() == work.resolve() and dest.base == "main"
+
+
+def test_one_function_signals_are_left_to_the_coverage_report(session, no_git):
+    dead = CoveragePattern(
+        fingerprint="unreachable_effect:com.acme.test.Svc#unused()", kind="unreachable",
+        signal="unreachable_effect", label="x", occurrences=1, repositories=1, applications=1,
+    )  # fmt: skip
+    session.add(dead)
+    session.flush()
+    assert dead.fingerprint not in {p.pattern.fingerprint for p in curation.pick(session, None)}
+
+
+def _queued_run(session, n, budget=10.0, prefix="P"):
+    fps = [
+        _pattern(session, f"unknown_hook:com.acme.test.{prefix}{i}").fingerprint for i in range(n)
+    ]
+    return curation.queue_run(session, fingerprints=fps, budget_usd=budget), fps
+
+
+def test_workers_draft_a_runs_patterns_in_parallel(session, no_git, monkeypatch):
+    monkeypatch.setattr(curation.get_settings(), "curation_parallel", 2)
+    run, fps = _queued_run(session, 3)
+    a, b = curation.claim(session, run.id), curation.claim(session, run.id)
+    assert {a.fingerprint, b.fingerprint} == set(fps[:2])
+    assert curation.claim(session, run.id) is None  # two at once, the cap
+    assert run.stats["reserved_usd"] == 4.0 and len(run.stats["inflight"]) == 2
+    fake = Fake(DraftResult(kind="ignore", summary="in-process", cost_usd=0.3))
+    curation.draft_one(session, b, fake)
+    c = curation.claim(session, run.id)
+    assert c.fingerprint == fps[2]
+    curation.draft_one(session, a, fake)
+    curation.draft_one(session, c, fake)
+    assert run.status == "succeeded" and run.spent_usd == 0.9
+    assert run.stats["ignore:ready"] == 3 and "inflight" not in run.stats
+
+
+def test_a_claim_waits_for_drafts_in_flight_before_stopping_at_the_budget(session, no_git):
+    run, fps = _queued_run(session, 3, budget=3.0, prefix="B")
+    a = curation.claim(session, run.id)
+    # $2 reserved for the draft in flight; another $2 could pass $3, so wait, don't stop
+    assert curation.claim(session, run.id) is None and "stopping" not in run.stats
+    curation.draft_one(session, a, Fake(DraftResult(kind="ignore", summary="x", cost_usd=0.5)))
+    assert curation.claim(session, run.id) is not None  # $0.50 spent: $2 more fits
+
+
+def test_a_claim_a_worker_never_finished_is_drafted_again(session, no_git, monkeypatch):
+    run, fps = _queued_run(session, 1, prefix="S")
+    a = curation.claim(session, run.id)
+    stats = dict(run.stats)
+    stats["inflight"] = {
+        a.fingerprint: {**stats["inflight"][a.fingerprint], "since": "2000-01-01T00:00:00+00:00"}
+    }
+    run.stats = stats
+    again = curation.claim(session, run.id)
+    assert again is not None and again.fingerprint == a.fingerprint

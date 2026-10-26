@@ -52,9 +52,10 @@ class Published:
 def destination(source: str, pack_dir: Path) -> Destination:
     """Where a pack in `pack_dir` is published: the git repository that holds it."""
     settings = get_settings()
-    repo = Path(
-        _git(pack_dir if pack_dir.exists() else pack_dir.parent, "rev-parse", "--show-toplevel")
-    )
+    existing = pack_dir  # a new pack's folder, and maybe its parents, don't exist yet
+    while not existing.exists() and existing != existing.parent:
+        existing = existing.parent
+    repo = Path(_git(existing, "rev-parse", "--show-toplevel"))
     mode = settings.rules_publish_core if source == "core" else settings.rules_publish_org
     if mode not in ("pr", "push"):
         raise PublishError(f"publish mode is pr or push, not {mode!r}")

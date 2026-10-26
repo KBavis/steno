@@ -15,6 +15,7 @@ import logging
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -60,6 +61,24 @@ class DraftResult:
     cost_usd: float = 0.0
     turns: int = 0
     error: str | None = None
+    title: str = ""  # its name for the reviewer, title case
+
+
+class DrafterUnavailable(RuntimeError):
+    """The provider can't draft right now (a usage limit, billing, a failed login): the run
+    stops and the pattern stays open, instead of being marked as needing a person."""
+
+
+# Errors that say the provider can't be used right now, not that the pattern is hard
+UNAVAILABLE = {"rate_limit", "billing_error", "authentication_failed"}
+
+
+def _limit_reached(info: Any) -> str:
+    kind = (info.rate_limit_type or "usage").replace("_", " ")
+    when = ""
+    if info.resets_at:
+        when = f"; it resets at {datetime.fromtimestamp(info.resets_at).strftime('%a %H:%M')}"
+    return f"Claude's {kind} limit is reached{when}"
 
 
 class Drafter(Protocol):
@@ -84,10 +103,11 @@ class NotImplementedDrafter:
         )
 
 
-def get_drafter(name: str | None = None) -> Drafter:
+def get_drafter(name: str | None = None, model: str | None = None) -> Drafter:
+    """The drafter for a provider, drafting with `model` (default: the setting)."""
     name = name or get_settings().rule_drafter
     if name == "claude_agent_sdk":
-        return ClaudeAgentSdkDrafter()
+        return ClaudeAgentSdkDrafter(model)
     if name in ("openai", "gemini", "azure_openai"):
         return NotImplementedDrafter(name)
     raise ValueError(f"unknown rule drafter {name!r}")
@@ -118,9 +138,23 @@ documentation). In the pack you suggest, a rule for a public library (Spring, Ka
 anything from a public registry) belongs in a core pack; a rule for the organization's own
 framework belongs in an organization pack.
 
-The `summary` is what the reviewer reads first: one sentence, at most 25 words, saying what
-code it matches and what fact it records (or, for ignore and vocabulary, why). No hedging,
-no background."""
+The reviewer reads the `title` first, then the `summary`. The `title` names what the rule
+recognizes, in title case, at most 6 words, with no method signatures or package paths
+("Docker Compose Services", "Psycopg2 PostgreSQL Connections", "In-Process Spring Security
+Checks"). The `summary` is one sentence, at most 20 words: what code it matches and what fact
+it records (or, for ignore and vocabulary, why). No hedging, no background."""
+
+
+def pack_folders() -> list[str]:
+    """The ecosystem folders core packs are grouped in (java, python, http, …); `org` holds
+    an organization's own packs and `core` only noise, so a drafted core pack goes in neither."""
+    root = get_settings().rule_packs_dir
+    if not root.is_dir():
+        return []
+    return sorted(
+        d.name for d in root.iterdir() if d.is_dir() and d.name not in ("org", "core")
+        and not d.name.startswith(".")
+    )  # fmt: skip
 
 
 def prompt_of(request: DraftRequest) -> str:
@@ -130,6 +164,7 @@ def prompt_of(request: DraftRequest) -> str:
         f"Owner: {request.owner or 'the application itself'}",
         f"Reach: {json.dumps(request.reach)}",
         f"Language: {request.language}",
+        "Core pack folders under rule-packs/: " + ", ".join(pack_folders()),
     ]
     if request.siblings:
         parts.append(
@@ -147,7 +182,11 @@ CASES_HELP = (
 )
 PACK_HELP = (
     'JSON pack.yaml fields, e.g. {"name": "acme-messaging", "language": "java", '
-    '"source": "org", "enabled_when": {"dependencies": ["com.acme:messaging"]}}'
+    '"source": "org", "witness_type": "CODE", "enabled_when": {"dependencies": '
+    '["com.acme:messaging"]}}. witness_type: CODE for application code, PLATFORM for '
+    "deployment and infrastructure config (compose files, manifests, proxies), DECLARED for "
+    'catalogs. For a new core pack also give "folder": the ecosystem folder under rule-packs/ '
+    "it belongs in (one listed in the prompt, or a new lowercase name such as platform)."
 )
 DRAFT_SCHEMA = {
     "type": "object",
@@ -171,6 +210,9 @@ class ClaudeAgentSdkDrafter:
 
     name = "claude_agent_sdk"
 
+    def __init__(self, model: str | None = None):
+        self.model = model or get_settings().rule_drafter_model
+
     def draft(self, request: DraftRequest, read_file: Callable[[str, str], str]) -> DraftResult:
         return asyncio.run(self._draft(request, read_file))
 
@@ -178,7 +220,9 @@ class ClaudeAgentSdkDrafter:
         self, request: DraftRequest, read_file: Callable[[str, str], str]
     ) -> DraftResult:
         from claude_agent_sdk import (
+            AssistantMessage,
             ClaudeAgentOptions,
+            RateLimitEvent,
             ResultMessage,
             create_sdk_mcp_server,
             query,
@@ -237,19 +281,21 @@ class ClaudeAgentSdkDrafter:
 
         submit_schema = {"type": "object", "properties": {
             "kind": {"type": "string", "enum": ["rule", "ignore", "vocabulary", "needs_person"]},
+            "title": {"type": "string", "description": "title case, at most 6 words"},
             "summary": {"type": "string", "description": "one or two sentences for the reviewer: "
                         "what it recognizes and what facts it produces (or why not)"},
             "facet": {"type": "string", "description": "the facet it serves: Behavior, Interfaces, "
                       "Messaging, Data, Schedules, Routing, Components, Artifacts, Structure"},
             "rule": {"type": "string"}, "cases": {"type": "string"}, "pack": {"type": "string"},
             "notes": {"type": "string"},
-        }, "required": ["kind", "summary"]}  # fmt: skip
+        }, "required": ["kind", "title", "summary"]}  # fmt: skip
 
         @tool("submit", "Submit your one proposal. A rule is accepted only if all its cases "
               "pass; otherwise the failures come back to fix.", submit_schema)  # fmt: skip
         async def submit(args: dict[str, Any]) -> dict[str, Any]:
             result = DraftResult(kind=args["kind"], summary=args.get("summary", ""),
-                                 facet=args.get("facet"), notes=args.get("notes", ""))  # fmt: skip
+                                 facet=args.get("facet"), notes=args.get("notes", ""),
+                                 title=args.get("title", ""))  # fmt: skip
             if result.kind == "rule":
                 try:
                     proof = _run_cases(args)
@@ -269,6 +315,7 @@ class ClaudeAgentSdkDrafter:
         )
         names = ["vocabulary", "rule_format", "find_rules", "read_file", "test_rule", "submit"]
         cost, turns, error = 0.0, 0, None
+        unavailable: str | None = None
         with tempfile.TemporaryDirectory(prefix="steno-drafter-") as cwd:
             options = ClaudeAgentOptions(
                 tools=[],  # no built-in tools: no shell, no file writes
@@ -277,7 +324,7 @@ class ClaudeAgentSdkDrafter:
                 strict_mcp_config=True,
                 setting_sources=[],  # nothing from this machine's Claude settings or CLAUDE.md
                 system_prompt=SYSTEM,
-                model=settings.rule_drafter_model,
+                model=self.model,
                 effort=settings.rule_drafter_effort,
                 max_turns=settings.rule_drafter_max_turns,
                 max_budget_usd=settings.rule_drafter_max_usd,
@@ -285,13 +332,20 @@ class ClaudeAgentSdkDrafter:
             )
             try:
                 async for message in query(prompt=prompt_of(request), options=options):
-                    if isinstance(message, ResultMessage):
+                    if isinstance(message, RateLimitEvent):
+                        if message.rate_limit_info.status == "rejected":
+                            unavailable = _limit_reached(message.rate_limit_info)
+                    elif isinstance(message, AssistantMessage) and message.error in UNAVAILABLE:
+                        unavailable = unavailable or f"Claude: {message.error.replace('_', ' ')}"
+                    elif isinstance(message, ResultMessage):
                         cost = message.total_cost_usd or 0.0
                         turns = message.num_turns
                         if message.is_error and "result" not in submitted:
                             error = f"{message.subtype}: {message.result or ''}".strip()
             except Exception as exc:  # noqa: BLE001 - recorded on the proposal, never raised
                 error = f"{type(exc).__name__}: {exc}"
+        if unavailable and "result" not in submitted:
+            raise DrafterUnavailable(unavailable)
         result = submitted.get("result") or DraftResult(
             kind="needs_person", summary="the drafter submitted nothing", error=error
         )

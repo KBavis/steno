@@ -468,7 +468,9 @@ class RuleProposal(Base):
     )
     fingerprints: Mapped[list[Any]] = mapped_column(default=list)
     owner: Mapped[str | None] = mapped_column(Text)  # the framework (D123)
-    title: Mapped[str] = mapped_column(Text, default="")
+    title: Mapped[str] = mapped_column(Text, default="")  # the pattern's label
+    # The suggestion's name, title case, for the reviewer: "Docker Compose Services"
+    name: Mapped[str | None] = mapped_column(Text)
     summary: Mapped[str] = mapped_column(Text, default="")  # what it recognizes, in English
     facet: Mapped[str | None] = mapped_column(String(64))
     # The draft: rule YAML text, its test cases, and the pack it belongs in (D129)

@@ -247,12 +247,14 @@ def resolver_check(
 
 @app.command()
 def curate(
-    limit: int = typer.Option(3, help="Patterns to work on, in score order"),
+    limit: int | None = typer.Option(None, help="At most this many patterns (default: all)"),
     fingerprint: list[str] = typer.Option(None, help="Work on these patterns only"),
     drafter: str = typer.Option(None, help="claude_agent_sdk (default) | openai | gemini | …"),
     budget: float = typer.Option(None, help="Dollars this run may spend (default: setting)"),
+    model: str = typer.Option(None, help="The model to draft with (default: setting)"),
 ) -> None:
-    """Rule curation (D120): draft proposals for the top open patterns. Every rule is proven
+    """Rule curation (D120): draft proposals for the open patterns, in score order, until the
+    run's budget is spent. Every rule is proven
     against its own test cases before it's proposed; a person approves it."""
     from steno.curation.drafters import get_drafter
     from steno.curation.run import curate as run_curation
@@ -262,7 +264,7 @@ def curate(
     with session_scope() as session:
         run = run_curation(
             session, limit=limit, fingerprints=fingerprint or None,
-            drafter=get_drafter(drafter), budget_usd=budget,
+            drafter=get_drafter(drafter, model), budget_usd=budget, model=model,
         )  # fmt: skip
         typer.echo(f"curation run {run.id}: {run.status}, ${run.spent_usd:.2f} spent, {run.stats}")
         for p in session.query(RuleProposal).filter(RuleProposal.run_id == run.id):

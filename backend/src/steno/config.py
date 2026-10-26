@@ -55,11 +55,24 @@ class Settings(BaseSettings):
     # Rule curation (D120, D130): which provider drafts rules, and the caps on each pattern.
     # claude_agent_sdk uses this machine's Claude Code login, or ANTHROPIC_API_KEY when set
     rule_drafter: str = "claude_agent_sdk"  # claude_agent_sdk | openai | gemini | azure_openai
-    rule_drafter_model: str = "claude-opus-5-5"
+    rule_drafter_model: str = "claude-opus-5-5"  # the default; a search can pick another
+    # The models a search may choose from, as model id → name shown in the UI
+    rule_drafter_models: dict[str, str] = {
+        "claude-opus-5-5": "Claude Opus 5.5",
+        "claude-sonnet-5-5": "Claude Sonnet 5.5",
+        "claude-haiku-5-5": "Claude Haiku 5.5",
+    }
     rule_drafter_effort: str = "high"
     rule_drafter_max_turns: int = 30
     rule_drafter_max_usd: float = 2.0  # per pattern
     curation_budget_usd: float = 10.0  # per run
+    # Patterns of one run drafted at once, across every worker (each worker process drafts one
+    # at a time); a claim not finished within the timeout (a worker died) is drafted again
+    curation_parallel: int = 4
+    # The cost check (§9): a search whose projection passes its limit, or with no history to
+    # project from, is confirmed first, and can start as a pilot of this many patterns
+    curation_pilot: int = 10
+    rule_drafter_timeout_min: int = 30
     # Publishing approved rules (D131): `pr` collects them on one `steno/rules` branch with one
     # open pull request per destination; `push` commits straight to the default branch
     rules_publish_core: str = "pr"  # Steno's own rule-packs/ (rules for public libraries)

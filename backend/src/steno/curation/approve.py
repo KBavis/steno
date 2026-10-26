@@ -16,6 +16,7 @@ pattern stays blocked until the vocabulary is built); "enable the pack" is noted
 to act on. Rejecting records why, and the pattern is `rejected`.
 """
 
+import re
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -103,6 +104,7 @@ def pack_meta(proposal: RuleProposal) -> dict[str, Any]:
         "language": language,
         "source": meta.get("source", "org"),
         "description": meta.get("description") or proposal.summary,
+        "witness_type": str(meta.get("witness_type") or "CODE").upper(),
         "enabled_when": meta.get("enabled_when")
         or ({"imports": [owner]} if owner else {"always": True}),
     }
@@ -116,7 +118,7 @@ def target(proposal: RuleProposal) -> tuple[Path, str, bool]:
     if meta["name"] in existing:
         pack = existing[meta["name"]]
         return pack.path, pack.source, False
-    return _new_pack_dir(meta), meta["source"], True
+    return _new_pack_dir(meta, (proposal.pack or {}).get("folder")), meta["source"], True
 
 
 def _publish_rule(proposal: RuleProposal, by: str) -> dict[str, Any]:
@@ -182,10 +184,15 @@ def _publish_rule(proposal: RuleProposal, by: str) -> dict[str, Any]:
     }
 
 
-def _new_pack_dir(meta: dict[str, Any]) -> Path:
+def _new_pack_dir(meta: dict[str, Any], folder: str | None = None) -> Path:
+    """A new core pack goes in the ecosystem folder the drafter chose (an existing one, or a
+    new name such as `platform`); without one, its language's folder, or `platform` for a
+    pack tied to no language. Org packs go in the organization's pack repository."""
     settings = get_settings()
     if meta.get("source") == "core":
-        return settings.rule_packs_dir / meta["language"] / meta["name"]
+        if not folder or not re.fullmatch(r"[a-z][a-z0-9-]*", folder) or folder in ("org", "core"):
+            folder = meta["language"] if meta["language"] != "any" else "platform"
+        return settings.rule_packs_dir / folder / meta["name"]
     root = (
         settings.rule_pack_dirs[0] if settings.rule_pack_dirs else settings.rule_packs_dir / "org"
     )
