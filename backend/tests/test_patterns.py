@@ -123,3 +123,20 @@ def test_triage_ignores_and_reopens_whole_patterns(session):
     assert _pattern(session).state == PatternState.OPEN
     with pytest.raises(ValueError):
         triage(session, [fp], PatternState.APPROVED)
+
+
+def test_a_pattern_ignored_for_some_file_names_reopens_when_others_appear(session):
+    from steno.db.models import IgnoredFile
+
+    a = _repo(session, "pattern-test-scoped")
+    fp = "unread_file:.yml@steno-test-scoped/"
+    session.add(IgnoredFile(fingerprint=fp, name="docker-compose.local.yml"))
+    p = CoveragePattern(fingerprint=fp, kind="config", signal="unread_file", label="x",
+                        state=PatternState.IGNORED)  # fmt: skip
+    session.add(p)
+    session.flush()
+    # The ignored name is filtered out before patterns are recorded; what's left is new
+    it = Item("config", "unread_file", ".yml@steno-test-scoped/", "x")
+    it.add({"file": "steno-test-scoped/deploy.yml", "function": "", "application": "svc"})
+    record(session, a.id, 1, [it])
+    assert p.state == PatternState.OPEN

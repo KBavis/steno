@@ -380,3 +380,16 @@ def test_a_sample_without_a_line_points_at_the_first_mention():
     assert curation.find_line(text, "psycopg2") == 2
     assert curation.find_line("x = 1\n", "joblib.dump") is None
     assert curation.find_line("anything", ".yml@/") is None  # a file-level pattern
+
+
+def test_ignoring_unread_files_covers_only_the_names_the_drafter_examined():
+    from steno.curation.approve import ignore_scope
+
+    p = RuleProposal(
+        kind=ProposalKind.IGNORE, fingerprints=["unread_file:.yml@/"],
+        samples=[{"repository": "r", "file": "docker-compose.local.yml"}],
+    )  # fmt: skip
+    assert ignore_scope(p) == {"unread_file:.yml@/": ["docker-compose.local.yml"]}
+    # A whole language, or any other pattern, is ignored whole
+    p.fingerprints = ["unread_file:.js@*", "external_call:torch.save"]
+    assert ignore_scope(p) == {}

@@ -376,6 +376,7 @@ export interface PublishInfo {
 
 export interface Proposal extends ProposalSummary {
   publish: PublishInfo | null
+  ignore_names: string[] // an ignore of unread files covers only these names
   rule_id: string | null
   pack_exists: boolean
   rule: string | null

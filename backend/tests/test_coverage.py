@@ -263,3 +263,23 @@ def test_a_pattern_inside_an_internal_library_has_evidence():
     app.add({"file": "services/users/Other.java", "function": "Other#run()"})
     _in_library({1: lib, 2: app}, lambda f: f.startswith("plugins/"))
     assert lib.evidence == {"in_internal_library"} and app.evidence == set()
+
+
+def test_a_file_name_ignored_within_its_pattern_is_skipped_only_there():
+    from steno.coverage.collect import _unread_files
+
+    found: dict = {}
+
+    def item(kind, signal, target, label):
+        return found.setdefault(
+            target,
+            type("I", (), {"files": [], "add": lambda self, s: self.files.append(s["file"])})(),
+        )
+
+    files = ["docker-compose.local.yml", "deploy.yml", "conf/docker-compose.local.yml"]
+    _unread_files(
+        files, set(), item, lambda f: "", [], {("unread_file:.yml@/", "docker-compose.local.yml")}
+    )
+    # Only that name, only in that pattern: deploy.yml stays, and so does the same name elsewhere
+    assert found[".yml@/"].files == ["deploy.yml"]
+    assert found[".yml@conf/"].files == ["conf/docker-compose.local.yml"]

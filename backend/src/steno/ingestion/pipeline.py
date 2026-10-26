@@ -32,6 +32,7 @@ from steno.db.models import (
     CoverageKind,
     CoverageStatus,
     FactChange,
+    IgnoredFile,
     IngestionJob,
     IngestionStage,
     JobMode,
@@ -307,6 +308,7 @@ def coverage(ctx: JobContext) -> dict[str, Any]:
         read=engine.read,
         root=engine.repo,
         in_library=_in_library(ctx),
+        ignored_files={(f.fingerprint, f.name) for f in ctx.session.scalars(select(IgnoredFile))},
         config_used=(
             engine.config_used
             | (getattr(engine.resolver.properties, "used", set()) if engine.resolver else set())

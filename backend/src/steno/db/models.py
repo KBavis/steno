@@ -418,6 +418,22 @@ class CoverageOccurrence(Base):
     first_seen_job: Mapped[int] = mapped_column(Integer)
 
 
+class IgnoredFile(Base):
+    """A file name ignored within one unread-files pattern: approving "ignore" for
+    `unread_file:.yml@/` because of `docker-compose.local.yml` ignores that name there, not
+    every root-level `.yml` file in the organization. Other names in the pattern stay visible,
+    and reopen it when they appear."""
+
+    __tablename__ = "ignored_file"
+    __table_args__ = (UniqueConstraint("fingerprint", "name"),)
+
+    id: Mapped[int] = _pk()
+    fingerprint: Mapped[str] = mapped_column(Text, index=True)  # the pattern's
+    name: Mapped[str] = mapped_column(Text)  # a file name, e.g. package-lock.json
+    note: Mapped[str | None] = mapped_column(Text)  # who ignored it and why
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=_now)
+
+
 class ProposalKind(StrEnum):
     RULE = "rule"  # a drafted rule with its tests
     ENABLE_PACK = "enable_pack"  # an existing pack already explains it: turn it on

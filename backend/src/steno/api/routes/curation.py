@@ -14,7 +14,14 @@ from sqlalchemy import func, select
 from steno.api.deps import SessionDep
 from steno.api.links import source_url
 from steno.config import get_settings
-from steno.curation.approve import ApprovalError, approve, pack_meta, reject, target
+from steno.curation.approve import (
+    ApprovalError,
+    approve,
+    ignore_scope,
+    pack_meta,
+    reject,
+    target,
+)
 from steno.curation.publish import BRANCH, destination
 from steno.curation.run import estimate, pick, queue_run
 from steno.db.models import CurationRun, ProposalStatus, Repository, RuleProposal
@@ -104,6 +111,8 @@ def proposal(proposal_id: int, session: SessionDep) -> dict[str, Any]:
     pack = pack_meta(p) if p.rule else None
     return {
         "publish": p.published or (_preview(p) if p.rule else None),
+        # For an ignore of unread files: the only file names it ignores
+        "ignore_names": sorted({n for ns in ignore_scope(p).values() for n in ns}),
         "rule_id": rule_id,
         "pack_exists": bool(pack and pack["name"] in {k.name for k in load_all_packs()}),
         **_summary(p),

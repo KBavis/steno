@@ -767,7 +767,14 @@ function Review({ id, onClose, onDone }: { id: number; onClose: () => void; onDo
 /** What approving does: for a rule, where it goes; otherwise one short sentence */
 function Effect({ p, passed, total }: { p: Proposal; passed: number; total: number }) {
   if (p.status === 'needs_person') return <p>Steno couldn't tell what this code does. Reject it with a note.</p>
-  if (p.kind === 'ignore') return <p>Steno stops flagging this code as unexplained.</p>
+  if (p.kind === 'ignore')
+    return p.ignore_names?.length ? (
+      <p>
+        Steno stops flagging <span className="mono">{p.ignore_names.join(', ')}</span>. Other files in <span className="mono">{p.title}</span> stay visible.
+      </p>
+    ) : (
+      <p>Steno stops flagging this code as unexplained, in every repository.</p>
+    )
   if (p.kind === 'vocabulary') return <p>Logged as a gap in Steno's vocabulary. Nothing changes in the graph.</p>
   if (p.kind === 'enable_pack') return <p>Records that an existing pack covers this; turning it on is up to you.</p>
   const pub = p.publish

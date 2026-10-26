@@ -19,7 +19,7 @@ to act on. Rejecting records why, and the pattern is `rejected`.
 import re
 import subprocess
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
@@ -31,6 +31,7 @@ from steno.coverage.patterns import triage
 from steno.curation.publish import PublishError, destination, publish, worktree
 from steno.db.models import (
     CoveragePattern,
+    IgnoredFile,
     PatternState,
     ProposalKind,
     ProposalStatus,
@@ -54,8 +55,20 @@ def approve(session: Session, proposal: RuleProposal, by: str) -> dict[str, Any]
         proposal.published = out
         state = PatternState.APPROVED
     elif proposal.kind == ProposalKind.IGNORE:
-        triage(session, list(proposal.fingerprints), PatternState.IGNORED,
-               f"proposal #{proposal.id} approved by {by}: {proposal.summary}")  # fmt: skip
+        note = f"proposal #{proposal.id} approved by {by}: {proposal.summary}"
+        names = ignore_scope(proposal)
+        for fp in proposal.fingerprints:
+            for name in names.get(fp, []):
+                if (
+                    session.scalar(
+                        select(IgnoredFile).where(
+                            IgnoredFile.fingerprint == fp, IgnoredFile.name == name
+                        )
+                    )
+                    is None
+                ):
+                    session.add(IgnoredFile(fingerprint=fp, name=name, note=note))
+        triage(session, list(proposal.fingerprints), PatternState.IGNORED, note)
         state = PatternState.IGNORED
     elif proposal.kind == ProposalKind.VOCABULARY:
         state = PatternState.BLOCKED_VOCABULARY  # waits for the vocabulary to be built
@@ -66,6 +79,18 @@ def approve(session: Session, proposal: RuleProposal, by: str) -> dict[str, Any]
     proposal.reviewed_at = datetime.now(UTC)
     _set_patterns(session, proposal, state, f"proposal #{proposal.id} approved by {by}")
     return out
+
+
+def ignore_scope(proposal: RuleProposal) -> dict[str, list[str]]:
+    """What an "ignore" covers, for unread-files patterns: only the file names the drafter
+    examined (its samples), not every file the pattern groups (`*.yml` at a repository's
+    root, in every repository). Other patterns are ignored whole."""
+    names = sorted({PurePosixPath(s["file"]).name for s in proposal.samples or [] if s.get("file")})
+    return {
+        fp: names
+        for fp in proposal.fingerprints
+        if fp.startswith("unread_file:") and not fp.endswith("@*") and names
+    }
 
 
 def reject(session: Session, proposal: RuleProposal, by: str, why: str) -> None:

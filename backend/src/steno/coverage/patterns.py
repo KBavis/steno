@@ -22,6 +22,7 @@ from steno.db.models import (
     CoverageOccurrence,
     CoveragePattern,
     CoverageStatus,
+    IgnoredFile,
     PatternState,
 )
 
@@ -136,6 +137,17 @@ def record(
 
     touched = {p.id for p in patterns.values()} | {o.pattern_id for o in gone}
     _recount(session, touched)
+    # A pattern ignored only for some file names (IgnoredFile) that still shows up has files
+    # nobody looked at: the ignored names were filtered out before this, so it's open again
+    scoped = set(
+        session.scalars(
+            select(IgnoredFile.fingerprint).where(IgnoredFile.fingerprint.in_(patterns))
+        )
+    ) if patterns else set()  # fmt: skip
+    for fp in scoped:
+        p = patterns[fp]
+        if p.state == PatternState.IGNORED and p.occurrences > 0:
+            p.state, p.note = PatternState.OPEN, "new files beside the names ignored before"
     for fp, p in patterns.items():
         if statuses.get(fp) == CoverageStatus.IGNORED and p.state == PatternState.OPEN:
             p.state = PatternState.IGNORED

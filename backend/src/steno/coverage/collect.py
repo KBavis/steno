@@ -121,6 +121,7 @@ def collect(
     root: Path | None = None,
     config_used: set[str] | None = None,
     in_library: Callable[[str], bool] | None = None,
+    ignored_files: set[tuple[str, str]] | None = None,
 ) -> Report:
     """`app_of`: the application a file belongs to (its service module's), so items and
     numbers can be shown per application, not just per repository. `enabled`: the packs that
@@ -153,7 +154,7 @@ def collect(
     _agreement(disagreements or [], unmatched or [], item)
     if files is not None:
         noise = [g for p in all_packs for g in p.noise_files]
-        _unread_files(files, read or set(), item, where, noise)
+        _unread_files(files, read or set(), item, where, noise, ignored_files)
         _referenced(items, root, read or set())
     if config_used is not None:
         prefixes = [k for p in all_packs for k in p.noise_config]
@@ -388,10 +389,12 @@ def _unread_files(
     item: Any,
     where: Callable[[str | None], str],
     noise: list[str] | None = None,
+    ignored: set[tuple[str, str]] | None = None,
 ) -> None:
     """Files no rule looked at (D122), grouped by extension and where they sit, so 40
     repositories' `*.xyz under resources/flows/` is one pattern. Noise and build files aren't
-    listed; everything else is, ranked low until something says it matters."""
+    listed, nor file names someone ignored within their pattern (`ignored`: fingerprint and
+    name); everything else is, ranked low until something says it matters."""
     for rel in files:
         if rel in read:
             continue
@@ -409,6 +412,8 @@ def _unread_files(
                 if p.suffix
                 else f"Unread · {p.name} in {place}"
             )
+        if ignored and (f"unread_file:{target}", p.name) in ignored:
+            continue
         item("config", "unread_file", target, label).add(
             {"file": rel, "function": "", "application": where(rel)}
         )
