@@ -12,11 +12,12 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from steno.api.deps import SessionDep
+from steno.api.links import source_url
 from steno.config import get_settings
 from steno.curation.approve import ApprovalError, approve, pack_meta, reject, target
 from steno.curation.publish import BRANCH, destination
 from steno.curation.run import estimate, pick, queue_run
-from steno.db.models import CurationRun, ProposalStatus, RuleProposal
+from steno.db.models import CurationRun, ProposalStatus, Repository, RuleProposal
 from steno.rule_packs.packs import load_all_packs
 
 router = APIRouter(tags=["curation"])
@@ -109,7 +110,7 @@ def proposal(proposal_id: int, session: SessionDep) -> dict[str, Any]:
         "rule": p.rule,
         "tests": p.tests,
         "proof": p.proof,
-        "samples": p.samples,
+        "samples": _linked(session, p.samples or []),
         "pack": pack,
         "flags": p.flags,
         "comment": p.comment,
@@ -194,6 +195,17 @@ def _preview(p: RuleProposal) -> dict[str, Any] | None:
         # The pack's folder in that repository, e.g. rule-packs/platform/steno-pack-compose
         "path": str(pack_dir.resolve().relative_to(dest.repo.resolve())),
     }
+
+
+def _linked(session: Any, samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Each sample with a link to its line on the git host, at the commit Steno ingested."""
+    repos = {r.name: r for r in session.scalars(select(Repository))}
+    out = []
+    for s in samples:
+        r = repos.get(s.get("repository"))
+        url = r and source_url(r.clone_url, r.last_ingested_sha, s.get("file"), s.get("line"))
+        out.append({**s, "url": url or None})
+    return out
 
 
 def _remote_name(repo: Any) -> str:

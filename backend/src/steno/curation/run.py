@@ -469,10 +469,21 @@ def gather(
             log.warning("curation: can't read %s:%s: %s", repo, path, exc)
             continue
         files[f"{repo}/{path}"] = text
-        samples.append(
-            Sample(repo, path, s.get("line"), s.get("function"), _around(text, s.get("line")))
-        )
+        line = s.get("line") or find_line(text, target)
+        samples.append(Sample(repo, path, line, s.get("function"), _around(text, line)))
     return samples, files
+
+
+def find_line(text: str, target: str) -> int | None:
+    """The first line that mentions what a pattern is about, for a sample recorded without
+    one (a library's import, a call): its full name, else its last part (`psycopg2.connect`,
+    then `connect`). None when it's a file-level pattern or isn't named in the file."""
+    names = [target.split("#")[0], target.replace("#", ".").rsplit(".", 1)[-1]]
+    for name in dict.fromkeys(n for n in names if len(n) >= 3 and "@" not in n):
+        for n, line in enumerate(text.splitlines(), start=1):
+            if name in line:
+                return n
+    return None
 
 
 def _around(text: str, line: int | None) -> str:

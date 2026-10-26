@@ -372,3 +372,11 @@ def test_a_claim_a_worker_never_finished_is_drafted_again(session, no_git, monke
     run.stats = stats
     again = curation.claim(session, run.id)
     assert again is not None and again.fingerprint == a.fingerprint
+
+
+def test_a_sample_without_a_line_points_at_the_first_mention():
+    text = "import os\nfrom psycopg2 import connect\n\nconn = connect(host=h)\n"
+    assert curation.find_line(text, "psycopg2.connect") == 2  # `connect`, on the import
+    assert curation.find_line(text, "psycopg2") == 2
+    assert curation.find_line("x = 1\n", "joblib.dump") is None
+    assert curation.find_line("anything", ".yml@/") is None  # a file-level pattern

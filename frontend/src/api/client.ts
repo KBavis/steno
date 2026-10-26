@@ -381,7 +381,7 @@ export interface Proposal extends ProposalSummary {
   rule: string | null
   tests: Record<string, ProposalCase>
   proof: { cases?: CaseResult[] }
-  samples: { repository: string; file: string; line: number | null; function: string | null }[]
+  samples: { repository: string; file: string; line: number | null; function: string | null; url: string | null }[]
   pack: Record<string, unknown> | null
   flags: string[]
   comment: string | null

@@ -1434,6 +1434,8 @@ textarea {
 .rules-case { margin: 8px 0 14px; }
 .rules-case-name { font-weight: 600; font-size: 13px; margin-bottom: 4px; text-transform: capitalize; }
 .rules-sample { padding: 2px 0; }
+.rules-sample a { display: inline-flex; align-items: center; gap: 4px; color: var(--accent-text); }
+.rules-sample a:hover { text-decoration: underline; }
 .rules-meta { color: var(--muted); font-size: 12px; margin-top: 18px !important; }
 .rules-why { flex: 1; min-width: 220px; height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: inherit; font: inherit; }
 .rules-pr { display: inline-flex; gap: 4px; align-items: center; margin-top: 8px; font-weight: 600; color: var(--accent-text); }

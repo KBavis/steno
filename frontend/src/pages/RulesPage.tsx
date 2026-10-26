@@ -739,13 +739,21 @@ function Review({ id, onClose, onDone }: { id: number; onClose: () => void; onDo
 
           {p.samples.length > 0 && (
             <details>
-              <summary>Where Steno found the code ({p.samples.length})</summary>
-              {p.samples.map((s, i) => (
-                <div key={i} className="mono small rules-sample">
-                  {s.repository} · {s.file}
-                  {s.line ? `:${s.line}` : ''}
-                </div>
-              ))}
+              <summary>Where it's used ({p.samples.length})</summary>
+              {p.samples.map((s, i) => {
+                const where = `${s.repository} · ${s.file}${s.line ? `:${s.line}` : ''}`
+                return (
+                  <div key={i} className="mono small rules-sample">
+                    {s.url ? (
+                      <a href={s.url} target="_blank" rel="noreferrer" title="Open at the commit Steno ingested">
+                        {where} <ExternalLink size={12} />
+                      </a>
+                    ) : (
+                      where
+                    )}
+                  </div>
+                )
+              })}
             </details>
           )}
 
