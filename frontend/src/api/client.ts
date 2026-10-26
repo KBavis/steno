@@ -296,12 +296,30 @@ export interface CurationRun {
 
 export interface CurationInfo {
   drafter: string
-  model: string
+  model: string // the default
+  models: { id: string; name: string }[]
   effort: string
   max_turns: number
   max_usd_per_pattern: number
   budget_usd: number
+  open_patterns: number
+  spent_total_usd: number
+  searches: number
   runs: CurationRun[]
+}
+
+export interface CurationEstimate {
+  model: string
+  patterns: number
+  frameworks: number
+  worst_usd: number
+  budget_usd: number
+  pilot: number
+  history: number // past drafts with this model
+  mean_usd?: number
+  p90_usd?: number
+  expected_usd?: number // with enough history
+  high_usd?: number
 }
 
 export type ProposalKind = 'rule' | 'enable_pack' | 'ignore' | 'vocabulary'
@@ -312,7 +330,8 @@ export interface ProposalSummary {
   run_id: number | null
   kind: ProposalKind
   status: ProposalStatus
-  title: string
+  title: string // the pattern it was drafted for
+  name: string | null // its name, title case
   summary: string
   fingerprints: string[]
   owner: string | null
@@ -324,6 +343,8 @@ export interface ProposalSummary {
   cost_usd: number
   turns: number
   created_at: string
+  reviewed_at: string | null
+  link: string | null // an approved rule's pull request
 }
 
 export interface ProposalCase {
@@ -347,6 +368,7 @@ export interface PublishInfo {
   base?: string
   created_pack?: boolean
   commit?: string
+  path?: string // the pack's folder in the repository
   pr_url?: string | null
   compare_url?: string | null
   error?: string
@@ -444,9 +466,15 @@ export const api = {
   },
   curation: {
     info: () => request<CurationInfo>('/curation'),
-    start: (limit: number, fingerprints: string[] = [], budget_usd?: number) =>
-      request<CurationRun>('/curation/runs', { method: 'POST', body: JSON.stringify({ limit, fingerprints, budget_usd }) }),
+    start: (opts: { model?: string; limit?: number; fingerprints?: string[]; budget_usd?: number } = {}) =>
+      request<CurationRun>('/curation/runs', { method: 'POST', body: JSON.stringify(opts) }),
     proposals: (status?: ProposalStatus) => request<ProposalSummary[]>(`/proposals${status ? `?${q({ status })}` : ''}`),
+    estimate: (model: string) => request<CurationEstimate>(`/curation/estimate?${q({ model })}`),
+    approveMany: (ids: number[]) =>
+      request<{ id: number; ok: boolean; error?: string }[]>('/proposals/approve', { method: 'POST', body: JSON.stringify({ ids }) }),
+    rejectMany: (ids: number[], why: string) =>
+      request<{ id: number; ok: boolean; error?: string }[]>('/proposals/reject', { method: 'POST', body: JSON.stringify({ ids, why }) }),
+    ofRun: (runId: number) => request<ProposalSummary[]>(`/proposals?${q({ run_id: String(runId) })}`),
     proposal: (id: number) => request<Proposal>(`/proposals/${id}`),
     approve: (id: number) =>
       request<{ proposal: ProposalSummary } & PublishInfo>(`/proposals/${id}/approve`, { method: 'POST', body: JSON.stringify({}) }),

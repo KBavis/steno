@@ -19,7 +19,7 @@ const TABS: Record<string, { label: string; icon: LucideIcon }> = {
   ingestion: { label: 'Ingestion', icon: FolderGit2 },
   visualize: { label: 'Visualize', icon: Network },
   coverage: { label: 'Coverage', icon: ScanSearch },
-  rules: { label: 'Suggested New Rules', icon: Sparkles },
+  rules: { label: 'Rule Composer', icon: Sparkles },
   spaces: { label: 'Spaces', icon: Layers },
   connectors: { label: 'Connectors', icon: Plug },
   organization: { label: 'Organization', icon: Building2 },
