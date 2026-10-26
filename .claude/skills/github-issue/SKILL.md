@@ -72,7 +72,7 @@ Pick exactly one **type**, one or two **areas**, one **priority**, and one **eff
 
 ## 3. Write the issue
 
-**Title:** an imperative summary, 70 characters or fewer, no type or area prefix (labels carry those). *"Implement the clone stage for dry runs"*, not *"[Ingestion] Clone stage"*.
+**Title:** brief and in Title Case: an imperative summary, ideally under 50 characters and never over 70, with no type or area prefix (labels carry those). Capitalize the main words; keep short articles, conjunctions, and prepositions lowercase unless they come first. *"Implement the Clone Stage for Dry Runs"*, not *"[Ingestion] Clone stage"* or *"Implement the clone stage so that dry runs can record clone time"*.
 
 **Body:** use the template for the type. Keep every section concrete; leave a section out rather than writing "N/A".
 
@@ -167,7 +167,7 @@ Sub-issues are linked natively; list them here too, in order:
 Present each issue as:
 
 ```
-Title:      Implement the clone stage for dry runs
+Title:      Implement the Clone Stage for Dry Runs
 Labels:     type:feature, area:ingestion, priority:p1, effort:m
 Milestone:  POC A: Foundations
 Links:      blocked by #12 · sub-issue of #20
