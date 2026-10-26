@@ -46,6 +46,8 @@ class DraftRequest:
     samples: list[Sample]
     siblings: list[str] = field(default_factory=list)  # other patterns the same owner has
     language: str = "java"
+    # Problems Steno's checks found in a previous draft, to fix this time (a revision round)
+    feedback: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -169,6 +171,12 @@ def prompt_of(request: DraftRequest) -> str:
     if request.siblings:
         parts.append(
             "Other unexplained patterns with the same owner: " + "; ".join(request.siblings[:15])
+        )
+    if request.feedback:
+        parts.append(
+            "\nYour previous draft of this rule passed its tests, but Steno's checks found "
+            "problems. Fix them, or explain in `notes` why they can't be fixed:\n- "
+            + "\n- ".join(request.feedback)
         )
     for i, s in enumerate(request.samples, start=1):
         where = f"{s.repository}:{s.file}" + (f":{s.line}" if s.line else "")

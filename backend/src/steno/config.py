@@ -73,6 +73,8 @@ class Settings(BaseSettings):
     # project from, is confirmed first, and can start as a pilot of this many patterns
     curation_pilot: int = 10
     rule_drafter_timeout_min: int = 30
+    # Times a draft goes back to the drafter with what Steno's checks found (recall, identity)
+    rule_drafter_revisions: int = 1
     # Publishing approved rules (D131): `pr` collects them on one `steno/rules` branch with one
     # open pull request per destination; `push` commits straight to the default branch
     rules_publish_core: str = "pr"  # Steno's own rule-packs/ (rules for public libraries)

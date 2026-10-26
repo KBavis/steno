@@ -1399,6 +1399,14 @@ textarea {
 .rules-kind { flex-shrink: 0; padding: 1px 8px; border-radius: 10px; font-family: var(--font); font-weight: 600; font-size: 11px; background: var(--bg); border: 1px solid var(--border); color: var(--text-2); }
 .rules-kind-rule { background: var(--accent-soft); border-color: transparent; color: var(--accent-text); }
 .rules-kind-vocabulary { background: var(--warn-soft); border-color: transparent; color: var(--warn); }
+.rules-checks { display: flex; flex-direction: column; gap: 8px; }
+.rules-check { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: var(--radius-sm); font-size: 13px; line-height: 1.5; }
+.rules-check > svg { flex-shrink: 0; margin-top: 2px; }
+.rules-check ul { margin: 4px 0 0; padding-left: 16px; }
+.rules-check a { color: var(--accent-text); display: inline-flex; gap: 4px; align-items: center; }
+.rules-check.ok { background: var(--ok-soft); } .rules-check.ok > svg { color: var(--ok); }
+.rules-check.warn { background: var(--warn-soft); } .rules-check.warn > svg { color: var(--warn); }
+.rules-check.bad { background: var(--fail-soft); } .rules-check.bad > svg { color: var(--fail); }
 .rules-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 13px; }
 .rules-facts dt { color: var(--muted); }
 .rules-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }

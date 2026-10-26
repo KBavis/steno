@@ -1,6 +1,6 @@
 import { AlertTriangle, CheckCircle2, ChevronRight, ExternalLink, History, Loader2, Search, Sparkles } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import { api, type CurationEstimate, type CurationInfo, type CurationRun, type Proposal, type ProposalSummary } from '../api/client'
+import { api, type CurationEstimate, type CurationInfo, type CurationRun, type Proposal, type ProposalSummary, type RuleChecks } from '../api/client'
 import { Drawer, EmptyState, ErrorAlert, Notice, PageHeader } from '../components/ui'
 import { useAction } from '../hooks/useAction'
 import { usePoll } from '../hooks/usePoll'
@@ -709,6 +709,8 @@ function Review({ id, onClose, onDone }: { id: number; onClose: () => void; onDo
             )}
           </section>
 
+          {p.checks && <Checks c={p.checks} />}
+
           {p.rule && (
             <section>
               <h3>The rule</h3>
@@ -764,9 +766,60 @@ function Review({ id, onClose, onDone }: { id: number; onClose: () => void; onDo
   )
 }
 
+/** What Steno found running the rule where its pattern really occurs, before you saw it */
+function Checks({ c }: { c: RuleChecks }) {
+  const identityOk = c.generic.length === 0 && c.taken.length === 0
+  return (
+    <section className="rules-checks">
+      <h3>Steno's checks</h3>
+      <div className={`rules-check ${c.missed.length ? 'warn' : 'ok'}`}>
+        {c.missed.length ? <AlertTriangle size={15} /> : <CheckCircle2 size={15} />}
+        <div>
+          <strong>Recall:</strong> explains {c.explained.length} of {c.files} {c.files === 1 ? 'file' : 'files'} where this pattern occurs
+          {c.missed.length > 0 && (
+            <ul>
+              {c.missed.map((m) => (
+                <li key={m.where} className="mono small">
+                  {m.url ? (
+                    <a href={m.url} target="_blank" rel="noreferrer">
+                      {m.where} <ExternalLink size={11} />
+                    </a>
+                  ) : (
+                    m.where
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+      {c.names.length > 0 && (
+        <div className={`rules-check ${identityOk ? 'ok' : 'bad'}`}>
+          {identityOk ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
+          <div>
+            <strong>Identity:</strong> creates application names <span className="mono">{c.names.join(', ')}</span>
+            {c.generic.length > 0 && <div>Too generic to identify one application: {c.generic.join(', ')}</div>}
+            {c.taken.map((t) => (
+              <div key={t.name}>
+                “{t.name}” is already {t.by} (in {t.repository})
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {c.errors.length > 0 && <div className="small muted">{c.errors.join(' · ')}</div>}
+    </section>
+  )
+}
+
 /** What approving does: for a rule, where it goes; otherwise one short sentence */
 function Effect({ p, passed, total }: { p: Proposal; passed: number; total: number }) {
-  if (p.status === 'needs_person') return <p>Steno couldn't tell what this code does. Reject it with a note.</p>
+  if (p.status === 'needs_person')
+    return p.checks && (p.checks.generic.length > 0 || p.checks.taken.length > 0) ? (
+      <p>Can't be approved: Steno's checks found an identity problem the drafter didn't fix (below). Reject it with what to change.</p>
+    ) : (
+      <p>Steno couldn't tell what this code does. Reject it with a note.</p>
+    )
   if (p.kind === 'ignore')
     return p.ignore_names?.length ? (
       <p>

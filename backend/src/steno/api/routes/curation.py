@@ -120,6 +120,7 @@ def proposal(proposal_id: int, session: SessionDep) -> dict[str, Any]:
         "tests": p.tests,
         "proof": p.proof,
         "samples": _linked(session, p.samples or []),
+        "checks": _checks(session, (p.proof or {}).get("checks")),
         "pack": pack,
         "flags": p.flags,
         "comment": p.comment,
@@ -215,6 +216,21 @@ def _linked(session: Any, samples: list[dict[str, Any]]) -> list[dict[str, Any]]
         url = r and source_url(r.clone_url, r.last_ingested_sha, s.get("file"), s.get("line"))
         out.append({**s, "url": url or None})
     return out
+
+
+def _checks(session: Any, checks: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The checks a drafted rule ran (recall, identity), with each missed file linked."""
+    if not checks:
+        return None
+    repos = {r.name: r for r in session.scalars(select(Repository))}
+
+    def link(where: str) -> dict[str, Any]:
+        name, _, path = where.partition("/")
+        r = repos.get(name)
+        url = r and source_url(r.clone_url, r.last_ingested_sha, path, None)
+        return {"where": where, "url": url}
+
+    return {**checks, "missed": [link(m) for m in checks.get("missed") or []]}
 
 
 def _remote_name(repo: Any) -> str:

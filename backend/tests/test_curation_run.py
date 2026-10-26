@@ -393,3 +393,18 @@ def test_ignoring_unread_files_covers_only_the_names_the_drafter_examined():
     # A whole language, or any other pattern, is ignored whole
     p.fingerprints = ["unread_file:.js@*", "external_call:torch.save"]
     assert ignore_scope(p) == {}
+
+
+def test_a_rule_the_checks_flag_goes_back_to_the_drafter_once(session):
+    from steno.curation.checks import RuleCheck
+
+    p = _pattern(session, "unknown_hook:com.acme.test.Revise")
+    fake = Fake(DraftResult(kind="rule", summary="s", rule=RULE, cases=CASES, cost_usd=0.3))
+    generic = RuleCheck(files=1, explained=["r/a"], names=["backend"], generic=["backend"])
+    proposal = curation._draft(fake, p, [], [], lambda r, f: "", lambda rule, pack: generic)
+    assert len(fake.seen) == 2  # the draft, then one revision
+    assert fake.seen[1].feedback[0].startswith("identity: names too generic")
+    # Still generic after the revision: a person decides, with the problem in front of them
+    assert proposal.status == ProposalStatus.NEEDS_PERSON
+    assert proposal.flags[0].startswith("identity:") and proposal.cost_usd == 0.6
+    assert proposal.proof["checks"]["generic"] == ["backend"]

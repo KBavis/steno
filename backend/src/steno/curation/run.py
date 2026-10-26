@@ -31,6 +31,7 @@ from steno.connectors.source import read_file
 from steno.coverage.patterns import frameworks
 from steno.coverage.runs import latest_runs
 from steno.curation import kit
+from steno.curation.checks import RuleCheck, check_rule
 from steno.curation.drafters import (
     Drafter,
     DrafterUnavailable,
@@ -234,8 +235,9 @@ def draft_one(session: Session, work: Work, drafter: Drafter | None = None) -> N
         reader = _reader(session)
         samples, files = gather(session, p, reader)
         proposal = _existing_rule(p, samples, files) or _draft(
-            drafter, p, samples, _siblings(session, run, p), reader
-        )
+            drafter, p, samples, _siblings(session, run, p), reader,
+            lambda rule, pack: check_rule(session, p, rule, pack, reader),
+        )  # fmt: skip
     except Exception as exc:
         # Nothing more can be drafted (the provider is unavailable or not built, or the run's
         # own machinery failed): this pattern goes back to the queue and the run stops
@@ -536,6 +538,7 @@ def _draft(
     samples: list[Sample],
     siblings: list[str],
     read: Callable[[str, str], str],
+    check: Callable[[str, dict[str, Any] | None], RuleCheck] | None = None,
 ) -> RuleProposal:
     request = DraftRequest(
         fingerprint=p.fingerprint,
@@ -551,8 +554,23 @@ def _draft(
         siblings=siblings,
         language=_language(samples),
     )
+    checked: RuleCheck | None = None
     try:
         result = drafter.draft(request, read)
+        if check and result.kind == "rule" and result.rule:
+            checked = check(result.rule, result.pack)
+            if checked.problems() and get_settings().rule_drafter_revisions > 0:
+                # One revision round: the drafter sees what the checks found
+                request.feedback = checked.problems()
+                revised = drafter.draft(request, read)
+                revised.cost_usd += result.cost_usd
+                revised.turns += result.turns
+                result = revised
+                checked = (
+                    check(result.rule, result.pack)
+                    if result.kind == "rule" and result.rule
+                    else None
+                )
     except (NotImplementedError, DrafterUnavailable):
         raise
     except Exception as exc:  # noqa: BLE001 - recorded, and the run goes on
@@ -571,6 +589,12 @@ def _draft(
     if result.error and result.kind == "needs_person":
         status = ProposalStatus.FAILED if "submitted nothing" not in result.summary else status
     flags = [f"drafter: {result.error}"] if result.error else []
+    proof = dict(result.proof or {})
+    if checked is not None:
+        flags = checked.problems() + flags
+        proof["checks"] = checked.to_json()
+        if checked.blocking() and status == ProposalStatus.READY:
+            status = ProposalStatus.NEEDS_PERSON  # a rule that would muddle identity
     return RuleProposal(
         kind=kind,
         status=status,
@@ -584,7 +608,7 @@ def _draft(
         tests=result.cases,
         target_pack=(result.pack or {}).get("name"),
         pack=result.pack or {},
-        proof=result.proof,
+        proof=proof,
         samples=[_sample_json(s) for s in samples],
         flags=flags + ([f"notes: {result.notes}"] if result.notes else []),
         drafter=drafter.name,

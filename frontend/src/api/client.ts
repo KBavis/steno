@@ -374,9 +374,21 @@ export interface PublishInfo {
   error?: string
 }
 
+/** What Steno found running a drafted rule where its pattern really occurs */
+export interface RuleChecks {
+  files: number
+  explained: string[]
+  missed: { where: string; url: string | null }[]
+  names: string[] // application names its claims would create
+  generic: string[]
+  taken: { name: string; by: string; repository: string }[]
+  errors: string[]
+}
+
 export interface Proposal extends ProposalSummary {
   publish: PublishInfo | null
   ignore_names: string[] // an ignore of unread files covers only these names
+  checks: RuleChecks | null
   rule_id: string | null
   pack_exists: boolean
   rule: string | null
