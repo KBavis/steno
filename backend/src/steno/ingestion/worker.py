@@ -26,10 +26,10 @@ def run_once() -> bool:
     there was nothing to do."""
     with session_scope() as session:
         job = claim_next(session, host(), machine())
-        if job is None:
-            return run_curation()
-        session.commit()
-        job_id = job.id
+        job_id = job.id if job is not None else None
+        session.commit()  # releases the claim lock, which other workers wait on
+    if job_id is None:
+        return run_curation()
 
     log.info("job %s: started", job_id)
     with session_scope() as session:

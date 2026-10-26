@@ -122,3 +122,27 @@ def test_after_running_out_of_jvm_memory_the_next_run_gets_more_and_batches(sess
     assert plan.reserve_mb == 4096 + get_settings().job_memory_default_mb
     small = estimate(session, repo.id, Machine(memory_mb=7000, available_mb=5000, cpus=8))
     assert small.jvm_heap_mb == 5600 - get_settings().job_memory_default_mb  # within the budget
+
+
+def test_a_worker_drafts_only_after_releasing_the_claim_lock(monkeypatch):
+    # Claiming jobs holds a lock other workers wait on; drafting inside that transaction made
+    # every other worker wait for the whole draft
+    from contextlib import contextmanager
+
+    from steno.ingestion import worker
+
+    open_sessions = []
+
+    @contextmanager
+    def scope():
+        open_sessions.append(1)
+        try:
+            yield type("S", (), {"commit": lambda self: None})()
+        finally:
+            open_sessions.pop()
+
+    seen = []
+    monkeypatch.setattr(worker, "session_scope", scope)
+    monkeypatch.setattr(worker, "claim_next", lambda *a: None)
+    monkeypatch.setattr(worker, "run_curation", lambda: seen.append(len(open_sessions)) or True)
+    assert worker.run_once() is True and seen == [0]
