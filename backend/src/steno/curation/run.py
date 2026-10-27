@@ -332,7 +332,7 @@ def _record(
     else:
         proposal.run_id = run.id
         session.add(proposal)
-        run.spent_usd = round((run.spent_usd or 0.0) + proposal.cost_usd, 4)
+        run.spent_usd = round((run.spent_usd or 0.0) + (proposal.cost_usd or 0.0), 4)
     p.state = _state_after(proposal)
     p.note = f"curation run {run.id}: {proposal.kind.value}, {proposal.status.value}" + (
         " (explained by a rule drafted for the same framework)" if joined else ""
@@ -667,6 +667,7 @@ def _existing_rule(
         target_pack=packs[0],
         samples=[_sample_json(s) for s in samples],
         drafter="kit",
+        cost_usd=0.0,  # found by running the packs, no LLM
     )
 
 

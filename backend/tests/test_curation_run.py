@@ -489,3 +489,20 @@ def test_with_rules_core_to_org_a_public_library_rule_stays_in_the_organization(
     pack_dir, source, created = approve.target(p)
     assert pack_dir == tmp_path / "core-extensions" / "steno-pack-spring-web-ext"
     assert (source, created) == ("org", True)
+
+
+def test_a_pattern_an_existing_pack_explains_costs_nothing_and_doesnt_stop_the_run(
+    session, no_git, monkeypatch
+):
+    p = _pattern(session, "unknown_hook:com.acme.test.Enable")
+    found = RuleProposal(
+        kind=ProposalKind.ENABLE_PACK,
+        status=ProposalStatus.READY,
+        fingerprints=[p.fingerprint],
+        title="x",
+        summary="already matched",
+    )
+    monkeypatch.setattr(curation, "_existing_rule", lambda p, samples, files: found)
+    run = curation.curate(session, fingerprints=[p.fingerprint], drafter=Fake(None))
+    assert run.status == "succeeded" and run.spent_usd == 0.0
+    assert run.stats["enable_pack:ready"] == 1
