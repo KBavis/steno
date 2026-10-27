@@ -32,6 +32,7 @@ WEIGHT = {
     "external_call": 3.0,
     "disagreement": 2.5,
     "inferred_entry": 2.0,
+    "no_trigger_application": 2.0,
     "unreachable_effect": 2.0,
     "library": 2.0,
     "unknown_host": 1.5,
@@ -46,8 +47,8 @@ WEIGHT = {
 }
 # Signals about the application's own code, which no library owns
 OWN_CODE = {
-    "inferred_entry", "unreachable_effect", "unknown_host", "dropped_match", "unparsed",
-    "unread_file",
+    "inferred_entry", "no_trigger_application", "unreachable_effect", "unknown_host",
+    "dropped_match", "unparsed", "unread_file",
 }  # fmt: skip
 
 

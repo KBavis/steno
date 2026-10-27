@@ -106,3 +106,9 @@ def test_sender_and_receiver_in_different_applications_meet_on_one_channel(tmp_p
     # The receiver's flow is started by the same channel node
     assert ("STARTS", "pxchannel:orders", "flow:shipping:orders") in received
     assert "Interface" in receiver.nodes["pxchannel:orders"].labels
+
+
+def test_an_application_its_messages_start_is_a_consumer(tmp_path):
+    receiver = _plan(tmp_path, "shipping", RECEIVER)
+    apps = [n for n in receiver.nodes.values() if "Application" in n.labels]
+    assert apps and all("Consumer" in a.labels and "Service" not in a.labels for a in apps)

@@ -71,7 +71,7 @@ ThingsBoard's traces went from 2.5 GB to 61 MB, and Neo4j stores the same 40-tim
 
 The job reserves what its repository needed last time (peak memory per stage, plus the JVM helper's), with 25% headroom, or 3 GB on a first run. It's claimed only when that fits what the machine's budget (80% of its memory) has left after the jobs running there, what's free right now, and one job per CPU. A job alone on a machine always starts, and the oldest job waits at the head of the queue rather than let smaller ones pass, so large repositories aren't starved.
 
-**Out of memory, then recovery.** The JVM heap is sized per repository: 1.5 times the live heap it needed last time. A run that ran out of JVM memory makes the next run of that repository get twice the heap (within the budget) and batched resolution, so it recovers instead of failing every night.
+**Out of memory, then recovery.** The JVM heap is sized per repository: 1.5 times the live heap it needed last time. A repository with more than `STENO_RESOLVER_JVM_BATCH_ABOVE_FILES` Java files (3,000) resolves in batches from its first run. If the resolver still runs out of memory, the parse stage retries once **in the same job**, in batches with twice the heap (within the budget), and records it in the job's plan so later runs start there (built 2026-10-27; before, the job failed and only the next run recovered). The stage's `java_memory` metric says how it ran: Java files, batched, heap, retried.
 
 | Setting | Default | Means |
 |---|---|---|
@@ -80,7 +80,8 @@ The job reserves what its repository needed last time (peak memory per stage, pl
 | `STENO_WORKER_PROCESSES` | one per CPU, up to 8 | Worker processes; idle ones only poll |
 | `STENO_MAX_PARALLEL_JOBS` | 16 | A ceiling across every machine |
 | `STENO_RESOLVER_JVM_MAX_HEAP` | 2g | The heap when a repository has no history |
-| `STENO_RESOLVER_JVM_BATCH_FILES` | 0 | Files per batch (0: one pass, unless the last run ran out of memory) |
+| `STENO_RESOLVER_JVM_BATCH_FILES` | 0 | Files per batch (0: one pass, unless the repository is large or ran out of memory) |
+| `STENO_RESOLVER_JVM_BATCH_ABOVE_FILES` | 3000 | Java files above which a repository resolves in batches from its first run |
 
 Each job's reservation, the machine it saw, and why are in `ingestion_job.stats.resources`, and `host` and `memory_reserved_mb` are columns on the job.
 
@@ -103,10 +104,21 @@ Each job's reservation, the machine it saw, and why are in `ingestion_job.stats.
 | Trace data | 2.5 GB | 61 MB |
 | Graph | — | 1,623 flows, 5.96M trace entries, 116,269 nodes, 246,393 edges: identical before and after the trace change |
 
+**Keycloak** (2026-10-27; 13,558 files, 5,925 Java sources outside tests, a multi-module Maven monorepo), on an 8 GB machine:
+
+| | Result |
+|---|---|
+| First run, one pass at a 2 GB heap | Out of memory after 8 minutes; nothing written |
+| Next run, in batches at a 3.3 GB heap (the budget's cap) | Succeeded in 5.5 minutes: resolver 97 s over 30 batches, JVM live heap 1.75 GB (3.4 GB resident), worker peak 1.5 GB |
+| Coverage stage | 147 s, nearly as long as parse: the next stage to make faster on large repositories |
+| What it found | 0 flows: Keycloak uses Quarkus and JAX-RS, which no pack covers; 861 patterns (304 framework annotations, 111 unexplained I/O calls, 410 groups of unread files) |
+
+With batching from the first run above 3,000 Java files, Keycloak's first run is the batched one.
+
 ## 8. Not built yet
 
 - **Flows per application** in a monorepo, so the call graph is never held for the whole repository at once.
 - **An on-disk index** for the resolver's output on the Python side (extraction still holds about 1 GB on ThingsBoard).
 - **Module isolation**: a module that still fails is recorded as a gap while the rest continues.
-- **Turning batching on by default**, once the differential check has run on more large repositories. Today it's on by setting, or after a run runs out of memory.
+- **A faster coverage stage** on large repositories (Keycloak: 147 s).
 - **Eclipse JDT**, only if the two-pass JavaParser helper fails a larger benchmark (Open).

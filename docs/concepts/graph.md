@@ -45,7 +45,7 @@ Organization
     │   ├ Interface, Entity, Schedule, Interceptor
     │   └ Flow  {trace: every function, in order}      architecture: what it DOES
     │      └ Step  {symbol, file, lines}
-    └ Repository ── Module (:Service ◀── BUILT_FROM ── Application)
+    └ Repository ── Module (:Deployable ◀── BUILT_FROM ── Application)
                      └ File                               code: how it's BUILT
 ```
 
@@ -119,7 +119,7 @@ A flow is described at four levels:
 
 An application is still one node type, with **labels for its kinds**, worked out from the triggers of its flows (Decided). Labels aren't exclusive: a typical Spring service has endpoints, listeners, and a scheduled method.
 
-Decided (D85); not built yet (POC stage A).
+Decided (D85). **Built (2026-10-27):** `:Service` and `:Consumer` from the triggers of an application's flows, with the list in its `kinds` property; an in-code schedule is a trigger, not a kind; `:Job` waits for a PLATFORM witness (a CronJob), and `:Frontend` is `v2`. An application with no known trigger gets no kind, never a default, and is a coverage item (`no_trigger_application`).
 
 | Label | Means | Known from |
 |---|---|---|

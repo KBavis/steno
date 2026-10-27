@@ -57,6 +57,8 @@ class Delta:
         default_factory=list
     )
     labels: dict[str, list[str]] = field(default_factory=dict)  # node id → labels
+    # Labels a node of this repository had and no longer has (a renamed role, a kind lost)
+    stale_labels: dict[str, list[str]] = field(default_factory=dict)
 
     def nodes_to_write(self) -> set[str]:
         return {nid for nid, _, after in self.nodes if after is not None}
@@ -90,9 +92,16 @@ def diff(plan: GraphPlan, existing: Existing) -> Delta:
             # A shared node another repository wrote first (a topic its producer and consumer
             # both name): the first writer keeps it, so two repositories don't take turns
             after = {**after, **{k: old[1][k] for k in OWNER if k in old[1]}}
+        stale = _stale_labels(nid, node.labels, old, existing)
+        if stale:
+            delta.stale_labels[nid] = stale
         if old is None:
             delta.nodes.append((nid, None, after))
-        elif _comparable(old[1]) != _comparable(after) or not set(node.labels) <= set(old[0]):
+        elif (
+            _comparable(old[1]) != _comparable(after)
+            or not set(node.labels) <= set(old[0])
+            or stale
+        ):
             delta.nodes.append((nid, old[1], after))
     for nid in sorted(existing.repo_nodes - set(plan.nodes)):
         labels, props = existing.nodes[nid]
@@ -120,6 +129,21 @@ OWNER = ("repo", "extracted_by")
 # What reconcile writes (stubs it creates) belongs to no repository: the first one whose code
 # names it takes it over (reconcile/run.py)
 RECONCILE = "reconcile"
+
+
+def _stale_labels(
+    nid: str,
+    labels: list[str],
+    old: tuple[list[str], dict[str, Any]] | None,
+    existing: Existing,
+) -> list[str]:
+    """Labels to take off a node this repository owns: what it had and the plan doesn't. Not
+    on a shared node, which other repositories (or reconcile) may have labeled too."""
+    if old is None or nid not in existing.repo_nodes:
+        return []
+    if SHARED & set(labels) or SHARED & set(old[0]) or old[1].get("shared"):
+        return []
+    return [lbl for lbl in old[0] if lbl not in labels]
 
 
 def _owned_elsewhere(

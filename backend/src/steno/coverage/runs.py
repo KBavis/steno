@@ -31,6 +31,7 @@ SIGNAL_WORDS = {
     "version_untested": "libraries newer or older than their pack is tested on",
     "version_unknown": "libraries whose version isn't stated",
     "inferred_entry": "work nothing in the code starts",
+    "no_trigger_application": "applications with no known trigger (kind unknown)",
     "unreachable_effect": "code with effects no entry point reaches",
     "dropped_match": "rule matches Steno couldn't complete",
     "unparsed": "files Steno couldn't read",

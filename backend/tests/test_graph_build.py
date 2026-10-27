@@ -207,3 +207,12 @@ def test_an_effect_keeps_every_operation_and_call_site():
     props = plan.edges[("WRITES_TO", "step:a", "table:t")].props
     assert props["operation"] == "delete, upsert"
     assert props["call_sites"] == ["120 upsert", "140 upsert", "164 delete"]
+
+
+def test_an_application_is_a_service_by_the_triggers_of_its_flows():
+    # D85: kinds are labels from what starts the flows; the module that builds it is Deployable
+    plan = _plan()
+    app = plan.nodes["app:demo"]
+    assert "Service" in app.labels and app.props["kinds"] == ["Service"]
+    assert "Deployable" in plan.nodes["module:demo:."].labels
+    assert plan.stats["applications_without_kind"] == []

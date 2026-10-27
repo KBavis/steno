@@ -72,6 +72,9 @@ TRIGGER_KIND = {
     "Queue": "queue",
     "GrpcMethod": "grpc",
 }
+# Application kinds (D85) by the kind of trigger that starts its flows
+KIND_OF = {"http": "Service", "grpc": "Service", "topic": "Consumer", "queue": "Consumer",
+           "channel": "Consumer"}  # fmt: skip
 JAVA_IMPLICIT = {"toString", "equals", "hashCode", "compareTo", "close", "clone", "finalize"}
 SCHEDULE_NAME = {
     "cron": "Cron job",
@@ -223,6 +226,7 @@ class _Builder:
         self.plan.ledger = self.ledger
         self.now = datetime.now(UTC).isoformat()
         self.apps: dict[str, str] = {}  # module path → application node id
+        self.app_triggers: dict[str, set[str]] = {}  # application node id → its flows' triggers
         self.app_keys: dict[str, str] = {}  # application node id → key for child IDs
         self.functions: dict[str, Function] = {f.symbol: f for f in r.functions()} if r else {}
         # Names of first-party functions: an unresolved call by one of these names may be a
@@ -248,6 +252,7 @@ class _Builder:
             self._fact_edge(edge)
         self._call_graph()
         self._flows()
+        self._kinds()
         self._file_nodes()
         self.plan.stats["unmet_joins"] = self.unmet
         return self.plan
@@ -288,7 +293,7 @@ class _Builder:
                 **self._prov("structure"),
             )
             p.edge("BELONGS_TO", mid, repo_id, **self._prov("structure"))
-            if "Service" in m.roles:
+            if "Deployable" in m.roles:
                 self._application(m, mid)
 
     def _application(self, m: Module, module_node: str) -> None:
@@ -918,9 +923,26 @@ class _Builder:
             self.plan.edge("STARTS", trigger, flow, **prov)
             if app:
                 self.plan.edge("BELONGS_TO", flow, app, **prov)
+                self.app_triggers.setdefault(app, set()).add(trigger_kind)
             self._steps(flow, trace)
         for key in sorted(self.inferred, key=_key_order):
             self._inferred_flow(key)
+
+    def _kinds(self) -> None:
+        """Application kinds (D85): labels from the triggers of the application's flows, not a
+        type; one application can be several. An in-code schedule is a trigger, not a kind,
+        and `:Job` needs a PLATFORM witness (a CronJob), so neither is set here. An application
+        none of whose flows has a known trigger gets no kind, never a default: it's a coverage
+        item instead."""
+        unknown = []
+        for app in self.apps.values():
+            kinds = sorted({KIND_OF[t] for t in self.app_triggers.get(app, ()) if t in KIND_OF})
+            if kinds:
+                self.plan.node(app, ["Application", *kinds], kinds=kinds)
+            else:
+                node = self.plan.nodes[app]
+                unknown.append({"application": node.props.get("name", app), "id": app})
+        self.plan.stats["applications_without_kind"] = unknown
 
     def _inferred_flow(self, key: Key) -> None:
         """A flow no trigger is known for (D74): no STARTS edge, named after the function it

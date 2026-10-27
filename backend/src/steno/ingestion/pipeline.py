@@ -372,12 +372,12 @@ def _application_of(ctx: JobContext) -> Any:
         identity = identities.get(module.path)
         return identity.canonical if identity else str(structure.application_name(repo, module))
 
-    services = [m for m in structure.modules if "Service" in m.roles]
+    services = [m for m in structure.modules if "Deployable" in m.roles]
     only = name(services[0]) if len(services) == 1 else ""
 
     def app_of(file: str | None) -> str:
         module = structure.module_of(file) if file else None
-        if module is not None and "Service" in module.roles:
+        if module is not None and "Deployable" in module.roles:
             return name(module)
         return only
 

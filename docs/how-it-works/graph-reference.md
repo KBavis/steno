@@ -52,7 +52,7 @@ Organization                              ← layer 1
     │   ├ Interface, Entity, Schedule, Interceptor
     │   └ Flow  {trace: every function, in order}      architecture nodes: what it DOES
     │      └ Step  {symbol, file, lines}
-    └ Repository ─────── Module (:Service ◀──BUILT_FROM── Application)
+    └ Repository ─────── Module (:Deployable ◀──BUILT_FROM── Application)
                           └ File                               code nodes: how it's BUILT
 ```
 
@@ -97,7 +97,7 @@ After a refactor, only the code pointers (a step's `symbol` and lines, the flow'
 - **Meaningful change tracking.** Architecture nodes change rarely and meaningfully; code changes on every edit. Keeping functions out of the graph means a refactor that changes no behavior writes no graph nodes (see [Depth and storage](#depth-and-storage-decided-traces-not-function-nodes)).
 
 Other points:
-- **An Application is not a Module.** An Application is the deployable unit (architecture); a Module is the build unit (code). A `:Service` module builds an Application. Packages aren't nodes.
+- **An Application is not a Module.** An Application is the deployable unit (architecture); a Module is the build unit (code). A `:Deployable` module builds an Application. Packages aren't nodes.
 - **Architecture nodes describe behavior down to each step without touching code.** Agents drop into a flow's trace, and from there into the source, only for fine detail.
 - Every node has exactly one `BELONGS_TO` owner. A Repository belongs to a Space, so code nodes are anchored in the same tree.
 
@@ -217,7 +217,7 @@ A role is an **optional label**. A module with no role is still an ordinary `Mod
 
 | Role | Detected by (deterministic) | Treatment |
 |---|---|---|
-| `:Service` | Produces a deployable: Spring Boot main class / boot packaging plugin, its own Dockerfile, its own deployment descriptor | Gets an `Application` |
+| `:Deployable` | Produces a deployable: Spring Boot main class / boot packaging plugin, its own Dockerfile, its own deployment descriptor. Built: a module with an entry point. (Was `:Service` until 2026-10-27; renamed so it doesn't collide with the Application kind, D85.) | Gets an `Application` |
 | `:Library` | Other modules depend on it; produces no deployable | Stored once, shared by the services that depend on it |
 | `:Contract` | Holds `.proto`, OpenAPI, or Avro definitions | Rules read it for `Interface` definitions |
 | `:Migrations` | Flyway / Liquibase scripts | Recognized now; read for table ownership in POC stage B (Data facet); parsed for columns in Data V2 |
@@ -228,8 +228,8 @@ Example, our microservices repository:
 
 ```
 (:Repository microservices)
- ├─ (:Module:Service services/users)  ◀─BUILT_FROM─ (:Application users-svc)
- ├─ (:Module:Service services/auth)   ◀─BUILT_FROM─ (:Application auth-svc)
+ ├─ (:Module:Deployable services/users)  ◀─BUILT_FROM─ (:Application:Service users-svc)
+ ├─ (:Module:Deployable services/auth)   ◀─BUILT_FROM─ (:Application:Service auth-svc)
  └─ (:Module:Library plugins/logging) ◀─DEPENDS_ON─ users-svc, auth-svc
 ```
 

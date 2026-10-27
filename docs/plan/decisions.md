@@ -148,7 +148,6 @@ Every numbered design decision, and the questions still open. Part of [Plan](./R
 
 **Design work queued in the POC**
 - [ ] **Artifacts A2:** how a flow's trace continues into an ingested library in another repository, now that library functions aren't stored as nodes (for example, a per-library summary of each public function's effects, read by dependents' runs).
-- [ ] **Label collision:** `:Service` is both a Module role and an Application kind (D85). Rename one (for example, the Module role to `:Deployable`) before kinds are built.
 - [ ] The format for an organization's **setup sheet** (witnesses per facet, precedence, naming patterns): a file in the org pack, the UI, or both.
 - [ ] Which edge cases of witness classification need guidance (Helm values that set environment variables the app reads: PLATFORM by default).
 - [ ] How confidence levels are assigned and shown, so an inferred or declared-only fact never looks deterministic.

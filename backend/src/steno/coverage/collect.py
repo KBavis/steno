@@ -141,6 +141,7 @@ def collect(
 
     _unknown_hosts(plan, resolver, item)
     _inferred(plan, item)
+    _kindless(plan, item)
     _unreachable(plan, resolver, item)
     _dropped(x, item)
     _unparsed(x, item)
@@ -252,6 +253,17 @@ def _unknown_hosts(plan: GraphPlan, r: Resolvers | None, item: Any) -> None:
                 "detail": u.get("url"),
             }
         )
+
+
+def _kindless(plan: GraphPlan, item: Any) -> None:
+    """Applications none of whose flows has a known trigger (D85): no kind is guessed. A rule
+    for whatever starts it (a framework's annotation, a listener) gives it one."""
+    for a in plan.stats.get("applications_without_kind", []):
+        item("unreachable", "no_trigger_application", a["id"],
+             f"No known trigger · {a['application']}").add(
+            {"file": "", "function": "", "application": a["application"],
+             "detail": "nothing found starts its flows, so its kind is unknown"}
+        )  # fmt: skip
 
 
 def _inferred(plan: GraphPlan, item: Any) -> None:

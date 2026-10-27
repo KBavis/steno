@@ -209,7 +209,7 @@ def deployables(
     (`spring.application.name`)."""
     out = []
     for module in structure.modules:
-        if "Service" not in module.roles:
+        if "Deployable" not in module.roles:
             continue
         names = [path_name(repo_name, structure, module)]
         built = build_name(repo, module)

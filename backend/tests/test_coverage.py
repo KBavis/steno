@@ -283,3 +283,20 @@ def test_a_file_name_ignored_within_its_pattern_is_skipped_only_there():
     # Only that name, only in that pattern: deploy.yml stays, and so does the same name elsewhere
     assert found[".yml@/"].files == ["deploy.yml"]
     assert found[".yml@conf/"].files == ["conf/docker-compose.local.yml"]
+
+
+def test_an_application_with_no_known_trigger_is_a_coverage_item_not_a_default_kind():
+    from types import SimpleNamespace
+
+    from steno.coverage.collect import _kindless
+
+    found: dict = {}
+
+    def item(kind, signal, target, label):
+        return found.setdefault((signal, target), type("I", (), {"add": lambda self, s: None})())
+
+    plan = SimpleNamespace(
+        stats={"applications_without_kind": [{"application": "batch", "id": "app:x"}]}
+    )
+    _kindless(plan, item)
+    assert list(found) == [("no_trigger_application", "app:x")]

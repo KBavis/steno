@@ -12,7 +12,7 @@ An organization-wide context engine for AI agents. It ingests repositories into 
 
 ## Current stage
 
-**Proof of concept, stage A** (`docs/plan/roadmap.md`). Built: identity, witness types, claims and reconcile, the completeness block. Remaining: application kinds, the work in the roadmap's build order for D115–D127 (answers that say what they checked and list their sources, Java at scale, patterns and rule curation), and a scored question set compared against an agent without Steno. Then B (a stub organization exercising every facet), C (spring-petclinic-microservices), D (our organization). Accuracy of MCP answers is the bar, and a feature belongs in Steno only if a use case in `docs/purpose/use-cases.md` needs it. Jev and runtime evidence are `v2`; decisions use stand-ins.
+**Proof of concept, stage A** (`docs/plan/roadmap.md`). Built: identity, witness types, claims and reconcile, the completeness block. Remaining: the work in the roadmap's build order for D115–D127 (answers that say what they checked and list their sources, Java at scale, patterns and rule curation), and a scored question set compared against an agent without Steno. Then B (a stub organization exercising every facet), C (spring-petclinic-microservices), D (our organization). Accuracy of MCP answers is the bar, and a feature belongs in Steno only if a use case in `docs/purpose/use-cases.md` needs it. Jev and runtime evidence are `v2`; decisions use stand-ins.
 
 ## Repository layout
 

@@ -90,6 +90,17 @@ def _write_all(tx: Any, plan: GraphPlan, repo: str) -> Delta:
             f"SET n += row.props {('SET n' + extra) if extra else ''}",
             rows,
         )
+    # Labels a node no longer has, so a rewrite equals a fresh build
+    stale: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for nid, gone in delta.stale_labels.items():
+        for lbl in gone:
+            stale[(primary[nid], lbl)].append(nid)
+    for (main, lbl), node_ids in stale.items():
+        _run(
+            tx,
+            f"UNWIND $rows AS id MATCH (n:{_safe(main)} {{id: id}}) REMOVE n:{_safe(lbl)}",
+            node_ids,
+        )
     edge_before = {key: b for key, b, _ in delta.edges}
     edges: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for key in delta.edges_to_write():
