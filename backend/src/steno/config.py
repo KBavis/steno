@@ -36,6 +36,18 @@ class Settings(BaseSettings):
             return [Path(p.strip()).expanduser() for p in value.split(",") if p.strip()]
         return value
 
+    # Packs Steno acts as if it didn't have, everywhere (ingestion, and the drafter's tools):
+    # for measuring rule curation against a pack we wrote (rule-curation §10).
+    # STENO_DISABLED_PACKS: pack names separated by commas
+    disabled_packs: Annotated[list[str], NoDecode] = []
+
+    @field_validator("disabled_packs", mode="before")
+    @classmethod
+    def _split_names(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [n.strip() for n in value.split(",") if n.strip()]
+        return value
+
     # The JVM helper for Java symbol resolution (D69): `make resolver` builds it here
     resolver_jvm_dir: Path = (
         Path(__file__).resolve().parents[3]

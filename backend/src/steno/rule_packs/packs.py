@@ -143,7 +143,7 @@ def load_all_packs() -> list[Pack]:
     each folder in `rule_pack_dirs`, such as a clone of an organization's own packs repository.
     An extra folder may use the same layout (ecosystem → pack) or hold packs directly; its packs
     are `source: org` unless they say otherwise. A pack name found twice is an error, never a
-    silent override."""
+    silent override. Packs named in `disabled_packs` are left out."""
     settings = get_settings()
     packs = load_packs(settings.rule_packs_dir)
     for folder in settings.rule_pack_dirs:
@@ -160,7 +160,7 @@ def load_all_packs() -> list[Pack]:
         if pack.name in seen:
             raise ValueError(f"two packs named {pack.name}: {seen[pack.name]} and {pack.path}")
         seen[pack.name] = pack.path
-    return packs
+    return [p for p in packs if p.name not in settings.disabled_packs]
 
 
 # ------------------------------------------------------------- enabled_when

@@ -73,3 +73,12 @@ def test_a_drafted_rule_runs_against_its_cases():
         results["good"].errors,
     )
     assert not results["wrong"].passed
+
+
+def test_a_disabled_pack_is_hidden_everywhere(monkeypatch):
+    from steno.config import get_settings
+    from steno.rule_packs.packs import load_all_packs
+
+    monkeypatch.setattr(get_settings(), "disabled_packs", ["steno-pack-spring-web"])
+    names = {p.name for p in load_all_packs()}
+    assert "steno-pack-spring-web" not in names and "steno-pack-jpa" in names
