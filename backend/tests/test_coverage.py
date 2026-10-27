@@ -300,3 +300,17 @@ def test_an_application_with_no_known_trigger_is_a_coverage_item_not_a_default_k
     )
     _kindless(plan, item)
     assert list(found) == [("no_trigger_application", "app:x")]
+
+
+def test_a_file_is_referenced_only_by_its_whole_name(tmp_path):
+    from steno.coverage.collect import CODE_SUFFIXES, Item, _referenced
+
+    suffix = sorted(CODE_SUFFIXES)[0]
+    (tmp_path / f"a{suffix}").write_text('load("flows/order.xyz"); load("myinvoice.xyz")\n')
+    order = Item("config", "unread_file", ".xyz@flows/", "x")
+    order.add({"file": "flows/order.xyz", "function": "", "application": ""})
+    invoice = Item("config", "unread_file", ".xyz@bills/", "y")
+    invoice.add({"file": "bills/invoice.xyz", "function": "", "application": ""})
+    items = {("config", ".xyz@flows/"): order, ("config", ".xyz@bills/"): invoice}
+    _referenced(items, tmp_path, {f"a{suffix}"})
+    assert order.evidence == {"referenced_by_code"} and not invoice.evidence

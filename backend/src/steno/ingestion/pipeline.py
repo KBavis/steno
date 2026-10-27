@@ -344,8 +344,13 @@ def coverage(ctx: JobContext) -> dict[str, Any]:
             )
         )
     # The organization's patterns: what rule curation works from (D121)
+    started = time.perf_counter()
     patterns = record_patterns(ctx.session, ctx.repository.id, ctx.job.id, report.items, statuses)
-    return {**report.metrics, "patterns": patterns}
+    timings = {
+        **report.metrics.get("timings", {}),
+        "patterns": round(time.perf_counter() - started, 2),
+    }
+    return {**report.metrics, "timings": timings, "patterns": patterns}
 
 
 def _in_library(ctx: JobContext) -> Any:

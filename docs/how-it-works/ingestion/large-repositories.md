@@ -110,7 +110,8 @@ Each job's reservation, the machine it saw, and why are in `ingestion_job.stats.
 |---|---|
 | First run, one pass at a 2 GB heap | Out of memory after 8 minutes; nothing written |
 | Next run, in batches at a 3.3 GB heap (the budget's cap) | Succeeded in 5.5 minutes: resolver 97 s over 30 batches, JVM live heap 1.75 GB (3.4 GB resident), worker peak 1.5 GB |
-| Coverage stage | 147 s, nearly as long as parse: the next stage to make faster on large repositories |
+| Coverage stage | 147 s, nearly as long as parse; then **11 s**: one step (whether code names an unread file) matched every file name as one regular expression against all the code; it now reads each file once and looks its file-name tokens up. The stage's `timings` metric gives seconds per step |
+| Whole job, batched from the first run | 3.1 minutes |
 | What it found | 0 flows: Keycloak uses Quarkus and JAX-RS, which no pack covers; 861 patterns (304 framework annotations, 111 unexplained I/O calls, 410 groups of unread files) |
 
 With batching from the first run above 3,000 Java files, Keycloak's first run is the batched one.
@@ -120,5 +121,4 @@ With batching from the first run above 3,000 Java files, Keycloak's first run is
 - **Flows per application** in a monorepo, so the call graph is never held for the whole repository at once.
 - **An on-disk index** for the resolver's output on the Python side (extraction still holds about 1 GB on ThingsBoard).
 - **Module isolation**: a module that still fails is recorded as a gap while the rest continues.
-- **A faster coverage stage** on large repositories (Keycloak: 147 s).
 - **Eclipse JDT**, only if the two-pass JavaParser helper fails a larger benchmark (Open).
