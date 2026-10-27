@@ -44,11 +44,13 @@ from steno.db.models import (
     CoverageItem,
     CoveragePattern,
     CurationRun,
+    IngestionStage,
     PatternState,
     ProposalKind,
     ProposalStatus,
     Repository,
     RuleProposal,
+    StageName,
 )
 
 log = logging.getLogger(__name__)
@@ -248,6 +250,12 @@ def draft_one(session: Session, work: Work, drafter: Drafter | None = None) -> N
             if p is None:
                 remaining.pop(0)
                 continue
+            if _waiting_for_review(session, p.fingerprint):
+                # Already suggested and not yet reviewed: drafting again would only duplicate it
+                p.state = PatternState.PROPOSED
+                session.commit()
+                remaining.pop(0)
+                continue
             log.info("curation %s: %s", work.run_id, p.fingerprint)
             samples, files = gather(session, p, reader)
             covering = _covered_by(drafted, samples, files)
@@ -258,7 +266,7 @@ def draft_one(session: Session, work: Work, drafter: Drafter | None = None) -> N
             if not _may_draft(session, work, p):
                 stopped = True
                 break
-            proposal = _existing_rule(p, samples, files) or _draft(
+            proposal = _existing_rule(session, p, samples, files) or _draft(
                 drafter, p, samples, _siblings(session, run, p), reader,
                 lambda rule, pack, p=p: check_rule(session, p, rule, pack, reader),
                 [d.rule for d in drafted if d.rule],
@@ -276,6 +284,11 @@ def draft_one(session: Session, work: Work, drafter: Drafter | None = None) -> N
         # own machinery failed): what's left goes back to the queue and the run stops
         if isinstance(exc, SQLAlchemyError):
             session.rollback()  # the session can't be used until it is
+        # A suggestion not yet saved goes with the failure: its pattern goes back to the queue,
+        # and saving it too would have the next search draft it a second time
+        for obj in list(session.new):
+            if isinstance(obj, RuleProposal):
+                session.expunge(obj)
         run = _locked(session, work.run_id)
         _requeue(session, remaining)
         _release(run, work.fingerprint)
@@ -299,6 +312,37 @@ def draft_one(session: Session, work: Work, drafter: Drafter | None = None) -> N
     if not stats.get("inflight") and (stopped or _next_fingerprint(session, run) is None):
         _finish(session, run)
     session.commit()
+
+
+def _packs_ran(session: Session, repositories: set[str]) -> dict[str, set[str]]:
+    """The packs each repository's latest ingestion ran (its parse stage's record)."""
+    names = {r.id: r.name for r in session.scalars(select(Repository))}
+    out: dict[str, set[str]] = {}
+    for repo_id, (job, _) in latest_runs(session).items():
+        name = names.get(repo_id)
+        if name not in repositories:
+            continue
+        parse = session.scalar(
+            select(IngestionStage).where(
+                IngestionStage.job_id == job.id, IngestionStage.stage == StageName.PARSE
+            )
+        )
+        out[name] = set(((parse.metrics if parse else None) or {}).get("packs") or [])
+    return out
+
+
+def _waiting_for_review(session: Session, fingerprint: str) -> bool:
+    return (
+        session.scalar(
+            select(RuleProposal.id)
+            .where(
+                RuleProposal.fingerprints.contains([fingerprint]),
+                RuleProposal.status.in_((ProposalStatus.READY, ProposalStatus.NEEDS_PERSON)),
+            )
+            .limit(1)
+        )
+        is not None
+    )
 
 
 def _pending_rules(session: Session, fingerprint: str) -> list[RuleProposal]:
@@ -637,7 +681,7 @@ def _around(text: str, line: int | None) -> str:
 
 
 def _existing_rule(
-    p: CoveragePattern, samples: list[Sample], files: dict[str, str]
+    session: Session, p: CoveragePattern, samples: list[Sample], files: dict[str, str]
 ) -> RuleProposal | None:
     """An existing rule that matches a sample at its own line: the pack wasn't enabled (or the
     version isn't one it's tested on) where the pattern occurs. Proposed as "enable it"."""
@@ -650,6 +694,11 @@ def _existing_rule(
         return None
     lines = {(f"{s.repository}/{s.file}", s.line) for s in samples if s.line}
     hits = [m for m in matches if (m["file"], m["line"]) in lines]
+    # A pack the repository's last ingestion already ran isn't the fix: the gap is elsewhere
+    # (a host set in config, a join), so the drafter looks at it instead. Whether it ran is
+    # read from that ingestion: the samples alone, without the build files, can't tell
+    ran = _packs_ran(session, {m["file"].split("/", 1)[0] for m in hits})
+    hits = [m for m in hits if m["pack"] not in ran.get(m["file"].split("/", 1)[0], set())]
     if not hits:
         return None
     packs = sorted({m["pack"] for m in hits})

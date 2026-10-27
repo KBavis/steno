@@ -502,7 +502,53 @@ def test_a_pattern_an_existing_pack_explains_costs_nothing_and_doesnt_stop_the_r
         title="x",
         summary="already matched",
     )
-    monkeypatch.setattr(curation, "_existing_rule", lambda p, samples, files: found)
+    monkeypatch.setattr(curation, "_existing_rule", lambda session, p, samples, files: found)
     run = curation.curate(session, fingerprints=[p.fingerprint], drafter=Fake(None))
     assert run.status == "succeeded" and run.spent_usd == 0.0
     assert run.stats["enable_pack:ready"] == 1
+
+
+def test_a_pattern_with_a_suggestion_waiting_for_review_isnt_drafted_again(session, no_git):
+    p = _pattern(session, "unknown_hook:com.acme.test.Waiting")
+    session.add(RuleProposal(kind=ProposalKind.IGNORE, status=ProposalStatus.READY,
+                             fingerprints=[p.fingerprint], title="x", summary="s"))  # fmt: skip
+    session.flush()
+    fake = Fake(DraftResult(kind="ignore", summary="again"))
+    curation.curate(session, fingerprints=[p.fingerprint], drafter=fake)
+    assert fake.seen == [] and p.state == PatternState.PROPOSED
+
+
+def test_a_failure_doesnt_keep_a_half_recorded_suggestion(session, no_git, monkeypatch):
+    p = _pattern(session, "unknown_hook:com.acme.test.Half")
+
+    def broken(session, work, p, proposal, joined=False):
+        session.add(proposal)  # added, then the recording fails
+        raise RuntimeError("recording failed")
+
+    monkeypatch.setattr(curation, "_record", broken)
+    with pytest.raises(RuntimeError):
+        curation.curate(session, fingerprints=[p.fingerprint],
+                        drafter=Fake(DraftResult(kind="ignore", summary="s")))  # fmt: skip
+    session.flush()
+    assert (
+        not session.query(RuleProposal)
+        .filter(RuleProposal.fingerprints.contains([p.fingerprint]))
+        .count()
+    )
+
+
+def test_enabling_a_pack_isnt_suggested_when_the_repository_already_ran_it(monkeypatch):
+    from steno.curation.drafters import Sample
+
+    p = CoveragePattern(fingerprint="unknown_host:x", signal="unknown_host", label="x")
+    samples = [Sample("r", "A.java", 3, "", "")]
+    match = {"pack": "steno-pack-spring-web", "rule": "web-client-call", "file": "r/A.java",
+             "line": 3, "enabled_for_these_files": False}  # fmt: skip
+    monkeypatch.setattr(curation.kit, "match_existing", lambda files: [match])
+    monkeypatch.setattr(curation, "_packs_ran", lambda s, repos: {"r": {"steno-pack-spring-web"}})
+    assert curation._existing_rule(None, p, samples, {"r/A.java": "x"}) is None
+    monkeypatch.setattr(curation, "_packs_ran", lambda s, repos: {"r": set()})
+    assert (
+        curation._existing_rule(None, p, samples, {"r/A.java": "x"}).kind
+        == ProposalKind.ENABLE_PACK
+    )
