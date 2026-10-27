@@ -18,7 +18,7 @@ docs/how-it-works/ingestion/rule-curation.md §5.
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -31,7 +31,7 @@ from steno.connectors.source import read_file
 from steno.coverage.patterns import frameworks
 from steno.coverage.runs import latest_runs
 from steno.curation import kit
-from steno.curation.checks import RuleCheck, check_rule
+from steno.curation.checks import RuleCheck, check_rule, draft_origins, run_draft
 from steno.curation.drafters import (
     Drafter,
     DrafterUnavailable,
@@ -67,6 +67,7 @@ DRAFTABLE = {
 }
 SAMPLES = 6
 MIN_HISTORY = 5  # past drafts with a model before its cost is projected
+NEAR = 5  # lines between a sample and a draft's fact for the draft to explain it
 CONTEXT = 30  # lines either side of an occurrence
 
 
@@ -194,6 +195,12 @@ def estimate(session: Session, model: str | None = None) -> dict[str, Any]:
 class Work:
     run_id: int
     fingerprint: str
+    # The framework's queued patterns, drafted in order by one worker (D123); the first is
+    # `fingerprint`, which keys the claim
+    group: list[str] = field(default_factory=list)
+
+    def patterns(self) -> list[str]:
+        return self.group or [self.fingerprint]
 
 
 def claim(session: Session, run_id: int | None = None) -> Work | None:
@@ -222,30 +229,55 @@ def claim(session: Session, run_id: int | None = None) -> Work | None:
 
 
 def draft_one(session: Session, work: Work, drafter: Drafter | None = None) -> None:
-    """Draft one claimed pattern and record what came of it."""
+    """Draft a claimed framework's patterns in order and record what came of each. A pattern
+    an earlier draft of this framework already explains joins that suggestion without an LLM
+    call; the others are drafted knowing what's been drafted, so rules aren't repeated."""
     run = session.get_one(CurationRun, work.run_id)
     drafter = drafter or get_drafter(run.drafter, run.model)
-    p = session.scalar(
-        select(CoveragePattern).where(CoveragePattern.fingerprint == work.fingerprint)
-    )
+    reader = _reader(session)
+    remaining = list(work.patterns())
+    # Rules drafted for this framework so far: this claim's, and earlier searches' still
+    # waiting for review, so a search that stopped partway isn't drafted over again
+    drafted = _pending_rules(session, remaining[0]) if remaining else []
+    stopped = False
     try:
-        if p is None:
-            raise ValueError(f"pattern {work.fingerprint} is gone")
-        log.info("curation %s: %s", work.run_id, work.fingerprint)
-        reader = _reader(session)
-        samples, files = gather(session, p, reader)
-        proposal = _existing_rule(p, samples, files) or _draft(
-            drafter, p, samples, _siblings(session, run, p), reader,
-            lambda rule, pack: check_rule(session, p, rule, pack, reader),
-        )  # fmt: skip
+        while remaining:
+            p = session.scalar(
+                select(CoveragePattern).where(CoveragePattern.fingerprint == remaining[0])
+            )
+            if p is None:
+                remaining.pop(0)
+                continue
+            log.info("curation %s: %s", work.run_id, p.fingerprint)
+            samples, files = gather(session, p, reader)
+            covering = _covered_by(drafted, samples, files)
+            if covering is not None:
+                _record(session, work, p, covering, joined=True)
+                remaining.pop(0)
+                continue
+            if not _may_draft(session, work, p):
+                stopped = True
+                break
+            proposal = _existing_rule(p, samples, files) or _draft(
+                drafter, p, samples, _siblings(session, run, p), reader,
+                lambda rule, pack, p=p: check_rule(session, p, rule, pack, reader),
+                [d.rule for d in drafted if d.rule],
+            )  # fmt: skip
+            _record(session, work, p, proposal)
+            if (
+                proposal.kind == ProposalKind.RULE
+                and proposal.rule
+                and proposal.status in (ProposalStatus.READY, ProposalStatus.NEEDS_PERSON)
+            ):
+                drafted.append(proposal)
+            remaining.pop(0)
     except Exception as exc:
         # Nothing more can be drafted (the provider is unavailable or not built, or the run's
-        # own machinery failed): this pattern goes back to the queue and the run stops
+        # own machinery failed): what's left goes back to the queue and the run stops
         if isinstance(exc, SQLAlchemyError):
             session.rollback()  # the session can't be used until it is
         run = _locked(session, work.run_id)
-        if p is not None and p.state == PatternState.DRAFTING:
-            p.state = PatternState.QUEUED
+        _requeue(session, remaining)
         _release(run, work.fingerprint)
         stats = _stats(run)
         stats["stopping"] = "error"
@@ -258,19 +290,110 @@ def draft_one(session: Session, work: Work, drafter: Drafter | None = None) -> N
         session.commit()
         raise
     run = _locked(session, work.run_id)
-    proposal.run_id = run.id
-    session.add(proposal)
-    p.state = _state_after(proposal)
-    p.note = f"curation run {run.id}: {proposal.kind.value}, {proposal.status.value}"
-    run.spent_usd = round((run.spent_usd or 0.0) + proposal.cost_usd, 4)
+    _requeue(session, remaining)
     _release(run, work.fingerprint)
     stats = _stats(run)
-    key = f"{proposal.kind.value}:{proposal.status.value}"
-    stats[key] = stats.get(key, 0) + 1  # progress, visible while it runs
-    run.stats = stats
-    if not stats.get("inflight") and _next_fingerprint(session, run) is None:
+    if stopped:
+        stats["stopping"] = "budget"
+        run.stats = stats
+    if not stats.get("inflight") and (stopped or _next_fingerprint(session, run) is None):
         _finish(session, run)
     session.commit()
+
+
+def _pending_rules(session: Session, fingerprint: str) -> list[RuleProposal]:
+    owner = session.scalar(
+        select(CoveragePattern.owner).where(CoveragePattern.fingerprint == fingerprint)
+    )
+    if not owner:
+        return []
+    return list(
+        session.scalars(
+            select(RuleProposal)
+            .where(
+                RuleProposal.owner == owner,
+                RuleProposal.kind == ProposalKind.RULE,
+                RuleProposal.status.in_((ProposalStatus.READY, ProposalStatus.NEEDS_PERSON)),
+                RuleProposal.rule.is_not(None),
+            )
+            .order_by(RuleProposal.id)
+        )
+    )
+
+
+def _record(
+    session: Session, work: Work, p: CoveragePattern, proposal: RuleProposal, joined: bool = False
+) -> None:
+    """A pattern's outcome: its own new suggestion, or (`joined`) a place in an earlier draft's
+    suggestion that already explains it. Committed at once, so progress shows."""
+    run = _locked(session, work.run_id)
+    if joined:
+        proposal.fingerprints = [*proposal.fingerprints, p.fingerprint]
+    else:
+        proposal.run_id = run.id
+        session.add(proposal)
+        run.spent_usd = round((run.spent_usd or 0.0) + proposal.cost_usd, 4)
+    p.state = _state_after(proposal)
+    p.note = f"curation run {run.id}: {proposal.kind.value}, {proposal.status.value}" + (
+        " (explained by a rule drafted for the same framework)" if joined else ""
+    )
+    stats = _stats(run)
+    key = "joined_draft" if joined else f"{proposal.kind.value}:{proposal.status.value}"
+    stats[key] = stats.get(key, 0) + 1  # progress, visible while it runs
+    run.stats = stats
+    session.commit()
+
+
+def _may_draft(session: Session, work: Work, p: CoveragePattern) -> bool:
+    """Whether one more draft of this claim fits the budget: what's spent and what the other
+    claims have reserved, plus a worst-case draft (this claim's own reservation). Updates
+    the claim's progress line while the run is locked."""
+    run = _locked(session, work.run_id)
+    stats = _stats(run)
+    cap = get_settings().rule_drafter_max_usd
+    budget = run.budget_usd or 0.0
+    others = (run.spent_usd or 0.0) + float(stats.get("reserved_usd") or 0.0) - cap
+    claim = stats["inflight"].get(work.fingerprint)
+    if claim is not None:
+        n = len(work.patterns())
+        claim["label"] = p.label if n == 1 else f"{p.owner} · {p.label}"
+        claim["since"] = datetime.now(UTC).isoformat()
+        run.stats = stats
+    ok = others <= 0 or others + min(cap, budget) <= budget
+    session.commit()
+    return ok
+
+
+def _covered_by(
+    drafted: list[RuleProposal], samples: list[Sample], files: dict[str, str]
+) -> RuleProposal | None:
+    """The earlier draft of this framework that already explains a pattern: running it over
+    the pattern's samples puts a fact within `NEAR` lines of every one (an annotation and the
+    method it marks are a few lines apart). Samples without a line can't be checked."""
+    located = [(f"{s.repository}/{s.file}", s.line) for s in samples if s.line]
+    if not drafted or not located or len(located) < len(samples):
+        return None
+    for d in drafted:
+        try:
+            x = run_draft(d.rule or "", d.pack, files, None)
+        except Exception:  # noqa: BLE001 - a draft that doesn't run explains nothing
+            continue
+        at: dict[str, list[int]] = {}
+        for o in draft_origins(x):
+            at.setdefault(o.file, []).append(o.line)
+        if all(any(abs(line - n) <= NEAR for n in at.get(f, [])) for f, line in located):
+            return d
+    return None
+
+
+def _requeue(session: Session, fingerprints: list[str]) -> None:
+    if not fingerprints:
+        return
+    for p in session.scalars(
+        select(CoveragePattern).where(CoveragePattern.fingerprint.in_(fingerprints))
+    ):
+        if p.state == PatternState.DRAFTING:
+            p.state = PatternState.QUEUED
 
 
 def _locked(session: Session, run_id: int) -> CurationRun | None:
@@ -341,15 +464,32 @@ def _next(session: Session, run: CurationRun) -> Work | None:
             stats["stopping"] = "budget"
             run.stats = stats
         return None
-    p.state = PatternState.DRAFTING
+    group = [p]
+    if p.owner:  # the framework's other queued patterns, in queue order (D123)
+        queue = stats.get("queue") or []
+        same = {
+            q.fingerprint: q
+            for q in session.scalars(
+                select(CoveragePattern).where(
+                    CoveragePattern.fingerprint.in_(queue),
+                    CoveragePattern.owner == p.owner,
+                    CoveragePattern.state == PatternState.QUEUED,
+                    CoveragePattern.fingerprint != p.fingerprint,
+                )
+            )
+        }
+        group += [same[fp] for fp in queue if fp in same]
+    for q in group:
+        q.state = PatternState.DRAFTING
     stats["inflight"][p.fingerprint] = {
         "label": p.label or p.fingerprint,
         "since": datetime.now(UTC).isoformat(),
         "host": _host(),
+        "group": [q.fingerprint for q in group],
     }
     stats["reserved_usd"] = round(float(stats.get("reserved_usd") or 0.0) + cap, 4)
     run.stats = stats
-    return Work(run.id, p.fingerprint)
+    return Work(run.id, p.fingerprint, [q.fingerprint for q in group])
 
 
 def _release(run: CurationRun, fingerprint: str) -> None:
@@ -368,9 +508,7 @@ def _recover(session: Session, run: CurationRun) -> None:
         if (now - datetime.fromisoformat(claim_["since"])).total_seconds() < limit:
             continue
         log.warning("curation %s: %s was never finished; back to the queue", run.id, fp)
-        p = session.scalar(select(CoveragePattern).where(CoveragePattern.fingerprint == fp))
-        if p is not None and p.state == PatternState.DRAFTING:
-            p.state = PatternState.QUEUED
+        _requeue(session, claim_.get("group") or [fp])
         _release(run, fp)
 
 
@@ -539,6 +677,7 @@ def _draft(
     siblings: list[str],
     read: Callable[[str, str], str],
     check: Callable[[str, dict[str, Any] | None], RuleCheck] | None = None,
+    drafted: list[str] | None = None,
 ) -> RuleProposal:
     request = DraftRequest(
         fingerprint=p.fingerprint,
@@ -553,6 +692,7 @@ def _draft(
         samples=samples,
         siblings=siblings,
         language=_language(samples),
+        drafted=drafted or [],
     )
     checked: RuleCheck | None = None
     try:

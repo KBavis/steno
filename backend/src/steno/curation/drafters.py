@@ -48,6 +48,8 @@ class DraftRequest:
     language: str = "java"
     # Problems Steno's checks found in a previous draft, to fix this time (a revision round)
     feedback: list[str] = field(default_factory=list)
+    # Rules already drafted for this framework in this search (YAML), not to be repeated
+    drafted: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -171,6 +173,13 @@ def prompt_of(request: DraftRequest) -> str:
     if request.siblings:
         parts.append(
             "Other unexplained patterns with the same owner: " + "; ".join(request.siblings[:15])
+        )
+    if request.drafted:
+        parts.append(
+            "\nRules already drafted for this framework in this search (each goes to review "
+            "on its own). Don't repeat them: draft only what they don't cover. If this pattern "
+            "is only a marker or setting of what they already record, submit ignore and say "
+            "which rule covers it.\n" + "\n---\n".join(r.strip() for r in request.drafted)
         )
     if request.feedback:
         parts.append(

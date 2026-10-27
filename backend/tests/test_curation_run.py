@@ -329,10 +329,15 @@ def test_one_function_signals_are_left_to_the_coverage_report(session, no_git):
     assert dead.fingerprint not in {p.pattern.fingerprint for p in curation.pick(session, None)}
 
 
-def _queued_run(session, n, budget=10.0, prefix="P"):
-    fps = [
-        _pattern(session, f"unknown_hook:com.acme.test.{prefix}{i}").fingerprint for i in range(n)
-    ]
+def _queued_run(session, n, budget=10.0, prefix="P", framework=None):
+    """`n` patterns, each its own framework unless `framework` names one for all."""
+    fps = []
+    for i in range(n):
+        p = _pattern(session, f"unknown_hook:com.acme.test.{prefix}{i}")
+        p.owner = framework or f"com.acme.{prefix.lower()}{i}"
+        p.score = 100.0 - i  # a fixed order: the first is the most widespread
+        fps.append(p.fingerprint)
+    session.flush()
     return curation.queue_run(session, fingerprints=fps, budget_usd=budget), fps
 
 
@@ -340,13 +345,14 @@ def test_workers_draft_a_runs_patterns_in_parallel(session, no_git, monkeypatch)
     monkeypatch.setattr(curation.get_settings(), "curation_parallel", 2)
     run, fps = _queued_run(session, 3)
     a, b = curation.claim(session, run.id), curation.claim(session, run.id)
-    assert {a.fingerprint, b.fingerprint} == set(fps[:2])
+    queue = run.stats["queue"]  # score order; these patterns tie, so any order
+    assert sorted(queue) == sorted(fps) and [a.fingerprint, b.fingerprint] == queue[:2]
     assert curation.claim(session, run.id) is None  # two at once, the cap
     assert run.stats["reserved_usd"] == 4.0 and len(run.stats["inflight"]) == 2
     fake = Fake(DraftResult(kind="ignore", summary="in-process", cost_usd=0.3))
     curation.draft_one(session, b, fake)
     c = curation.claim(session, run.id)
-    assert c.fingerprint == fps[2]
+    assert c.fingerprint == queue[2]
     curation.draft_one(session, a, fake)
     curation.draft_one(session, c, fake)
     assert run.status == "succeeded" and run.spent_usd == 0.9
@@ -408,3 +414,48 @@ def test_a_rule_the_checks_flag_goes_back_to_the_drafter_once(session):
     assert proposal.status == ProposalStatus.NEEDS_PERSON
     assert proposal.flags[0].startswith("identity:") and proposal.cost_usd == 0.6
     assert proposal.proof["checks"]["generic"] == ["backend"]
+
+
+def test_a_framework_is_drafted_by_one_worker_and_drafts_arent_repeated(
+    session, no_git, monkeypatch
+):
+    from steno.curation.drafters import Sample
+
+    run, fps = _queued_run(session, 3, prefix="F", framework="com.acme.messaging")
+    work = curation.claim(session, run.id)
+    assert work.patterns() == fps  # the whole framework, in order
+    assert curation.claim(session, run.id) is None  # nothing left to claim meanwhile
+
+    # The first draft is a rule; the second pattern's samples are where that rule matches,
+    # so it joins the first suggestion; the third isn't, so it's drafted, knowing the first
+    code = {"r/H.java": CODE}
+    near = {
+        fps[0]: ([Sample("r", "H.java", 3, "", "")], code),
+        fps[1]: ([Sample("r", "H.java", 4, "", "")], code),
+        fps[2]: ([Sample("r", "H.java", 40, "", "")], code),
+    }
+    monkeypatch.setattr(curation, "gather", lambda session, p, read: near[p.fingerprint])
+    fake = Fake(DraftResult(kind="rule", summary="s", rule=RULE, cases=CASES, cost_usd=0.5))
+    curation.draft_one(session, work, fake)
+
+    assert len(fake.seen) == 2  # the second pattern cost nothing
+    assert fake.seen[1].drafted and "acme-handler" in fake.seen[1].drafted[0]
+    proposals = session.query(RuleProposal).filter(RuleProposal.run_id == run.id).all()
+    first = next(p for p in proposals if fps[0] in p.fingerprints)
+    assert first.fingerprints == [fps[0], fps[1]]
+    assert run.stats["joined_draft"] == 1 and run.status == "succeeded" and run.spent_usd == 1.0
+
+
+def test_a_rule_waiting_from_an_earlier_search_is_not_drafted_again(session, no_git, monkeypatch):
+    from steno.curation.drafters import Sample
+
+    run, fps = _queued_run(session, 1, prefix="E", framework="com.acme.earlier")
+    session.add(RuleProposal(kind=ProposalKind.RULE, status=ProposalStatus.READY,
+                             owner="com.acme.earlier", fingerprints=["unknown_hook:x"],
+                             rule=RULE, pack={"language": "java"}))  # fmt: skip
+    session.flush()
+    monkeypatch.setattr(curation, "gather", lambda session, p, read: (
+        [Sample("r", "H.java", 3, "", "")], {"r/H.java": CODE}))  # fmt: skip
+    fake = Fake(DraftResult(kind="rule", summary="s", rule=RULE, cases=CASES))
+    curation.draft_one(session, curation.claim(session, run.id), fake)
+    assert fake.seen == [] and run.stats["joined_draft"] == 1

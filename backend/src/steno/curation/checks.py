@@ -112,7 +112,7 @@ def check_rule(
         out.errors.append(f"the rule didn't run over its pattern's files: {exc}")
         return out
 
-    matched = {o.file for o in _origins(x)}
+    matched = {o.file for o in draft_origins(x)}
     out.explained = sorted(f for f in files if f in matched)
     out.missed = sorted(f for f in files if f not in matched)
 
@@ -159,7 +159,8 @@ def run_draft(
         return run_folder(repo, [*others, draft]).out
 
 
-def _origins(x: Any) -> list[Any]:
+def draft_origins(x: Any) -> list[Any]:
+    """Where a draft run by `run_draft` produced facts."""
     every = [
         *(n.origin for n in x.nodes), *(e.origin for e in x.edges),
         *(c.origin for c in x.clues), *(e.origin for e in x.entry_points),
