@@ -91,6 +91,11 @@ class Settings(BaseSettings):
     # open pull request per destination; `push` commits straight to the default branch
     rules_publish_core: str = "pr"  # Steno's own rule-packs/ (rules for public libraries)
     rules_publish_org: str = "pr"  # the organization's rule-pack repository
+    # Everything to the organization's repository: a rule for a public library becomes an
+    # extension pack there (core-extensions/, marked for upstreaming) instead of a change to
+    # Steno's own rule-packs/. For running Steno inside an organization whose code mustn't
+    # leave it, and that can't push to Steno's repository (D129). STENO_RULES_CORE_TO_ORG
+    rules_core_to_org: bool = False
     # Steno's own working files (the worktrees it publishes rules from)
     cache_dir: Path = Path.home() / ".cache" / "steno"
 

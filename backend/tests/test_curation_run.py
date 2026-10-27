@@ -459,3 +459,33 @@ def test_a_rule_waiting_from_an_earlier_search_is_not_drafted_again(session, no_
     fake = Fake(DraftResult(kind="rule", summary="s", rule=RULE, cases=CASES))
     curation.draft_one(session, curation.claim(session, run.id), fake)
     assert fake.seen == [] and run.stats["joined_draft"] == 1
+
+
+def test_with_rules_core_to_org_a_public_library_rule_stays_in_the_organization(
+    monkeypatch, tmp_path
+):
+    from steno.config import get_settings
+    from steno.curation import approve
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "rules_core_to_org", True)
+    p = RuleProposal(
+        kind=ProposalKind.RULE,
+        rule=RULE,
+        tests=CASES,
+        owner="org.springframework",
+        pack={"name": "steno-pack-spring-web", "language": "java", "source": "core"},
+    )
+    meta = approve.pack_meta(p)
+    # Adds to an existing core pack: its own extension pack, marked for upstreaming
+    assert (meta["name"], meta["source"]) == ("steno-pack-spring-web-ext", "org")
+    assert meta["upstream"] == {"core_pack": "steno-pack-spring-web"}
+
+    # Without an organization repository it refuses rather than publish to Steno's
+    monkeypatch.setattr(settings, "rule_pack_dirs", [])
+    with pytest.raises(approve.ApprovalError, match="STENO_RULE_PACK_DIRS"):
+        approve.target(p)
+    monkeypatch.setattr(settings, "rule_pack_dirs", [tmp_path])
+    pack_dir, source, created = approve.target(p)
+    assert pack_dir == tmp_path / "core-extensions" / "steno-pack-spring-web-ext"
+    assert (source, created) == ("org", True)

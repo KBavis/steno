@@ -123,7 +123,7 @@ def pack_meta(proposal: RuleProposal) -> dict[str, Any]:
         "python" if files and all(f.endswith(".py") for f in files) else "java"
     )
     owner = (proposal.owner or "").split(".")[0] if language == "python" else proposal.owner
-    return {
+    out = {
         "name": meta.get("name") or proposal.target_pack or f"steno-pack-proposal-{proposal.id}",
         "version": str(meta.get("version", "0.1.0")),
         "language": language,
@@ -133,6 +133,18 @@ def pack_meta(proposal: RuleProposal) -> dict[str, Any]:
         "enabled_when": meta.get("enabled_when")
         or ({"imports": [owner]} if owner else {"always": True}),
     }
+    if out["source"] == "core" and get_settings().rules_core_to_org:
+        out = _extension(out)
+    return out
+
+
+def _extension(meta: dict[str, Any]) -> dict[str, Any]:
+    """A rule for a public library, kept in the organization's repository (rules_core_to_org):
+    an organization pack that says which core pack it would belong to, so it can be
+    upstreamed by hand. One that adds to an existing core pack gets its own name, `-ext`."""
+    core = {p.name for p in load_all_packs() if p.source == "core"}
+    name = f"{meta['name']}-ext" if meta["name"] in core else meta["name"]
+    return {**meta, "name": name, "source": "org", "upstream": {"core_pack": meta["name"]}}
 
 
 def target(proposal: RuleProposal) -> tuple[Path, str, bool]:
@@ -218,6 +230,13 @@ def _new_pack_dir(meta: dict[str, Any], folder: str | None = None) -> Path:
         if not folder or not re.fullmatch(r"[a-z][a-z0-9-]*", folder) or folder in ("org", "core"):
             folder = meta["language"] if meta["language"] != "any" else "platform"
         return settings.rule_packs_dir / folder / meta["name"]
+    if meta.get("upstream"):  # a public-library rule kept in the organization's repository
+        if not settings.rule_pack_dirs:
+            raise ApprovalError(
+                "rules_core_to_org is on but there's no organization pack repository "
+                "(set STENO_RULE_PACK_DIRS); nothing was published"
+            )
+        return settings.rule_pack_dirs[0] / "core-extensions" / meta["name"]
     root = (
         settings.rule_pack_dirs[0] if settings.rule_pack_dirs else settings.rule_packs_dir / "org"
     )
