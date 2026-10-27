@@ -1,0 +1,5 @@
+nodes:
+- DataStore:
+    host: <unresolved>
+    vendor: postgresql
+    database: <unresolved>

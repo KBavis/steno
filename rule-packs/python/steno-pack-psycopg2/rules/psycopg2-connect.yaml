@@ -1,0 +1,37 @@
+id: psycopg2-connect
+description: A PostgreSQL connection opened with psycopg2, e.g. psycopg2.connect(database=db_name, user=user, password=password, host=host, port=port), or connect(...) imported from psycopg2
+match:
+  rule:
+    kind: call
+    all:
+      - any:
+          - pattern: psycopg2.connect($$$)
+          - all:
+              - pattern: connect($$$)
+              - inside:
+                  kind: module
+                  stopBy: end
+                  has:
+                    kind: import_from_statement
+                    has:
+                      field: module_name
+                      regex: "^psycopg2$"
+      - has:
+          kind: argument_list
+          has:
+            kind: keyword_argument
+            all:
+              - has: { field: name, regex: "^host$" }
+              - has: { field: value, pattern: $HOST }
+      - has:
+          kind: argument_list
+          has:
+            kind: keyword_argument
+            all:
+              - has: { field: name, regex: "^(database|dbname)$" }
+              - has: { field: value, pattern: $DB }
+emit:
+  - node: [DataStore]
+    vendor: postgresql
+    host: $HOST
+    database: $DB
