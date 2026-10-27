@@ -1,0 +1,13 @@
+name: steno-pack-psycopg2
+version: 0.1.0
+language: python
+source: core
+description: Matches psycopg2 connect calls, including bare connect imported from
+  psycopg2, and records a PostgreSQL DataStore with host and database.
+witness_type: CODE
+enabled_when:
+  imports:
+  - psycopg2
+  dependencies:
+  - psycopg2
+  - psycopg2-binary
