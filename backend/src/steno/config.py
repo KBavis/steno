@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     # Resolve method bodies this many files at a time against a declaration index of the whole
     # repository, so memory stays bounded (D127); 0 resolves everything in one pass
     resolver_jvm_batch_files: int = 0
+    # A repository with more Java files than this resolves in batches from its first run: one
+    # pass ran a 5,500-file repository out of memory at a 2 GB heap (D127)
+    resolver_jvm_batch_above_files: int = 3000
 
     # Rule curation (D120, D130): which provider drafts rules, and the caps on each pattern.
     # claude_agent_sdk uses this machine's Claude Code login, or ANTHROPIC_API_KEY when set

@@ -126,10 +126,10 @@ def _last_oom_heap(session: Session, repository_id: int) -> int | None:
     if job is None or job.status != JobStatus.FAILED or "OutOfMemoryError" not in (job.error or ""):
         return None
     heap = ((job.stats or {}).get("resources") or {}).get("jvm_heap_mb")
-    return heap if isinstance(heap, int) else _mb(get_settings().resolver_jvm_max_heap)
+    return heap if isinstance(heap, int) else size_mb(get_settings().resolver_jvm_max_heap)
 
 
-def _mb(size: str) -> int:
+def size_mb(size: str) -> int:
     """A JVM size (`2g`, `1536m`) in MB."""
     size = size.strip().lower()
     if size.endswith("g"):

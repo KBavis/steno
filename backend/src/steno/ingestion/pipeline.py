@@ -54,6 +54,7 @@ from steno.identity.identify import deployables
 from steno.identity.identify import identify as run_identify
 from steno.identity.registry import SqlRegistry
 from steno.ingestion import memory
+from steno.ingestion.resources import JVM_HEAP_MIN_MB, budget_mb, machine, size_mb
 from steno.reconcile.run import reconcile as run_reconcile
 from steno.resolvers.java import JVM_BATCHED, JVM_HEAP_MB
 from steno.rule_packs.packs import is_enabled, load_all_packs
@@ -119,8 +120,13 @@ def parse(ctx: JobContext) -> dict[str, Any]:
     ctx.state["packs"] = packs
     # Library versions, checked against what each pack is tested on (coverage)
     ctx.state["dependencies"] = deps = dependencies(ctx.workspace)
+    memory_plan = _plan_java(ctx)
     engine = Engine(ctx.workspace, packs)
     engine.parse()
+    if _out_of_memory(engine) and _more_memory(ctx, memory_plan):
+        # Retry here rather than fail and wait for the next run: in batches, with more heap
+        engine = Engine(ctx.workspace, packs)
+        engine.parse()
     if engine.resolver is not None and engine.resolver.failed:
         # Every flow in that language would come out hollow, and writing it would remove the
         # repository's good facts: fail here so nothing is written
@@ -128,6 +134,7 @@ def parse(ctx: JobContext) -> dict[str, Any]:
     ctx.state["engine"] = engine
     return {
         "packs": [p.name for p in packs],
+        "java_memory": memory_plan,
         "files": len(engine.files),
         "resolvers": engine.resolver.stats() if engine.resolver else {},
         "libraries": len({d.name for d in deps}),
@@ -426,6 +433,52 @@ STAGES: list[tuple[StageName, StageFn]] = [
     (StageName.COVERAGE, coverage),
     (StageName.CARDS, cards),
 ]
+
+
+def _plan_java(ctx: JobContext) -> dict[str, Any]:
+    """How the Java resolver runs for this job: in batches when the job's plan says so (its
+    last run ran out of memory) or the repository is large (D127)."""
+    assert ctx.workspace is not None
+    settings = get_settings()
+    java = sum(1 for _ in ctx.workspace.rglob("*.java"))
+    if java > settings.resolver_jvm_batch_above_files and not JVM_BATCHED.get():
+        JVM_BATCHED.set(True)
+    return {
+        "java_files": java,
+        "batched": JVM_BATCHED.get(),
+        "heap_mb": JVM_HEAP_MB.get() or size_mb(settings.resolver_jvm_max_heap),
+        "retried": False,
+    }
+
+
+def _out_of_memory(engine: Engine) -> bool:
+    return bool(
+        engine.resolver is not None
+        and engine.resolver.failed
+        and "OutOfMemoryError" in engine.resolver.failed
+    )
+
+
+def _more_memory(ctx: JobContext, plan: dict[str, Any]) -> bool:
+    """After the resolver ran out of memory: batches, and twice the heap within this
+    machine's budget. Recorded in the job's plan, so the next run starts from it. False when
+    there's nothing more to give (already batched at the most the machine allows)."""
+    settings = get_settings()
+    cap = max(JVM_HEAP_MIN_MB, budget_mb(machine()) - settings.job_memory_default_mb)
+    heap = min(plan["heap_mb"] * 2, cap)
+    if plan["batched"] and heap <= plan["heap_mb"]:
+        return False
+    JVM_BATCHED.set(True)
+    JVM_HEAP_MB.set(heap)
+    log.warning(
+        "job %s: the Java resolver ran out of memory at %s MB; retrying in batches at %s MB",
+        ctx.job.id, plan["heap_mb"], heap,
+    )  # fmt: skip
+    plan.update(retried=True, batched=True, heap_mb=heap)
+    stats = dict(ctx.job.stats or {})
+    stats["resources"] = {**(stats.get("resources") or {}), "jvm_heap_mb": heap, "batched": True}
+    ctx.job.stats = stats
+    return True
 
 
 def run_job(session: Session, job: IngestionJob) -> None:
