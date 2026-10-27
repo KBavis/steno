@@ -140,3 +140,17 @@ def test_a_pattern_ignored_for_some_file_names_reopens_when_others_appear(sessio
     it.add({"file": "steno-test-scoped/deploy.yml", "function": "", "application": "svc"})
     record(session, a.id, 1, [it])
     assert p.state == PatternState.OPEN
+
+
+def test_an_approved_or_rejected_pattern_a_rule_now_explains_is_covered(session):
+    a = _repo(session, "pattern-test-explained")
+    record(session, a.id, 1, [_hook(("A.java", "A#on()"))])
+    p = _pattern(session)
+    for state in (PatternState.APPROVED, PatternState.REJECTED):
+        p.state = state
+        record(session, a.id, 2, [])  # the approved rule (or a hand-written one) explains it
+        assert p.state == PatternState.COVERED
+        record(session, a.id, 3, [_hook(("A.java", "A#on()"))])
+    p.state = PatternState.IGNORED
+    record(session, a.id, 4, [])
+    assert p.state == PatternState.IGNORED

@@ -44,14 +44,6 @@ WEIGHT = {
     "unread_file": 0.5,  # low until something says it matters (D122)
     "unread_config": 0.5,
 }
-# States a pattern leaves when its occurrences are gone (a rule explains it now)
-OPEN_STATES = {
-    PatternState.OPEN,
-    PatternState.QUEUED,
-    PatternState.DRAFTING,
-    PatternState.PROPOSED,
-    PatternState.NEEDS_PERSON,
-}
 # Signals about the application's own code, which no library owns
 OWN_CODE = {
     "inferred_entry", "unreachable_effect", "unknown_host", "dropped_match", "unparsed",
@@ -179,7 +171,9 @@ def _recount(session: Session, pattern_ids: set[int]) -> None:
         p.applications = row.apps if row else 0
         p.occurrences = row.occurrences if row else 0
         p.score = score(p.signal, p.repositories, p.applications, p.occurrences, p.evidence)
-        if p.occurrences == 0 and p.state in OPEN_STATES:
+        # Gone: a rule explains it now, whatever its review history (approved, rejected, …);
+        # an ignored pattern stays ignored, since its occurrences were filtered out on purpose
+        if p.occurrences == 0 and p.state not in (PatternState.COVERED, PatternState.IGNORED):
             p.state = PatternState.COVERED
             p.note = "no longer occurs: a rule explains it, or the code is gone"
         elif p.occurrences and p.state in (PatternState.COVERED, PatternState.APPROVED):
