@@ -834,6 +834,8 @@ function Effect({ p, passed, total }: { p: Proposal; passed: number; total: numb
   const pub = p.publish
   const pack = String(p.pack?.name ?? 'a pack')
   const pr = pub?.mode !== 'push'
+  // A public-library rule kept in the organization's repository: the core pack it belongs to
+  const upstream = (p.pack?.upstream as { core_pack?: string } | undefined)?.core_pack
   return (
     <dl className="rules-facts">
       <dt>Rule</dt>
@@ -843,11 +845,11 @@ function Effect({ p, passed, total }: { p: Proposal; passed: number; total: numb
         <span className="mono">{pack}</span>{' '}
         <span className="muted">{p.pack_exists ? 'existing' : `new, ${p.pack?.source === 'core' ? 'core' : 'organization'}`}</span>
       </dd>
-      {(p.pack?.upstream as { core_pack?: string } | undefined)?.core_pack && (
+      {upstream && (
         <>
           <dt>Upstream</dt>
           <dd>
-            Belongs with Steno's <span className="mono">{(p.pack?.upstream as { core_pack: string }).core_pack}</span>; kept in your organization's repository until it's copied there
+            Belongs with Steno's <span className="mono">{upstream}</span>; kept in your organization's repository until it's copied there
           </dd>
         </>
       )}
