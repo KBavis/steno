@@ -592,6 +592,7 @@ function statusOf(p: ProposalSummary): { label: string; className: string } {
   if (p.status === 'approved') return { label: 'Approved', className: 'badge badge-ok' }
   if (p.status === 'rejected') return { label: 'Rejected', className: 'badge' }
   if (p.status === 'failed') return { label: 'Not drafted', className: 'badge' }
+  if (p.status === 'superseded') return { label: 'Covered by a pack', className: 'badge' }
   return { label: '', className: '' }
 }
 
@@ -692,8 +693,8 @@ function Review({ id, onClose, onDone }: { id: number; onClose: () => void; onDo
           <Meta p={p} />
 
           <section className="rules-effect">
-            <h3>{open ? 'If you approve' : p.status === 'approved' ? 'Approved' : p.status === 'failed' ? 'Not drafted' : 'Rejected'}</h3>
-            {p.status === 'rejected' ? (
+            <h3>{open ? 'If you approve' : p.status === 'approved' ? 'Approved' : p.status === 'failed' ? 'Not drafted' : p.status === 'superseded' ? 'Covered by a pack' : 'Rejected'}</h3>
+            {p.status === 'rejected' || p.status === 'superseded' ? (
               <p>
                 {p.reviewed_by ?? 'Someone'}: {p.comment}
               </p>
