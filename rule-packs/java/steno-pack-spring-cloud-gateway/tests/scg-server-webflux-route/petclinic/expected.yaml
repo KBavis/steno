@@ -1,0 +1,3 @@
+claims:
+  - route: { gateway: api-gateway, id: vets-service, target: "lb://vets-service", path: "/api/vet/**", strip_prefix: "2", router: spring-cloud-gateway, line: 14 }
+  - route: { gateway: api-gateway, id: visits-service, target: "lb://visits-service", path: "/api/visit/**", strip_prefix: "2", router: spring-cloud-gateway, line: 20 }

@@ -930,13 +930,23 @@ class _Builder:
 
     def _kinds(self) -> None:
         """Application kinds (D85): labels from the triggers of the application's flows, not a
-        type; one application can be several. An in-code schedule is a trigger, not a kind,
+        type; one application can be several; `:Gateway` when its own config routes requests
+        (D132). An in-code schedule is a trigger, not a kind,
         and `:Job` needs a PLATFORM witness (a CronJob), so neither is set here. An application
         none of whose flows has a known trigger gets no kind, never a default: it's a coverage
         item instead."""
         unknown = []
+        # An application whose own config routes requests is a gateway (D132)
+        gateways = {
+            app
+            for c in self.x.claims
+            if c.claim_type == "route" and (app := self._app_for(c.origin.file))
+        }
         for app in self.apps.values():
-            kinds = sorted({KIND_OF[t] for t in self.app_triggers.get(app, ()) if t in KIND_OF})
+            kinds = sorted(
+                {KIND_OF[t] for t in self.app_triggers.get(app, ()) if t in KIND_OF}
+                | ({"Gateway"} if app in gateways else set())
+            )
             if kinds:
                 self.plan.node(app, ["Application", *kinds], kinds=kinds)
             else:

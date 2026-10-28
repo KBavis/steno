@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: orders
+app:
+  routes:
+    - id: nightly
+      uri: lb://reports
+      predicates:
+        - Path=/reports/**

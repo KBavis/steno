@@ -27,6 +27,7 @@ from steno.connectors.source import SourceError, read_file, slice_lines
 from steno.coverage.runs import unexplained
 from steno.db.models import Connector, Repository
 from steno.extraction.facts import split_url
+from steno.graph import routing
 from steno.graph import trace as trace_codec
 from steno.graph.build import step_of
 from steno.graph.views import GraphViews, kind_of, search_words
@@ -273,6 +274,133 @@ class Tools:
                 }
         return out
 
+    # ------------------------------------------------------------ routing (D132)
+
+    def _routes(self, app_ids: list[str] | None = None) -> list[dict[str, Any]]:
+        """Gateways' routes, with the application each forwards to (all, or to these)."""
+        rows = self._read(
+            "MATCH (g)-[:EXPOSES]->(r:Route) "
+            "OPTIONAL MATCH (r)-[:FORWARDS_TO]->(a:Application) "
+            "WITH g, r, a WHERE $apps IS NULL OR a.id IN $apps "
+            "RETURN g.id AS gateway_id, g.name AS gateway, properties(r) AS route, "
+            "a.id AS app_id, a.name AS app, a.stub AS stub",
+            apps=app_ids,
+        )
+        return [dict(r) for r in rows]
+
+    def _route_citation(self, route: dict[str, Any], claim: str) -> list[dict[str, Any]]:
+        out = []
+        for src in json.loads(route.get("sources") or "[]"):
+            out.append(
+                self._cite(claim, src.get("repo"), src.get("commit"), src.get("file"),
+                           src.get("line"))
+            )  # fmt: skip
+        return out
+
+    def route_request(self, path: str, method: str | None = None) -> dict[str, Any]:
+        """What serves a request from outside (D132): the gateway route its path matches, the
+        path the application sees after the route's rewrite, and the endpoint and flow it
+        reaches. Without a matching route, the endpoints anywhere that serve the path as is."""
+        path = "/" + path.strip().lstrip("/").split("?")[0]
+        method = method.upper() if method else None
+        hits, citations = [], []
+        for r in self._routes():
+            route = r["route"]
+            inside = routing.inside_path(route, path)
+            if inside is None or not routing.takes(route, method):
+                continue
+            endpoints = self._endpoints_serving(r["app_id"], inside, method) if r["app_id"] else []
+            hits.append(
+                {
+                    "gateway": r["gateway"],
+                    "route": route.get("path"),
+                    "router": route.get("router"),
+                    "rewrite": {
+                        k: route[k]
+                        for k in ("strip_prefix", "rewrite", "prefix")
+                        if route.get(k) is not None
+                    },  # fmt: skip
+                    "application": r["app"] or route.get("target"),
+                    **({"application_not_ingested": True} if r["stub"] else {}),
+                    "request_as_application_sees_it": f"{method or '*'} {inside}",
+                    "endpoints": endpoints,
+                }
+            )
+            citations += self._route_citation(
+                route,
+                f"{r['gateway']} routes {route.get('path')} to {r['app'] or route.get('target')}",
+            )
+        direct = [] if hits else self._endpoints_serving(None, path, method)
+        checked = [f"the routes of every gateway Steno knows ({len(self._routes())})"]
+        not_checked = {
+            "routes_in_code": "routes defined in Java code (RouteLocator beans) or in routers "
+            "no pack reads",
+            "frontends": "requests a frontend makes (v2, D92)",
+        }
+        return {
+            "request": f"{method or '*'} {path}",
+            "through_gateways": hits,
+            **({"served_directly_by": direct} if direct else {}),
+            **(
+                {"note": "no gateway route or endpoint serves this path"}
+                if not hits and not direct
+                else {}
+            ),
+            "completeness": _completeness(checked, not_checked, None),
+            "citations": citations,
+            "next": [
+                "get_flow(flow) for what the request does",
+                "get_node(endpoint) for who else calls it",
+            ],  # fmt: skip
+        }
+
+    def _endpoints_serving(
+        self, app_id: str | None, path: str, method: str | None
+    ) -> list[dict[str, Any]]:
+        rows = self._read(
+            "MATCH (a:Application)-[:EXPOSES]->(e:HttpEndpoint) "
+            "WHERE $app IS NULL OR a.id = $app "
+            "OPTIONAL MATCH (e)-[:STARTS]->(f:Flow) "
+            "RETURN e.id AS id, e.method AS method, e.path AS path, a.name AS app, "
+            "collect(f.id)[0] AS flow",
+            app=app_id,
+        )
+        return [
+            {
+                "endpoint": r["id"],
+                "request": f"{r['method']} {r['path']}",
+                "application": r["app"],
+                **({"flow": r["flow"]} if r["flow"] else {}),
+            }  # fmt: skip
+            for r in rows
+            if r["path"]
+            and routing.serves(r["path"], path)
+            and (method is None or (r["method"] or "").upper() in (method, "ANY", "*"))
+        ]
+
+    def _outside(self, node: Any) -> dict[str, Any]:
+        """How an endpoint is reached from outside: each gateway route to its application
+        whose rewrite leads to it, with the outside path. Public when any does."""
+        app = self._read(
+            "MATCH (a:Application)-[:EXPOSES]->(e {id: $id}) RETURN a.id AS id LIMIT 1",
+            id=node["id"],
+        )
+        if not app:
+            return {}
+        reached = []
+        for r in self._routes([app[0]["id"]]):
+            route = r["route"]
+            outside = routing.outside_path(route, node.get("path") or "")
+            if outside is not None and routing.takes(route, node.get("method")):
+                reached.append(
+                    {
+                        "gateway": r["gateway"],
+                        "route": route.get("path"),
+                        "outside_request": f"{node.get('method')} {outside}",
+                    }  # fmt: skip
+                )
+        return {"public": bool(reached), **({"reached_through": reached} if reached else {})}
+
     # ------------------------------------------------- witnesses (D109, claims)
 
     def _uses(self, node_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -501,6 +629,7 @@ class Tools:
             edges[label].append(f"{n['node']['label']} [{n['node']['id']}]")
         prov = detail["provenance"]
         channel = kind == "interface" and not ({"HttpEndpoint", "GrpcMethod"} & set(node.labels))
+        outside = self._outside(node) if "HttpEndpoint" in node.labels else {}
         uses, use_citations = self._uses(node["id"]) if channel else ([], [])
         return {
             "id": node["id"],
@@ -508,6 +637,7 @@ class Tools:
             "name": detail["label"],
             **self._where(node["id"]),
             "properties": detail["properties"],
+            **outside,
             **(
                 {"uses": uses, "agreement_means": _meanings(uses)}
                 if uses

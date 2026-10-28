@@ -81,7 +81,7 @@ A **facet** is one fixed question with a fixed answer shape, defined once by Ste
 | **Artifacts** | Which repository builds which library or image; who depends on it, and how: builds against it, or uses its shared models (D108) | `DEPENDS_ON` across repositories; image → repository | Evidence | `POC` (A1 link); A2 and shared models `v1` |
 | **Interfaces** | Endpoints, RPC methods, payloads | `HttpEndpoint`, `GrpcMethod`, `USES_ENTITY` | Evidence | `POC` |
 | **Messaging** | Topics, clusters, who may produce and consume | `KafkaTopic`, `PRODUCES`, `CONSUMES` | Evidence | `POC` |
-| **Routing** | How a request reaches a service: gateway routes, hosts, env values | Completes `CALLS` joins; marks public endpoints | Evidence | `POC` |
+| **Routing** | How a request reaches a service: gateway routes, hosts, env values | Gateways and their routes, each forwarding to an application (D132); public endpoints and "what serves this URL" worked out at query time. Built: Spring Cloud Gateway routes (2026-10-28); nginx, Ingress, and completing `CALLS` joins through routes to come | Evidence | `POC` |
 | **Data** | Data stores, tables, owners, access | `DataStore`, `Table`, `READS_FROM`, `WRITES_TO` | Evidence | `POC` (V2 schemas later) |
 | **Schedules** | What runs on a timer, when, and what it runs | `Schedule`, `STARTS` | Evidence | `POC` |
 | Ownership | Which team owns each component | `Team` | Authority | `v2` |

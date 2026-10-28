@@ -18,7 +18,7 @@ from typing import Any
 
 from ast_grep_py import SgNode, SgRoot
 
-from steno.claims.types import InvalidClaim, validate
+from steno.claims.types import TEMPLATE_FIELDS, InvalidClaim, validate
 from steno.extraction.facts import (
     IDENTITY,
     UNRESOLVED_TEXT,
@@ -434,7 +434,7 @@ class Engine:
                 max(lines, default=ctx.origin.line),
             )
             try:
-                if any("${" in str(v) for v in values.values()):
+                if any("${" in str(v) for k, v in values.items() if k not in TEMPLATE_FIELDS):
                     raise InvalidClaim(f"{kind}: a value is an unresolved ${{placeholder}}")
                 validate(kind, values)
             except InvalidClaim as exc:
@@ -452,7 +452,20 @@ class Engine:
             )
 
     def _claim_values(self, ctx: Ctx, spec: Any) -> list[tuple[Any, int | None]]:
-        """A claim field's possible values, each with the line it came from (None: the match's)."""
+        """A claim field's possible values, each with the line it came from (None: the match's).
+        `{from: $.filters, regex: "^StripPrefix=(\\d+)$"}` keeps the values of `from` that match,
+        as the regex's first group (`split: ","` then splits it into several)."""
+        if isinstance(spec, dict) and "from" in spec and "regex" in spec:
+            pattern = re.compile(str(spec["regex"]))
+            out = []
+            for value, line in self._claim_values(ctx, spec["from"]):
+                m = pattern.search(str(value))
+                if m is None:
+                    continue
+                text = m.group(1) if m.groups() else m.group(0)
+                parts = text.split(spec["split"]) if spec.get("split") else [text]
+                out += [(part.strip(), line) for part in parts if part.strip()]
+            return out
         if isinstance(spec, dict):
             parts = [(k, self._claim_values(ctx, v)) for k, v in spec.items()]
             if any(not vals for _, vals in parts):

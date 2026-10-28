@@ -3,8 +3,9 @@
 See docs/how-it-works/retrieval-and-mcp.md §5.
 
 Stateless (docs/how-it-works/README.md). The first tools (D54): `search`, `get_node`, `get_flow`,
-`find_dependents`, `view_flow_code`. Every result carries citations (D29), is cut to its
-`max_tokens`, and every call is logged in `tool_call` (tool, parameters, latency, result count).
+`find_dependents`, `view_flow_code`; then `route_request` (D132). Every result carries
+citations (D29), is cut to its `max_tokens`, and every call is logged in `tool_call` (tool,
+parameters, latency, result count).
 """
 
 import logging
@@ -40,7 +41,9 @@ mcp = MCPServer(
         "`expand='sync'` follows calls into other applications.\n"
         "4. `view_flow_code` only for the steps the question is about.\n"
         "5. `find_dependents` for who uses something, or `direction='downstream'` for what "
-        "a change affects.\n\n"
+        "a change affects.\n"
+        "6. `route_request` when you have a URL from outside (`GET /api/vet/vets`): which "
+        "gateway route takes it, and which application, endpoint, and flow serve it.\n\n"
         "Before saying 'all', 'only', or 'none', check what the answer couldn't see: `where` "
         "and `more` in search; `completeness` everywhere else: `checked` is what Steno looked "
         "at, `not_checked` what it couldn't, and `unexplained` counts code Steno sees but no "
@@ -129,6 +132,17 @@ def view_flow_code(
     """The source code of a flow's steps, in one call, read from the git host at the commit
     Steno ingested. `paths`: the step paths from `get_flow` to read (default: all its steps)."""
     return _run(ctx, "view_flow_code", locals(), max_tokens, lambda t: t.view_flow_code(ref, paths))
+
+
+@mcp.tool()
+def route_request(
+    path: str, ctx: Context, method: str | None = None, max_tokens: int = 3000
+) -> dict[str, Any]:
+    """What serves a request from outside, such as `GET /api/vet/vets`: the gateway route its
+    path matches, the request as the target application sees it after the route's rewrite
+    (`GET /vets`), and the endpoint and flow it reaches. Use it when you have a URL a user,
+    frontend, or another system calls; an endpoint's own `get_node` says how it's reached."""
+    return _run(ctx, "route_request", locals(), max_tokens, lambda t: t.route_request(path, method))
 
 
 @mcp.tool()

@@ -213,7 +213,7 @@ Steno computes `sources` from the answer's citations (built: `Tools.sources`, at
 
 Transport: **MCP over Streamable HTTP**. Every tool accepts `max_tokens`. Every result carries **confidence**, **citations** (below), and hints for the next call.
 
-**Built (2026-10-07):** `search` (full-text over names, plus flows whose traces contain a matching function), `get_node`, `get_flow`, `view_flow_code` (reads from the git host at the ingested commit; GitHub, GitLab, Bitbucket), and `find_dependents` (`via`: `http`, `messaging`, `data`), in `backend/src/steno/mcp/`. A result over its `max_tokens` loses items from its longest lists and says so in `truncated`. Every call is logged in `tool_call`. Confidence levels aren't built yet (Open).
+**Built (2026-10-07):** `search` (full-text over names, plus flows whose traces contain a matching function), `get_node`, `get_flow`, `view_flow_code` (reads from the git host at the ingested commit; GitHub, GitLab, Bitbucket), `find_dependents` (`via`: `http`, `messaging`, `data`), and `route_request` (2026-10-28, D132), in `backend/src/steno/mcp/`. A result over its `max_tokens` loses items from its longest lists and says so in `truncated`. Every call is logged in `tool_call`. Confidence levels aren't built yet (Open).
 
 ### How the tools work together (built)
 
@@ -239,6 +239,7 @@ flowchart TD
 | 2. What is it? | `get_node(id or name)` | An application's flows, data, outbound calls, names, and `messaging` with `agreement`; a space's applications and how they communicate; `also_named` when the name is shared | The flow that answers the question |
 | 3. What happens? | `get_flow(flow id)` | Steps in order, with what each reads, writes, and calls; `interceptor` steps (filters, validators) first; `stops` (calls Steno couldn't follow); `host_unknown`, `possible_targets` | Open a folded step with `under=<path>`; follow calls into other applications with `expand="sync"` |
 | 4. Show me | `view_flow_code(flow id, paths)` | The code of the chosen steps, at the ingested commit | Only when the step list doesn't answer it |
+| From a URL | `route_request(path, method)` | The gateway route a request from outside takes, the request as the application sees it after the rewrite (`GET /api/vet/vets` → `GET /vets`), and the endpoint and flow that serve it, citing the route's config (D132). An endpoint's `get_node` says the reverse: `public` and `reached_through` | `get_flow(flow)` for what it does |
 | 5. Who depends on it? | `find_dependents(id)` | Dependents by application and space, every way each touches the target, `agreement` for a topic, `possible_callers` | `direction="downstream"` for blast radius; `via` to filter by transport |
 
 `get_node("organization")` is the organization (its spaces and how they communicate); a name several nodes share is answered with the most specific one plus `also_named`.

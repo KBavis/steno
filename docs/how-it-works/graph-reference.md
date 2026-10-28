@@ -124,6 +124,8 @@ Other points:
 | `Column` | Table | `name`, `type`, `nullable`, `purpose` | Data V2 (`v2`) |
 | `Entity` | Application (or the library module that defines it) | `name`, `symbol`, `fields` (JSON; see [Contracts](#contracts-decided-d115)) | Domain models and payloads in any language: JPA classes, SQLAlchemy / Pydantic models, protobuf / Avro messages, DTOs. One node per class; whether it's a persistence model or a payload is read from its edges (`MAPS_TO`, `USES_ENTITY`). Today `fields` is `[{name, type}]`. |
 | `Interceptor` | Application, or the library `Module` that defines it | `kind` (filter / request / validation / aspect / response / error), `phase` (before / after / on_error), `scope`, `requires`, `adds`, `activation`, `symbol`, `file`, `lines` | Code a framework runs around entry points without their code calling it (D103, D116). Searchable. See [Interceptors](#interceptors-decided-d116). Not built: interceptors are steps today. |
+| `Route` | its gateway | `path` (pattern), `methods`, `strip_prefix`, `rewrite`, `prefix`, `target` (as written), `router`, `route_id`, `sources` | One route rule of a gateway (D132): requests on `path` go to an application after the rewrite. Written by reconcile from `route` claims. Searchable. |
+| `Gateway` | Organization | `name`, `router` | A router that is infrastructure (nginx, a Kubernetes Ingress), not an application (D132). A gateway that *is* an application is an `Application` with the kind `:Gateway`. |
 | `ExternalSystem` | Organization | `host`, `name`, `called_from` (when the host is unknown) | Vendor and third-party APIs. Keyed by host, or by service name when an [HTTP signature](./ingestion/rules-and-packs.md#http-signatures-decided-d64) recognizes the host. |
 | `KafkaCluster` (and other brokers) | Organization | `name` | Infrastructure, attached with `HOSTED_ON`. Not built: topics are keyed by name alone today. |
 
@@ -298,7 +300,8 @@ Every relationship is either **extracted** (read directly from code or config by
 | `BELONGS_TO` | child → owner | | The containment tree. Exactly one per node (except the root). | Extracted |
 | `BUILT_FROM` | Application → Module | | Which module builds the deployable | Extracted (build files) |
 | `DEPENDS_ON` | Module → Module | `scope` | A **build dependency**, from `pom.xml` / `build.gradle`: `services/users` depends on `plugins/logging` | Extracted (build files) |
-| `EXPOSES` | Application → Interface | | The app serves this endpoint or method | Extracted |
+| `EXPOSES` | Application → Interface; Application or Gateway → Route | | The app serves this endpoint or method; a gateway takes requests on this route (D132) | Extracted; routes by reconcile |
+| `FORWARDS_TO` | Route → Application | | Requests on the route go to this application, after the route's rewrite (D132); a stub application when the target names none | Reconcile |
 | `CALLS` | Step → Interface / ExternalSystem | `transport`, `confidence` | **A network call** to an endpoint or gRPC method | Extracted |
 | `PRODUCES` / `CONSUMES` | Step → KafkaTopic / Queue / org-defined Interface | `consumer_group` | Async messaging. A consumer that's a flow's trigger is `STARTS`; `CONSUMES` is for a step that reads messages itself (polling). | Extracted |
 | `READS_FROM` / `WRITES_TO` | Step → Table / DataStore | `operation` | Data access. Table-level when known. | Extracted |

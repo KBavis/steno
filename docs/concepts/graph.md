@@ -125,6 +125,7 @@ Decided (D85). **Built (2026-10-27):** `:Service` and `:Consumer` from the trigg
 |---|---|---|
 | `:Service` | Exposes HTTP or gRPC | Flows started by endpoints |
 | `:Consumer` | Reacts to messages | Flows started by topics or queues |
+| `:Gateway` | Routes requests to other applications | Its own route config (D132): `EXPOSES` `Route` nodes that `FORWARDS_TO` applications |
 | `:Job` | Runs to completion: starts, works, exits | CODE hints (web server off plus a `CommandLineRunner`, Spring Batch, a CLI framework), confirmed by PLATFORM (a CronJob, a scheduler entry) |
 | `:Frontend` | A UI | UI routes (`v2`) |
 

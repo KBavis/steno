@@ -7,6 +7,7 @@ in reconcile, what in the code it's compared with. Packs emit claims; a new type
 change, because reconcile has to know how to compare it.
 """
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -40,8 +41,24 @@ CLAIM_TYPES: dict[str, ClaimType] = {
         ClaimType(
             "schedule", "Schedules", "evidence", ("application",), ("cron", "every", "command")
         ),
+        # A gateway's route rule (D132): requests matching `path` (and `methods`) go to
+        # `target` (`lb://vets-service`, `http://orders:8080`) after the rewrite. `gateway` is
+        # the application (or, for infrastructure, the router's name) that holds it; without
+        # it, the application whose module holds the claim's file
+        ClaimType(
+            "route",
+            "Routing",
+            "evidence",
+            ("path", "target"),
+            ("gateway", "id", "methods", "strip_prefix", "rewrite", "prefix", "router"),
+        ),
     )
 }
+
+
+# Fields whose `${...}` is the value's own syntax, not a config placeholder left unresolved
+# (a gateway's `RewritePath=/shop/(?<rest>.*), /${rest}` refers to its own regex group)
+TEMPLATE_FIELDS = {"rewrite"}
 
 
 class InvalidClaim(ValueError):
@@ -92,4 +109,24 @@ def subjects(claim_type: str, fields: dict[str, Any]) -> list[str]:
         out.append(f"application:{fields['application']}")
     if claim_type == "name":
         out.append(f"application:{fields['name']}")
+    if claim_type == "route":
+        if fields.get("gateway"):
+            out.append(f"application:{fields['gateway']}")
+        if (name := route_target(str(fields.get("target") or ""))) is not None:
+            out.append(f"application:{name}")
     return sorted(set(out))
+
+
+def route_target(target: str) -> str | None:
+    """The application a route's target names (D132): `lb://vets-service` (a service
+    registry name), or a bare cluster host (`http://orders:8080`, `orders.shop.svc`); None for
+    an outside host (`https://api.example.com`), which is no application."""
+    m = re.match(r"^(?:(lb|https?|wss?)://)?([^/:?#]+)", target.strip())
+    if not m or not m.group(2):
+        return None
+    scheme, host = m.group(1), m.group(2)
+    if scheme == "lb":
+        return host
+    if host.endswith((".svc", ".svc.cluster.local")):
+        return host.split(".", 1)[0]
+    return host if "." not in host and host != "localhost" else None

@@ -1,0 +1,2 @@
+claims:
+  - route: { gateway: edge, id: users, target: "http://users:8080", path: "/users/**", router: spring-cloud-gateway, line: 11 }
