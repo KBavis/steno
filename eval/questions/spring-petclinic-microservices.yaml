@@ -1,0 +1,86 @@
+# Question set: spring-petclinic-microservices (POC stage C; docs/plan/roadmap.md §4)
+# Expected answers are written from the code, not from Steno. `must_mention`: the facts a
+# correct answer contains (scored 2 all, 1 some, 0 none or wrong).
+target: spring-petclinic-microservices
+repositories:
+  - name: spring-petclinic-microservices
+    clone_url: https://github.com/spring-petclinic/spring-petclinic-microservices.git
+questions:
+  - id: pc-01
+    use_case: find a flow
+    question: What happens when the UI requests GET /api/gateway/owners/7?
+    expected: >
+      api-gateway's own endpoint (ApiGatewayController.getOwnerDetails) gets the owner from
+      customers-service (GET /owners/{ownerId}), then the visits for the owner's pets from
+      visits-service (GET /pets/visits?petId=...), and merges them; if visits-service fails,
+      a circuit breaker returns the owner with empty visits.
+    must_mention: [api-gateway, customers-service, "GET /owners/{ownerId}", visits-service, "pets/visits", circuit breaker]
+  - id: pc-02
+    use_case: find a flow
+    question: Which service serves GET /api/vet/vets, and where does its data come from?
+    expected: >
+      The gateway route /api/vet/** (StripPrefix=2) forwards it to vets-service as GET /vets
+      (VetResource.showResourcesVetList), which reads vets with their specialties from the
+      vets-service database (vets, specialties, vet_specialties), cached.
+    must_mention: [vets-service, "GET /vets", "/api/vet/**", vets table]
+  - id: pc-03
+    use_case: dependents
+    question: Who calls customers-service's GET /owners/{ownerId} endpoint?
+    expected: >
+      api-gateway's CustomersServiceClient.getOwner (used by GET /api/gateway/owners/{ownerId}),
+      and genai-service's AIDataProvider (owner lookups for the AI assistant's tools).
+    must_mention: [api-gateway, CustomersServiceClient, genai-service, AIDataProvider]
+  - id: pc-04
+    use_case: dependents
+    question: Which services write to a database, and to which tables?
+    expected: >
+      customers-service writes owners and pets; visits-service writes visits; vets-service only
+      reads (vets, specialties); genai-service writes to its vector store, not a relational table.
+    must_mention: [customers-service, owners, pets, visits-service, visits, vets-service read only]
+  - id: pc-05
+    use_case: interfaces
+    question: Which endpoints are reachable from outside, through the gateway?
+    expected: >
+      Everything under the four gateway routes: /api/customer/** → customers-service,
+      /api/visit/** → visits-service, /api/vet/** → vets-service, /api/genai/** → genai-service
+      (each with the first two segments stripped), plus api-gateway's own /api/gateway/** endpoint.
+    must_mention: ["/api/customer/**", "/api/visit/**", "/api/vet/**", "/api/genai/**", "/api/gateway"]
+  - id: pc-06
+    use_case: where logic lives
+    question: What can the AI assistant do, and which services does it touch?
+    expected: >
+      genai-service exposes @Tool methods to the LLM (PetclinicTools): listOwners,
+      addOwnerToPetclinic, addPetToOwner, listVets. They call customers-service through AIDataProvider and
+      search vets in a vector store loaded from vets-service.
+    must_mention: [genai-service, "@Tool", list owners, add, customers-service, vector store]
+  - id: pc-07
+    use_case: blast radius
+    question: If I rename the Owner field telephone, what's affected?
+    expected: >
+      customers-service (the Owner entity, its owners table, the owner endpoints and their
+      request/response), api-gateway's OwnerDetails (it deserializes the owner), and
+      genai-service's owner DTOs and tools.
+    must_mention: [customers-service, Owner, api-gateway, OwnerDetails, genai-service]
+  - id: pc-08
+    use_case: interfaces
+    question: How does the gateway find vets-service at runtime?
+    expected: >
+      The route's uri is lb://vets-service: Spring Cloud LoadBalancer resolves the name through
+      Eureka (discovery-server, @EnableEurekaServer), where the services register as Eureka
+      clients (@EnableDiscoveryClient) under their spring.application.name.
+    must_mention: ["lb://vets-service", Eureka, discovery-server]
+  - id: pc-09
+    use_case: scheduled work
+    question: Is anything scheduled, or run automatically at startup?
+    expected: >
+      Nothing is scheduled. At startup, genai-service loads the vets (from vets-service) into its
+      vector store (VectorStoreController.loadVetDataToVectorStoreOnStartup, an @EventListener
+      on ApplicationStartedEvent).
+    must_mention: [nothing scheduled, genai-service, startup, vector store]
+  - id: pc-10
+    use_case: where logic lives
+    question: Where's the logic for adding a visit?
+    expected: >
+      visits-service: POST /owners/*/pets/{petId}/visits → VisitResource.create, which saves the
+      visit with VisitRepository (visits table).
+    must_mention: [visits-service, "POST", VisitResource, visits table]

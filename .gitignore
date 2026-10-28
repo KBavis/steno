@@ -27,3 +27,5 @@ facts.json
 scratch.cypher
 
 docs/my_docs/
+eval/workdir/
+eval/mcp-steno.json
