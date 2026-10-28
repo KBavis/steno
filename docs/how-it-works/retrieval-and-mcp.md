@@ -244,6 +244,8 @@ flowchart TD
 
 `get_node("organization")` is the organization (its spaces and how they communicate); a name several nodes share is answered with the most specific one plus `also_named`.
 
+**Route first; ask when it's ambiguous.** A question rarely names an application's ID: "what does the backend call?" Steno answers across the organization, so the agent first finds which application the question is about (`search` and its `where`, or `get_node`). When one clearly fits, it answers about that one. When several could (four applications are called "…backend"), it doesn't pick: it lists the candidates, each with a line on what it is, and asks which is meant. In testing, an agent asked "which external systems does the backend talk to?" chose `contextualized-backend` when the person meant budgeting-app's. The MCP server's instructions say this.
+
 **Why top-down matters at organization scale.** A word matches dozens of flows; a page of ten can show one application's and hide the rest. In testing, an agent asked which applications ingest data saw ten matches from Steno, missed contextualized's five, and answered "only steno". So `search` leads with `where`, every space and application with matches and how many, and its `results` take turns by application. Reading code before knowing which flow matters wastes the budget for the same reason: the graph already says which flow, step, and lines.
 
 **Reading an answer:**

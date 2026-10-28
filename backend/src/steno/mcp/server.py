@@ -31,6 +31,11 @@ mcp = MCPServer(
         "applications, the interfaces they expose and call, the flows that run when an "
         "interface, topic, or schedule triggers them, the data stores and topics they use, and "
         "the code behind each step.\n\n"
+        "Route the question first: find the application it's about with `search` (read "
+        '`where`) or `get_node`. When it could mean several ("the backend" when '
+        "`budget-app` and `contextualized-backend` both fit; `also_named` in `get_node`), "
+        "don't pick one: list the candidates, each with a line on what it is, and ask which "
+        "is meant. Answer directly only when one application clearly fits.\n\n"
         "Work top-down; an organization has thousands of flows, and no page shows them all:\n"
         "1. `search` with the words the code uses. Read `where` first: every space and "
         "application with matches, and how many. `results` shows only some; when several "
