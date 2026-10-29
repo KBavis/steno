@@ -188,7 +188,7 @@ Steno is the **map**: it answers *what and where* across the organization. The c
 |---|---|---|
 | 1. Facts | Flows, dependents, contracts (`get_interface`), completeness | Steno |
 | 2. Code | `view_flow_code`, `view_file`, `list_directory`, `search_code` in one repository, read from the git host | Steno serves, the agent reads |
-| 3. Clone | Only the sources an answer cited, at the cited commit, sparse when possible | The consumer, or the harness it runs in |
+| 3. Clone | Only the sources an answer cited, at the cited commit, sparse when possible | The consumer: locally, Steno's investigation plugin (D133, Proposed); remotely, the harness it runs in (SDLC layer) |
 
 **Clone when** the task edits code, builds, or runs tests; needs a toolchain (compiling, type checking, git history); needs more than a handful of files or wide exploration with no pointer; or concerns code newer than the ingested commit (`head_moved: true` and the change matters). **Don't clone** to find consumers or impact, to understand a flow, or to build a request when the contract has no gaps.
 
