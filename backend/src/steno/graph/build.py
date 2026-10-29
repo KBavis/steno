@@ -21,6 +21,7 @@ from fnmatch import fnmatch
 from typing import Any
 
 from steno.accounting import Ledger, short
+from steno.claims.types import route_target
 from steno.extraction.facts import (
     UNRESOLVED_TEXT,
     AppRef,
@@ -228,6 +229,10 @@ class _Builder:
         self.apps: dict[str, str] = {}  # module path → application node id
         self.app_triggers: dict[str, set[str]] = {}  # application node id → its flows' triggers
         self.app_keys: dict[str, str] = {}  # application node id → key for child IDs
+        # Every name this repository's own applications go by (canonical, aliases, including
+        # spring.application.name) → key, so an outbound call's bare host joins the same
+        # repository's endpoint instead of becoming a per-caller ExternalSystem
+        self.app_by_name: dict[str, str] = {}
         self.functions: dict[str, Function] = {f.symbol: f for f in r.functions()} if r else {}
         # Names of first-party functions: an unresolved call by one of these names may be a
         # flow step that's missing (D71)
@@ -322,6 +327,8 @@ class _Builder:
         )
         self.apps[m.path] = app
         self.app_keys[app] = key
+        for known in {name, *(identity.aliases if identity else [])}:
+            self.app_by_name[known] = key
         self.plan.edge("BUILT_FROM", app, module_node, **self._prov("structure"))
         if self.ctx.space_id:
             self.plan.edge("BELONGS_TO", app, self.ctx.space_id, **self._prov("structure"))
@@ -534,13 +541,20 @@ class _Builder:
         the class that makes it, named after that class and its file, and the call keeps its
         URL template (`{domain}/rest/api/content/{page_id}`). It's also listed as an unmet
         join for the coverage report. Which service that is stays unnamed for now."""
-        host, _ = split_url(ref.url)
+        host, path = split_url(ref.url)
         if host:
             system = next(
                 (s for s in self.http_systems if any(fnmatch(host, h) for h in s.hosts)), None
             )
             if system:  # the service's own host: one system, however many hosts it has
                 return self._external(host, system.name, prov, key=system.name)
+            # A bare service name (no dots, not localhost), same shape as a gateway's route
+            # target (D132): try it against the identity registry before assuming it's outside
+            # the organization. Unmatched, it falls back to an ExternalSystem keyed by host,
+            # same as today.
+            target = self._app_target(host, ref.method, path)
+            if target is not None:
+                return target
             return self._external(host, host, prov)
         fn = self.functions.get(caller or "")
         owner = fn.container if fn else caller or self.ctx.repo
@@ -578,6 +592,26 @@ class _Builder:
                 else "the host is runtime data"
             ),
         )
+
+    def _app_target(self, host: str, method: str, path: str) -> str | None:
+        """A bare host naming another module of *this same repository* (the shape a gateway
+        route's `uri` takes, D132's `route_target`): the exact `HttpEndpoint` that module's
+        own build already wrote, so `http://customers-service/owners/{id}` joins the same way
+        a gateway route does, instead of becoming a separate `ExternalSystem` per caller.
+
+        A lookup only, never a new node: every real endpoint in this repository is already in
+        `self.plan` by the time edges run (`run()` does every node, then every edge), so a
+        miss means no handler at that exact method and path, not a target still to come.
+
+        Cross-repository service names (each microservice its own git repository) aren't
+        resolved here: that needs identity read across ingestions, like Routing's claims
+        (reconcile), not this in-memory single-repository build. Left as None, same as today."""
+        name = route_target(host)
+        if name is None or name not in self.app_by_name:
+            return None
+        verb = method.upper()
+        eid = ids.http_endpoint_id(self.app_by_name[name], verb, path)
+        return eid if eid in self.plan.nodes else None
 
     def _fact_edge(self, e: EdgeFact) -> None:
         o = e.origin
