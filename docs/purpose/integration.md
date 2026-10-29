@@ -7,7 +7,7 @@ What Steno provides to other systems that build on it: project history tools lik
 > - **Planned IDs**: IDs come from natural keys, so a plan can name something before it exists and the link becomes real when the code lands.
 > - **Change history** per nightly run (`fact_change`), with commits mapped to PRs (later), so other systems can attribute changes.
 > - **Scopes** (organization, space, application) that other systems attach to.
-> - **MCP tools** with citations, as the read interface.
+> - **MCP tools** with citations, as the read interface, and the **sources** behind every answer, so a harness can fetch exactly the code a task needs.
 > - **Steno must work without any of them.** Contextualized supplies the *why*; Steno supplies the *what*.
 
 ---
@@ -23,6 +23,7 @@ What Steno provides to other systems that build on it: project history tools lik
 | **Commits → PRs** | Each run's commit range mapped to PRs (`job_commit`), so a change can be attributed | `v1` |
 | **Attribution hook** | `(:Project)-[:CHANGED {kind, pr, commit}]->(element)` edges on the facts a project changed, supplied by a project system as a witness | Designed; with the integration |
 | **Read interface** | MCP tools with citations and completeness | Built (5 tools); more planned |
+| **Sources to fetch** | Every answer that cites code lists its `sources`: repository, clone URL, branch, ingested commit, whether the branch has moved since (`head_moved`), cited folders, and why. A harness that clones for agents (built in the SDLC layer, not in Steno) uses it to fetch exactly what a task needs (D119). | Built |
 
 ## 2. Division of work with Contextualized (Decided, D11)
 

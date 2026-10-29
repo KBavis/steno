@@ -71,6 +71,10 @@ class Pack:
     # A source generated from the code (an OpenAPI spec built from controllers): its claims
     # never count as an independent witness
     generated: bool = False
+    # What's never worth a rule (D122): file globs and config key prefixes the coverage
+    # report doesn't list. Checked against the facets: nothing a facet reads belongs here
+    noise_files: list[str] = field(default_factory=list)
+    noise_config: list[str] = field(default_factory=list)
 
 
 def load_pack(path: Path) -> Pack:
@@ -110,6 +114,8 @@ def load_pack(path: Path) -> Pack:
         witness_type=_witness_type(meta, path),
         facets=list(meta.get("facets") or []),
         generated=bool(meta.get("generated", False)),
+        noise_files=[str(g) for g in (meta.get("noise") or {}).get("files") or []],
+        noise_config=[str(k) for k in (meta.get("noise") or {}).get("config") or []],
     )
 
 
@@ -137,7 +143,7 @@ def load_all_packs() -> list[Pack]:
     each folder in `rule_pack_dirs`, such as a clone of an organization's own packs repository.
     An extra folder may use the same layout (ecosystem → pack) or hold packs directly; its packs
     are `source: org` unless they say otherwise. A pack name found twice is an error, never a
-    silent override."""
+    silent override. Packs named in `disabled_packs` are left out."""
     settings = get_settings()
     packs = load_packs(settings.rule_packs_dir)
     for folder in settings.rule_pack_dirs:
@@ -154,7 +160,7 @@ def load_all_packs() -> list[Pack]:
         if pack.name in seen:
             raise ValueError(f"two packs named {pack.name}: {seen[pack.name]} and {pack.path}")
         seen[pack.name] = pack.path
-    return packs
+    return [p for p in packs if p.name not in settings.disabled_packs]
 
 
 # ------------------------------------------------------------- enabled_when

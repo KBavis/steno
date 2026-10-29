@@ -12,10 +12,10 @@ Two kinds of property don't count as a change:
   read at, so its citations stay exact.
 """
 
-import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from steno.graph import trace as trace_codec
 from steno.graph.build import POINTERS, SHARED, GraphPlan
 
 # Neo4j returns a node's `id` among its properties; the plan keeps it apart. Never compared,
@@ -33,7 +33,7 @@ VOLATILE = {
 NODE_POINTERS = {"file", *POINTERS, "entry_file", "entry_start_line", "entry_end_line"}
 # Written by later stages (cards), never part of a plan
 LATER = ("card",)
-TRACE_FIELDS = {"trace", "trace_files", "trace_symbols"}
+TRACE_FIELDS = {"trace", "trace_files", "trace_symbols", "trace_entries"}
 
 EdgeKey = tuple[str, str, str]
 
@@ -57,6 +57,8 @@ class Delta:
         default_factory=list
     )
     labels: dict[str, list[str]] = field(default_factory=dict)  # node id → labels
+    # Labels a node of this repository had and no longer has (a renamed role, a kind lost)
+    stale_labels: dict[str, list[str]] = field(default_factory=dict)
 
     def nodes_to_write(self) -> set[str]:
         return {nid for nid, _, after in self.nodes if after is not None}
@@ -90,9 +92,16 @@ def diff(plan: GraphPlan, existing: Existing) -> Delta:
             # A shared node another repository wrote first (a topic its producer and consumer
             # both name): the first writer keeps it, so two repositories don't take turns
             after = {**after, **{k: old[1][k] for k in OWNER if k in old[1]}}
+        stale = _stale_labels(nid, node.labels, old, existing)
+        if stale:
+            delta.stale_labels[nid] = stale
         if old is None:
             delta.nodes.append((nid, None, after))
-        elif _comparable(old[1]) != _comparable(after) or not set(node.labels) <= set(old[0]):
+        elif (
+            _comparable(old[1]) != _comparable(after)
+            or not set(node.labels) <= set(old[0])
+            or stale
+        ):
             delta.nodes.append((nid, old[1], after))
     for nid in sorted(existing.repo_nodes - set(plan.nodes)):
         labels, props = existing.nodes[nid]
@@ -122,6 +131,21 @@ OWNER = ("repo", "extracted_by")
 RECONCILE = "reconcile"
 
 
+def _stale_labels(
+    nid: str,
+    labels: list[str],
+    old: tuple[list[str], dict[str, Any]] | None,
+    existing: Existing,
+) -> list[str]:
+    """Labels to take off a node this repository owns: what it had and the plan doesn't. Not
+    on a shared node, which other repositories (or reconcile) may have labeled too."""
+    if old is None or nid not in existing.repo_nodes:
+        return []
+    if SHARED & set(labels) or SHARED & set(old[0]) or old[1].get("shared"):
+        return []
+    return [lbl for lbl in old[0] if lbl not in labels]
+
+
 def _owned_elsewhere(
     nid: str, labels: list[str], props: dict[str, Any], existing: Existing
 ) -> bool:
@@ -147,8 +171,8 @@ def _comparable(props: dict[str, Any]) -> dict[str, Any]:
         and k != IDENTITY
         and not k.startswith(LATER)
     }
-    if isinstance(out.get("trace"), str):
-        out["trace"] = [_strip_pointers(e) for e in json.loads(out["trace"])]
+    if out.get("trace") is not None:
+        out["trace"] = [_strip_pointers(e) for e in trace_codec.decode(out["trace"])]
     return out
 
 
@@ -247,8 +271,7 @@ def _trace_change(
 
 
 def _trace_of(props: dict[str, Any] | None) -> list[dict[str, Any]]:
-    raw = (props or {}).get("trace")
-    return json.loads(raw) if isinstance(raw, str) else []
+    return trace_codec.decode((props or {}).get("trace"))
 
 
 def _fn(entry: dict[str, Any]) -> str:

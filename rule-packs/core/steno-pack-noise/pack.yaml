@@ -1,0 +1,83 @@
+name: steno-pack-noise
+version: 0.1.0
+language: any
+source: core
+description: >-
+  What's never worth a rule in any organization (D122): images, docs, lock files, editor and
+  CI settings, styling, and framework settings that never wire anything. Checked against the
+  facets: SQL migrations, API contracts, schemas, deploy and catalog files are never listed here.
+enabled_when:
+  always: true
+noise:
+  files:
+    - "*.md"
+    - "*.txt"
+    - "*.rst"
+    - "*.adoc"
+    - "*.png"
+    - "*.jpg"
+    - "*.jpeg"
+    - "*.gif"
+    - "*.svg"
+    - "*.ico"
+    - "*.webp"
+    - "*.avif"
+    - "*.bmp"
+    - "*.mp3"
+    - "*.mp4"
+    - "*.webm"
+    - "*.pdf"
+    - "*.lock"
+    - "*.iml"
+    - "*.jar"
+    - "*.class"
+    - "*.pyc"
+    - "*.zip"
+    - "*.gz"
+    - "*.tar"
+    - "*.tgz"
+    - "*.ttf"
+    - "*.woff"
+    - "*.woff2"
+    - "*.eot"
+    - "*.map"
+    - "*.css"
+    - "*.scss"
+    - "*.less"
+    - "*.bat"
+    - "*.cmd"
+    - ".*"
+    - "LICENSE*"
+    - "NOTICE*"
+    - "gradlew"
+    - "mvnw"
+    - "Makefile"
+    - "Dockerfile"
+    - "Jenkinsfile"
+    - ".github/**"
+    - ".gitlab/**"
+    - ".idea/**"
+    - ".vscode/**"
+    - ".mvn/**"
+    - ".circleci/**"
+    - "gradle/wrapper/**"
+  config:
+    - logging
+    - management
+    - server
+    - info
+    - debug
+    - trace
+    - spring.main
+    - spring.jpa
+    - spring.jackson
+    - spring.mvc
+    - spring.output
+    - spring.devtools
+    - spring.profiles
+    - spring.servlet
+    - spring.thymeleaf
+    - spring.banner
+    - spring.lifecycle
+    - spring.web
+    - springdoc

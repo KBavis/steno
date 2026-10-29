@@ -1,0 +1,3 @@
+claims:
+  - route: { gateway: edge, id: orders, target: "http://orders:8080", path: "/shop/orders/**", methods: "GET,POST", rewrite: "/shop/(?<segment>.*), /${segment}", prefix: /v1, router: spring-cloud-gateway, line: 14 }
+  - route: { gateway: edge, id: orders, target: "http://orders:8080", path: "/shop/order-history/**", methods: "GET,POST", rewrite: "/shop/(?<segment>.*), /${segment}", prefix: /v1, router: spring-cloud-gateway, line: 14 }

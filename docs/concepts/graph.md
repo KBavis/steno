@@ -5,7 +5,7 @@ How Steno models an organization: three layers to zoom through, two kinds of nod
 > **In one minute**
 > - **Three layers:** Organization → Space → Application. Applications are ingested; spaces and the organization are rolled up from them.
 > - **Two kinds of nodes in one graph:** architecture nodes (what the software *does*: applications, interfaces, flows, steps, tables, data stores, external systems) and code nodes (how it's *built*: repositories, modules, files). Functions are neither: each flow stores the ordered list of functions it runs (its trace).
-> - **Search** covers the architecture nodes that carry cards (flows, applications, spaces, the organization, interfaces, entities, tables) plus function names inside traces, which lead back to their flow. Code nodes aren't searched; any node can still be opened by name with `get_node`.
+> - **Search** covers the searchable architecture nodes (flows, applications, spaces, the organization, interfaces, entities, tables, data stores, external systems, interceptors) plus function names inside traces, which lead back to their flow. Code nodes aren't searched; any node can still be opened by name with `get_node`.
 > - **Interfaces are nodes.** Two applications are connected when one sends to an interface the other receives on: a topic, an endpoint, a table. No one declares the connection; it falls out of shared keys.
 > - **A flow** is a trigger plus everything its entry function reaches, as ordered steps, with a trace of every function it runs.
 >
@@ -42,10 +42,10 @@ Organization
  └ Space  (can nest)
     ├ DataStore → Schema → Table, KafkaTopic / Queue
     ├ Application
-    │   ├ Interface, Entity, Schedule
+    │   ├ Interface, Entity, Schedule, Interceptor
     │   └ Flow  {trace: every function, in order}      architecture: what it DOES
     │      └ Step  {symbol, file, lines}
-    └ Repository ── Module (:Service ◀── BUILT_FROM ── Application)
+    └ Repository ── Module (:Deployable ◀── BUILT_FROM ── Application)
                      └ File                               code: how it's BUILT
 ```
 
@@ -53,11 +53,11 @@ Organization
 
 | | Architecture nodes | Code nodes |
 |---|---|---|
-| Kinds | Organization, Space, Application, Interface, Schedule, Flow, Step, Entity, DataStore, Table, ExternalSystem | Repository, Module, File |
+| Kinds | Organization, Space, Application, Interface, Schedule, Flow, Step, Entity, Interceptor, DataStore, Table, ExternalSystem | Repository, Module, File |
 | Answers | What exists, what it does, what it touches | Where the code lives and how it's organized |
-| Searched | Flows, applications, spaces, the organization, interfaces, entities, and tables (the nodes with cards). Not steps, schedules, data stores, or external systems. | Never directly |
+| Searched | Flows, applications, spaces, the organization, interfaces, entities, tables, data stores, external systems, and interceptors (D104, D116). Not steps or schedules. | Never directly |
 
-**What search covers, exactly.** Search looks at the names (and, later, cards) of the searchable architecture nodes, **plus function names inside every flow's trace**: searching `create_job` returns the flows that run it. Data stores and external systems are searchable too ("who calls Plaid?", D104). Code nodes aren't searched, and nor are steps or schedules, though any node can be opened by name or ID with `get_node`.
+**What search covers, exactly.** Search looks at the names (and, later, cards) of the searchable architecture nodes, **plus function names inside every flow's trace**: searching `create_job` returns the flows that run it. Data stores and external systems are searchable too ("who calls Plaid?", D104). Interceptors are searchable too ("which endpoints use the tenant filter?", D116). Code nodes aren't searched, and nor are steps or schedules, though any node can be opened by name or ID with `get_node`.
 
 **Functions are not nodes (D60).** The call graph is built in memory during each run and discarded. What survives is each flow's **trace**: the ordered list of functions it runs, with file and lines. A refactor that changes no behavior writes no graph nodes.
 
@@ -85,6 +85,10 @@ flowchart LR
 | **Shared key** | The topic name, the method and path, the channel, the table | The interface's stable ID |
 
 Two applications are connected exactly when their keys match. An organization's own messaging framework needs one sender rule and one receiver rule. The same pattern later joins a library to the services that depend on it (the artifact coordinate is the key) and a gateway route to the service behind it.
+
+**Contracts.** What an interface takes and returns is an `Entity` (the class, stored once) plus how this interface uses it (validated or not, which validation groups, wrapped how), so one class shared by two endpoints can carry two different contracts (D115).
+
+**Interceptors.** Code a framework runs around entry points (a JWT filter, a response wrapper, an error handler) is an `Interceptor` node. Applications activate it, by defining it or by turning on a shared library's, and it runs around the endpoints its scope covers (D116).
 
 **Stubs.** When a target isn't ingested yet, the sender points at a stub keyed by its natural key. When the owning application is ingested, the real node merges into the stub. An HTTP call whose host is runtime data is never merged with others: it goes to a stub per calling class, with its URL template (D64).
 
@@ -115,12 +119,13 @@ A flow is described at four levels:
 
 An application is still one node type, with **labels for its kinds**, worked out from the triggers of its flows (Decided). Labels aren't exclusive: a typical Spring service has endpoints, listeners, and a scheduled method.
 
-Decided (D85); not built yet (POC stage A).
+Decided (D85). **Built (2026-10-27):** `:Service` and `:Consumer` from the triggers of an application's flows, with the list in its `kinds` property; an in-code schedule is a trigger, not a kind; `:Job` waits for a PLATFORM witness (a CronJob), and `:Frontend` is `v2`. An application with no known trigger gets no kind, never a default, and is a coverage item (`no_trigger_application`).
 
 | Label | Means | Known from |
 |---|---|---|
 | `:Service` | Exposes HTTP or gRPC | Flows started by endpoints |
 | `:Consumer` | Reacts to messages | Flows started by topics or queues |
+| `:Gateway` | Routes requests to other applications | Its own route config (D132): `EXPOSES` `Route` nodes that `FORWARDS_TO` applications |
 | `:Job` | Runs to completion: starts, works, exits | CODE hints (web server off plus a `CommandLineRunner`, Spring Batch, a CLI framework), confirmed by PLATFORM (a CronJob, a scheduler entry) |
 | `:Frontend` | A UI | UI routes (`v2`) |
 

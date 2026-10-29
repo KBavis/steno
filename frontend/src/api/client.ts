@@ -248,6 +248,161 @@ export interface SearchHit {
 const q = (params: Record<string, string | boolean>) =>
   new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString()
 
+// ---------------------------------------------------------------- patterns and curation
+
+export type PatternState =
+  | 'open' | 'queued' | 'drafting' | 'proposed' | 'approved' | 'covered'
+  | 'rejected' | 'ignored' | 'blocked_vocabulary' | 'needs_person'
+
+export interface Pattern {
+  fingerprint: string
+  signal: string
+  label: string
+  repositories: number
+  applications: number
+  occurrences: number
+  score: number
+  state: PatternState
+  evidence?: string[]
+  note?: string
+}
+
+export interface PatternGroup {
+  owner: string | null
+  score: number
+  patterns: Pattern[]
+}
+
+export interface PatternsResponse {
+  state: PatternState
+  patterns: number
+  frameworks: PatternGroup[]
+  more: number
+}
+
+export interface CurationRun {
+  id: number
+  status: 'queued' | 'running' | 'succeeded' | 'failed'
+  trigger: string
+  drafter: string
+  model: string | null
+  budget_usd: number | null
+  spent_usd: number
+  started_at: string
+  finished_at: string | null
+  stats: Record<string, unknown>
+  error: string | null
+}
+
+export interface CurationInfo {
+  drafter: string
+  model: string // the default
+  models: { id: string; name: string }[]
+  effort: string
+  max_turns: number
+  max_usd_per_pattern: number
+  budget_usd: number
+  open_patterns: number
+  spent_total_usd: number
+  searches: number
+  runs: CurationRun[]
+}
+
+export interface CurationEstimate {
+  model: string
+  patterns: number
+  frameworks: number
+  worst_usd: number
+  budget_usd: number
+  pilot: number
+  history: number // past drafts with this model
+  mean_usd?: number
+  p90_usd?: number
+  expected_usd?: number // with enough history
+  high_usd?: number
+}
+
+export type ProposalKind = 'rule' | 'enable_pack' | 'ignore' | 'vocabulary'
+export type ProposalStatus = 'drafting' | 'ready' | 'approved' | 'rejected' | 'superseded' | 'needs_person' | 'failed'
+
+export interface ProposalSummary {
+  id: number
+  run_id: number | null
+  kind: ProposalKind
+  status: ProposalStatus
+  title: string // the pattern it was drafted for
+  name: string | null // its name, title case
+  summary: string
+  fingerprints: string[]
+  owner: string | null
+  facet: string | null
+  target_pack: string | null
+  cases: number
+  cases_passed: number
+  drafter: string | null
+  cost_usd: number
+  turns: number
+  created_at: string
+  reviewed_at: string | null
+  link: string | null // an approved rule's pull request
+}
+
+export interface ProposalCase {
+  files?: Record<string, string>
+  expected?: Record<string, unknown[]>
+}
+
+export interface CaseResult {
+  case: string
+  passed: boolean
+  missing: Record<string, unknown[]>
+  unexpected: Record<string, unknown[]>
+  errors: string[]
+}
+
+export interface PublishInfo {
+  destination?: string
+  repository?: string
+  mode?: 'pr' | 'push'
+  branch?: string
+  base?: string
+  created_pack?: boolean
+  commit?: string
+  path?: string // the pack's folder in the repository
+  pr_url?: string | null
+  compare_url?: string | null
+  error?: string
+}
+
+/** What Steno found running a drafted rule where its pattern really occurs */
+export interface RuleChecks {
+  files: number
+  explained: string[]
+  missed: { where: string; url: string | null }[]
+  names: string[] // application names its claims would create
+  generic: string[]
+  taken: { name: string; by: string; repository: string }[]
+  errors: string[]
+}
+
+export interface Proposal extends ProposalSummary {
+  publish: PublishInfo | null
+  ignore_names: string[] // an ignore of unread files covers only these names
+  checks: RuleChecks | null
+  rule_id: string | null
+  pack_exists: boolean
+  rule: string | null
+  tests: Record<string, ProposalCase>
+  proof: { cases?: CaseResult[] }
+  samples: { repository: string; file: string; line: number | null; function: string | null; url: string | null }[]
+  pack: Record<string, unknown> | null
+  flags: string[]
+  comment: string | null
+  reviewed_by: string | null
+  reviewed_at: string | null
+  commit_sha: string | null
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
     ...init,
@@ -315,6 +470,29 @@ export const api = {
     report: (scope = 'org') => request<CoverageReport>(`/coverage?${q({ scope })}`),
     triage: (kind: string, target: string, status: CoverageStatus) =>
       request<{ updated: number }>('/coverage/triage', { method: 'PUT', body: JSON.stringify({ kind, target, status }) }),
+  },
+  patterns: {
+    list: (state: PatternState = 'open', limit = 100) =>
+      request<PatternsResponse>(`/patterns?${q({ state, limit: String(limit) })}`),
+    triage: (fingerprints: string[], state: 'ignored' | 'open', note?: string) =>
+      request<{ updated: number }>('/patterns/triage', { method: 'PUT', body: JSON.stringify({ fingerprints, state, note }) }),
+  },
+  curation: {
+    info: () => request<CurationInfo>('/curation'),
+    start: (opts: { model?: string; limit?: number; fingerprints?: string[]; budget_usd?: number } = {}) =>
+      request<CurationRun>('/curation/runs', { method: 'POST', body: JSON.stringify(opts) }),
+    proposals: (status?: ProposalStatus) => request<ProposalSummary[]>(`/proposals${status ? `?${q({ status })}` : ''}`),
+    estimate: (model: string) => request<CurationEstimate>(`/curation/estimate?${q({ model })}`),
+    approveMany: (ids: number[]) =>
+      request<{ id: number; ok: boolean; error?: string }[]>('/proposals/approve', { method: 'POST', body: JSON.stringify({ ids }) }),
+    rejectMany: (ids: number[], why: string) =>
+      request<{ id: number; ok: boolean; error?: string }[]>('/proposals/reject', { method: 'POST', body: JSON.stringify({ ids, why }) }),
+    ofRun: (runId: number) => request<ProposalSummary[]>(`/proposals?${q({ run_id: String(runId) })}`),
+    proposal: (id: number) => request<Proposal>(`/proposals/${id}`),
+    approve: (id: number) =>
+      request<{ proposal: ProposalSummary } & PublishInfo>(`/proposals/${id}/approve`, { method: 'POST', body: JSON.stringify({}) }),
+    reject: (id: number, why: string) =>
+      request<ProposalSummary>(`/proposals/${id}/reject`, { method: 'POST', body: JSON.stringify({ why }) }),
   },
   createJob: (repository_id: number, mode: JobMode) =>
     request<Job>('/jobs', { method: 'POST', body: JSON.stringify({ repository_id, mode }) }),

@@ -69,6 +69,7 @@ A claim has a fixed shape. Its **type** comes from a small set owned by Steno, l
 | Components | `deployable` | `application`, `kind?`, `display_name?` | An application with the name exists; else a stub | Evidence (existence) | Stubs and display names |
 | Components | `name` | `application`, `name`, `slot` (`admin`, `deploy`, `manifest`, `build_artifact`, `runtime`, `path`) | Feeds the name ladder in identify | Authority | Through identify |
 | Schedules | `schedule` | `application`, `cron` or `every`, `command?` | An in-code schedule in the application | Evidence | Not yet |
+| Routing | `route` | `path`, `target`, `gateway?`, `id?`, `methods?`, `strip_prefix?`, `rewrite?`, `prefix?`, `router?` | A gateway's route rule (D132): requests on `path` go to `target` after the rewrite. **Stored even from CODE** (a gateway's own config), because reconcile writes it into the graph: `Route` nodes and `FORWARDS_TO` the target application across repositories. A `${…}` in `rewrite` is the gateway's own syntax, not a placeholder | Evidence | No (one witness so far) |
 
 **A permission isn't a use.** An ACL says an application *may* consume; code says it *does*. That's why the claims are `may_produce` and `may_consume`, and why each mismatch means something different: `declared only` is an unused or stale grant, an application not ingested, or a missed listener; `code only` is a use nothing grants.
 
@@ -113,6 +114,7 @@ emit:
 | `$.field.sub` | A field of the record; `$.list[*]` fans out: one claim per entry |
 | `$.@key` | The mapping key the record was found under (`payment.settled`) |
 | `$doc.field` | A field of the record's document |
+| `{from: $.filters, regex: "^StripPrefix=(\\d+)$"}` | The values of `from` that match the regex, as its first group; `split: ","` then splits each into several (one claim per part). For list entries written as strings (`Path=/api/vet/**`) |
 | `when` | Equals a value, `contains`, `in`, `not_in`, `matches` (a regex), or `exists: true/false` |
 
 - **Every claim cites its line:** the line of the value it came from, so a fanned-out claim cites its own list entry. Key-based config matches cite their line too.
@@ -120,7 +122,7 @@ emit:
 - **Tests:** an `expected.yaml` lists the `claims:` a case must produce (fields, plus `line` and `witness_type` when listed).
 - **Generated sources** (an OpenAPI spec built from the code): `generated: true` in `pack.yaml`; their claims are stored but never count as a second witness.
 - **Secrets** are skipped as in every config rule.
-- **Core packs today:** `kafka/steno-pack-strimzi` (PLATFORM: `KafkaTopic`, `KafkaUser` ACLs), `catalog/steno-pack-backstage` (DECLARED: `catalog-info.yaml` Components), and `spring-application-name` in the Spring Boot pack (CODE name). Organization-specific formats (an XLD repository's custom types, `component_manifest.yaml`) are org packs.
+- **Core packs today:** `kafka/steno-pack-strimzi` (PLATFORM: `KafkaTopic`, `KafkaUser` ACLs), `catalog/steno-pack-backstage` (DECLARED: `catalog-info.yaml` Components), `spring-application-name` in the Spring Boot pack (CODE name), and `java/steno-pack-spring-cloud-gateway` (CODE `route` claims from a gateway's YAML, D132). Organization-specific formats (an XLD repository's custom types, `component_manifest.yaml`) are org packs.
 
 ## 5. The claim store
 

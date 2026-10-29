@@ -108,3 +108,21 @@ def test_a_shared_node_another_repository_wrote_first_stays_with_it():
     second.nodes[topic].props["partitions"] = 6
     ((_, _, after),) = diff(second, graph).nodes
     assert (after["repo"], after["partitions"]) == ("payments", 6)
+
+
+def test_a_label_the_node_no_longer_has_is_removed_but_not_from_a_shared_node():
+    # A renamed role (Module :Service → :Deployable) mustn't leave the old label behind
+    before = _plan()
+    before.node("module:demo:.", ["Module", "Service"], path=".", repo="demo")
+    graph = _graph_holding(before)
+    # Another repository labeled the shared table too
+    graph.nodes["table:s::t"] = (["Table", "Searchable", "Audited"], graph.nodes["table:s::t"][1])
+
+    now = _plan()
+    now.node("module:demo:.", ["Module", "Deployable"], path=".", repo="demo")
+    delta = diff(now, graph)
+    assert delta.stale_labels == {"module:demo:.": ["Service"]}
+    assert "module:demo:." in delta.nodes_to_write()
+
+    # Unchanged labels: nothing to rewrite
+    assert diff(before, _graph_holding(before)).stale_labels == {}

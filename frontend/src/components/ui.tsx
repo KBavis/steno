@@ -83,12 +83,15 @@ export function Drawer({
   onClose,
   footer,
   children,
+  wide,
 }: {
   title: string
   description?: ReactNode
   onClose: () => void
   footer: ReactNode
   children: ReactNode
+  /** Room for code: a rule and its test cases */
+  wide?: boolean
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
@@ -99,7 +102,7 @@ export function Drawer({
   return (
     <>
       <div className="drawer-backdrop" onClick={onClose} />
-      <aside className="drawer" role="dialog" aria-label={title}>
+      <aside className={wide ? 'drawer drawer-wide' : 'drawer'} role="dialog" aria-label={title}>
         <div className="drawer-header">
           <div>
             <h2>{title}</h2>

@@ -4,7 +4,6 @@ library types Steno can't see stop visibly instead of silently.
 
 Needs the JVM helper (`make resolver`); skipped without it."""
 
-import json
 import shutil
 from pathlib import Path
 from textwrap import dedent
@@ -15,8 +14,9 @@ from steno.config import get_settings
 from steno.coverage.collect import collect
 from steno.graph.build import Context, build
 from steno.graph.structure import detect
+from steno.graph.trace import decode as decode_trace
 from steno.ingestion.local import run_folder
-from steno.resolvers.java import JavaResolver, _literal, library_of
+from steno.resolvers.java import JavaResolver, _literal, compare_batched, library_of
 from steno.rule_packs.packs import Pack, Rule, declared_dependencies
 
 pytestmark = pytest.mark.skipif(
@@ -232,7 +232,7 @@ def test_functions_are_symbols_with_parameter_types(engine) -> None:  # type: ig
 
 def test_flow_follows_interfaces_lombok_and_streams(engine, repo: Path) -> None:  # type: ignore[no-untyped-def]
     flow = _flow(engine, repo)
-    trace = json.loads(flow["trace"])
+    trace = decode_trace(flow["trace"])
     assert [t["symbol"] for t in trace] == [
         "com.x.web.OrderController#create(java.lang.String)",
         # One implementation of the interface: DI can only inject that one
@@ -260,7 +260,7 @@ def test_effects_and_config_values(engine, repo: Path) -> None:  # type: ignore[
 
 def test_library_chain_stops_visibly(engine, repo: Path) -> None:  # type: ignore[no-untyped-def]
     flow = _flow(engine, repo)
-    place = json.loads(flow["trace"])[1]
+    place = decode_trace(flow["trace"])[1]
     stops = place.get("unresolved", [])
     # web.post() is a WebClient call (I/O-capable, D101) and no rule in this pack explains
     # it, so it's the stop; the builder calls after it are code detail, not listed
@@ -316,3 +316,13 @@ def test_missing_helper_is_an_error_not_a_crash(
     r = JavaResolver(repo)
     assert list(r.functions()) == []
     assert "Java resolver unavailable" in r.errors[0][1]
+    # A job stops at parse instead of writing hollow flows over good ones
+    assert r.failed and "Java resolver unavailable" in r.failed
+
+
+def test_batched_resolution_matches_one_pass(repo: Path) -> None:
+    """Resolving method bodies a file at a time against a declaration index gives the same
+    answers as one pass over everything (D127)."""
+    out = compare_batched(repo, batch_files=1)
+    assert out["differences"] == []
+    assert out["batched"]["batches"] == out["files"]

@@ -10,9 +10,14 @@ Items are keyed by (kind, target), so the same gap in another run, or another re
 is the same item: that's how triage carries over and how the org-wide report adds up (D62).
 """
 
+import re
+import time
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
+from fnmatch import fnmatch
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from steno.accounting import Ledger
@@ -21,6 +26,7 @@ from steno.graph.build import GraphPlan
 from steno.resolvers.base import Function, Resolvers
 from steno.rule_packs.packs import Pack
 from steno.rule_packs.versions import Dependency, in_range, versions_of
+from steno.source.files import is_test_file
 
 SAMPLES = 5
 
@@ -55,12 +61,26 @@ class Item:
     occurrences: int = 0
     samples: list[dict[str, Any]] = field(default_factory=list)
     applications: dict[str, int] = field(default_factory=dict)  # application → occurrences
+    # Every place it occurs: (file, enclosing symbol, application). The symbol, not the line,
+    # so an edit that moves lines isn't new code (D121)
+    keys: set[tuple[str, str, str]] = field(default_factory=set)
+    # Why it may matter beyond its reach (D122), e.g. "referenced_by_code"
+    evidence: set[str] = field(default_factory=set)
+    # Config values seen (unread config), for evidence that they name things in the graph
+    values: set[str] = field(default_factory=set)
+
+    @property
+    def fingerprint(self) -> str:
+        """What it is, across the organization: the pattern it belongs to (D121)."""
+        return f"{self.signal}:{self.target}"
 
     def add(self, sample: dict[str, Any]) -> None:
         self.occurrences += 1
         app = sample.get("application")
         if app:
             self.applications[app] = self.applications.get(app, 0) + 1
+        symbol = sample.get("function") or sample.get("detail") or ""
+        self.keys.add((sample.get("file") or "", str(symbol), app or ""))
         if len(self.samples) < SAMPLES:
             self.samples.append(sample)
 
@@ -70,6 +90,22 @@ class Report:
     items: list[Item]
     # Completeness numbers for the repository (D62)
     metrics: dict[str, Any]
+
+
+# Source code in a language no pack reads: one pattern per language, wherever it sits
+CODE_SUFFIXES = {
+    ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".vue", ".go", ".kt", ".kts", ".scala", ".rb",
+    ".cs", ".php", ".rs", ".swift", ".c", ".cc", ".cpp", ".h", ".hpp", ".m", ".dart", ".ex",
+    ".exs", ".clj", ".groovy", ".py", ".java",
+}  # fmt: skip
+NOISE_DIRS = {".github", ".gitlab", ".idea", ".vscode", ".mvn", "gradle", ".circleci"}
+NOISE_NAMES = {"LICENSE", "NOTICE", "gradlew", "mvnw", "Makefile", "Dockerfile", "Jenkinsfile"}
+# Build files: read for dependencies and versions, not by rules
+BUILD_NAMES = {
+    "pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts",
+    "gradle.properties", "libs.versions.toml", "pyproject.toml", "setup.py", "setup.cfg",
+    "requirements.txt", "package.json",
+}  # fmt: skip
 
 
 def collect(
@@ -82,6 +118,12 @@ def collect(
     deps: list[Dependency] | None = None,
     disagreements: list[dict[str, Any]] | None = None,
     unmatched: list[dict[str, Any]] | None = None,
+    files: list[str] | None = None,
+    read: set[str] | None = None,
+    root: Path | None = None,
+    config_used: set[str] | None = None,
+    in_library: Callable[[str], bool] | None = None,
+    ignored_files: set[tuple[str, str]] | None = None,
 ) -> Report:
     """`app_of`: the application a file belongs to (its service module's), so items and
     numbers can be shown per application, not just per repository. `enabled`: the packs that
@@ -99,19 +141,49 @@ def collect(
             items[key] = _Tagged(kind, signal, target, label)
         return items[key]
 
-    _unknown_hosts(plan, resolver, item)
-    _inferred(plan, item)
-    _unreachable(plan, resolver, item)
-    _dropped(x, item)
-    _unparsed(x, item)
+    # Seconds per step, in the stage's metrics: what to make faster on a large repository
+    timings: dict[str, float] = {}
+
+    @contextmanager
+    def timed(name: str) -> Iterator[None]:
+        started = time.perf_counter()
+        yield
+        timings[name] = round(time.perf_counter() - started, 2)
+
+    with timed("entries"):
+        _unknown_hosts(plan, resolver, item)
+        _inferred(plan, item)
+        _kindless(plan, item)
+        _unreachable(plan, resolver, item)
+        _dropped(x, item)
+        _unparsed(x, item)
     no_io: dict[str, Any] = {"total": 0, "explained": 0, "by_app": {}}
-    io = _external_calls(x, resolver, all_packs, item, where, plan.ledger) if resolver else no_io
-    _hooks(plan, item)
-    _config(x, item)
-    if resolver:
-        _libraries(resolver, all_packs, items, item)
-    _versions(enabled or [], deps or [], item)
-    _agreement(disagreements or [], unmatched or [], item)
+    with timed("external_calls"):
+        io = (
+            _external_calls(x, resolver, all_packs, item, where, plan.ledger) if resolver else no_io
+        )
+    with timed("hooks_config_libraries"):
+        _hooks(plan, item)
+        _config(x, item)
+        if resolver:
+            _libraries(resolver, all_packs, items, item)
+        _versions(enabled or [], deps or [], item)
+        _agreement(disagreements or [], unmatched or [], item)
+    if files is not None:
+        noise = [g for p in all_packs for g in p.noise_files]
+        with timed("unread_files"):
+            _unread_files(files, read or set(), item, where, noise, ignored_files)
+        with timed("referenced"):
+            _referenced(items, root, read or set())
+    if config_used is not None:
+        prefixes = [k for p in all_packs for k in p.noise_config]
+        with timed("unread_config"):
+            _unread_config(x, config_used, prefixes, item, where)
+    with timed("names_known"):
+        _names_known(items, plan, root)
+    if in_library is not None:
+        with timed("in_library"):
+            _in_library(items, in_library)
     gaps = _unresolved_types(resolver) if resolver else 0
 
     stats = plan.stats
@@ -138,6 +210,7 @@ def collect(
     return Report(
         ranked,
         {
+            "timings": timings,
             "functions": total,
             "functions_reachable": reachable,
             "reachable_pct": round(100 * reachable / total, 1) if total else None,
@@ -202,6 +275,17 @@ def _unknown_hosts(plan: GraphPlan, r: Resolvers | None, item: Any) -> None:
                 "detail": u.get("url"),
             }
         )
+
+
+def _kindless(plan: GraphPlan, item: Any) -> None:
+    """Applications none of whose flows has a known trigger (D85): no kind is guessed. A rule
+    for whatever starts it (a framework's annotation, a listener) gives it one."""
+    for a in plan.stats.get("applications_without_kind", []):
+        item("unreachable", "no_trigger_application", a["id"],
+             f"No known trigger · {a['application']}").add(
+            {"file": "", "function": "", "application": a["application"],
+             "detail": "nothing found starts its flows, so its kind is unknown"}
+        )  # fmt: skip
 
 
 def _inferred(plan: GraphPlan, item: Any) -> None:
@@ -331,6 +415,188 @@ def _libraries(r: Resolvers, packs: list[Pack], items: dict[Any, Item], item: An
         it = item("library", "library", lib, lib)
         for f in sorted(where):
             it.add({"file": f, "detail": f"imports {lib}"})
+
+
+def _unread_files(
+    files: list[str],
+    read: set[str],
+    item: Any,
+    where: Callable[[str | None], str],
+    noise: list[str] | None = None,
+    ignored: set[tuple[str, str]] | None = None,
+) -> None:
+    """Files no rule looked at (D122), grouped by extension and where they sit, so 40
+    repositories' `*.xyz under resources/flows/` is one pattern. Noise and build files aren't
+    listed, nor file names someone ignored within their pattern (`ignored`: fingerprint and
+    name); everything else is, ranked low until something says it matters."""
+    for rel in files:
+        if rel in read:
+            continue
+        p = PurePosixPath(rel)
+        if p.name in BUILD_NAMES or is_test_file(Path(rel)) or is_noise(rel, noise or []):
+            continue
+        kind = p.suffix.lower() or p.name
+        if kind in CODE_SUFFIXES:
+            target, label = f"{kind}@*", f"Code in a language no pack reads · *{kind}"
+        else:
+            place = convention(rel)
+            target = f"{kind}@{place}"
+            label = (
+                f"Unread files · *{kind} under {place}"
+                if p.suffix
+                else f"Unread · {p.name} in {place}"
+            )
+        if ignored and (f"unread_file:{target}", p.name) in ignored:
+            continue
+        item("config", "unread_file", target, label).add(
+            {"file": rel, "function": "", "application": where(rel)}
+        )
+
+
+FILE_TOKEN = re.compile(r"[\w][\w.-]*")  # a file name, as code writes it in a path or string
+
+
+def _referenced(items: dict[Any, Item], root: Path | None, read: set[str]) -> None:
+    """An unread file whose name the code mentions (`getResource("flows/order.xyz")`) is
+    probably wiring, not noise: evidence that ranks its pattern higher (D122)."""
+    unread = [i for (_, _), i in items.items() if i.signal == "unread_file"]
+    if root is None or not unread:
+        return
+    names: dict[str, list[Item]] = defaultdict(list)
+    for it in unread:
+        for file, _, _ in it.keys:
+            name = PurePosixPath(file).name
+            if len(name) > 4:  # too short to tell apart from ordinary words
+                names[name].append(it)
+    # Each file is read once and its file-name-shaped tokens looked up, so the cost follows
+    # the size of the code, not names × code (one alternation of every name took 134 s on
+    # Keycloak). A whole token must match: `myorder.xyz` doesn't mention `order.xyz`.
+    for rel in sorted(read):
+        if not names:
+            return
+        if PurePosixPath(rel).suffix not in CODE_SUFFIXES:
+            continue
+        try:
+            text = (root / rel).read_text(errors="replace")
+        except OSError:
+            continue
+        for token in set(FILE_TOKEN.findall(text)) & names.keys():
+            for it in names.pop(token):
+                it.evidence.add("referenced_by_code")
+
+
+def _unread_config(
+    x: Extraction,
+    used: set[str],
+    noise: list[str],
+    item: Any,
+    where: Callable[[str | None], str],
+) -> None:
+    """Config keys set in the repository that nothing read (D122): no rule stated a fact from
+    them and no `${placeholder}` or settings lookup used them. Grouped by prefix
+    (`acme.messaging.*`), so one framework's settings are one pattern. Noise prefixes from the
+    packs (`logging`, `management`, …) aren't listed."""
+    for clue in x.clues:
+        key = clue.fields.get("key") if clue.kind == "property" else None
+        if not isinstance(key, str) or key in used or _under(key, noise):
+            continue
+        prefix = config_prefix(key)
+        it = item("config", "unread_config", prefix, f"Config no rule read · {prefix}.*")
+        it.add({"file": clue.origin.file, "function": key, "line": clue.origin.line,
+                "detail": key, "application": where(clue.origin.file)})  # fmt: skip
+        value = clue.fields.get("value")
+        if isinstance(value, str):
+            it.values.add(value)
+
+
+MAX_READ = 512 * 1024  # bytes of an unread file looked at for names
+FILES_PER_ITEM = 50
+
+
+def known_names(plan: GraphPlan) -> set[str]:
+    """Names in this run's graph worth recognizing elsewhere: topics, queues, and org channels,
+    endpoint paths (their constant part), tables, and applications. Short plain words are left
+    out, so ordinary words don't count."""
+    out: set[str] = set()
+    for node in plan.nodes.values():
+        labels = set(node.labels)
+        if "HttpEndpoint" in labels:
+            path = str(node.props.get("path") or "").split("{", 1)[0].rstrip("/")
+            name = path if path.count("/") >= 2 else ""
+        elif labels & {"Table", "Application"} or (
+            "Interface" in labels and "GrpcMethod" not in labels
+        ):
+            name = str(node.props.get("name") or "")
+        else:
+            continue
+        # A plain short word (`users`, `orders`) is too ordinary to be evidence of anything
+        if len(name) >= 8 or (len(name) >= 5 and re.search(r"[._/-]", name)):
+            out.add(name)
+    return out
+
+
+def _names_known(items: dict[Any, Item], plan: GraphPlan, root: Path | None) -> None:
+    """An unread file or config value that names a topic, endpoint, table, or application
+    already in the graph is probably wiring (D122): evidence that ranks it higher."""
+    unread = [i for i in items.values() if i.signal in ("unread_file", "unread_config")]
+    names = known_names(plan)
+    if not unread or not names:
+        return
+    pattern = re.compile(
+        r"(?<![\w.-])(?:"
+        + "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
+        + r")(?![\w-]|\.\w)"  # `orders.created.v2` is another name
+    )
+    for it in unread:
+        texts = list(it.values)
+        if it.signal == "unread_file" and root is not None:
+            for file, _, _ in sorted(it.keys)[:FILES_PER_ITEM]:
+                try:
+                    with (root / file).open("rb") as fh:
+                        texts.append(fh.read(MAX_READ).decode(errors="replace"))
+                except OSError:
+                    continue
+        if any(pattern.search(t) for t in texts):
+            it.evidence.add("names_known_things")
+
+
+def _in_library(items: dict[Any, Item], in_library: Callable[[str], bool]) -> None:
+    """A pattern that occurs inside one of the organization's own library modules is likely
+    part of an internal framework (D122): evidence that ranks it higher."""
+    for it in items.values():
+        if any(file and in_library(file) for file, _, _ in it.keys):
+            it.evidence.add("in_internal_library")
+
+
+def config_prefix(key: str) -> str:
+    """`acme.messaging.topics.orders` → `acme.messaging`; a one-segment key is its own."""
+    parts = key.split(".")
+    return ".".join(parts[:2]) if len(parts) > 1 else key
+
+
+def _under(key: str, prefixes: list[str]) -> bool:
+    return any(key == p or key.startswith(p + ".") for p in prefixes)
+
+
+def is_noise(rel: str, globs: list[str]) -> bool:
+    """Whether a file matches a noise glob (from the packs' `noise.files`), by its name or by
+    its path from any folder down (`.github/**` matches `svc/.github/ci.yml`)."""
+    parts = PurePosixPath(rel).parts
+    tails = ["/".join(parts[i:]) for i in range(len(parts))]
+    return any(fnmatch(t, g) for g in globs for t in tails)
+
+
+def convention(rel: str) -> str:
+    """Where a file sits, as a convention shared across repositories: the folders after
+    `src/main/` or `src/` (`resources/flows/`), else its parent folder's name."""
+    parts = PurePosixPath(rel).parts[:-1]
+    for marker in (("src", "main"), ("src",)):
+        n = len(marker)
+        for i in range(len(parts) - n + 1):
+            if tuple(parts[i : i + n]) == marker:
+                rest = parts[i + n :]
+                return "/".join(rest) + "/" if rest else "/"
+    return (parts[-1] + "/") if parts else "/"
 
 
 def _agreement(

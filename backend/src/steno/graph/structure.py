@@ -2,9 +2,10 @@
 
 docs/how-it-works/graph-reference.md §3, Module roles. A Module is the ecosystem's build unit
 (a Python
-project, an npm package, a Maven/Gradle module); a `:Service` module produces a deployable
-and gets an Application. Phase 1 detection (Proposed; docs/plan/decisions.md lists the signals as
-Open): a module is a Service when rules found entry points in it.
+project, an npm package, a Maven/Gradle module); a `:Deployable` module produces a deployable
+and gets an Application (the role was `:Service` until 2026-10-27, renamed so it doesn't collide
+with the Application kind, D85). Phase 1 detection (Proposed; docs/plan/decisions.md lists the
+signals as Open): a module is Deployable when rules found entry points in it.
 """
 
 from dataclasses import dataclass, field
@@ -71,5 +72,5 @@ def detect(repo: Path, entry_files: set[str]) -> Structure:
     for f in entry_files:
         m = structure.module_of(f)
         if m is not None:
-            m.roles.add("Service")
+            m.roles.add("Deployable")
     return structure

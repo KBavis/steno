@@ -36,6 +36,18 @@ class Settings(BaseSettings):
             return [Path(p.strip()).expanduser() for p in value.split(",") if p.strip()]
         return value
 
+    # Packs Steno acts as if it didn't have, everywhere (ingestion, and the drafter's tools):
+    # for measuring rule curation against a pack we wrote (rule-curation §10).
+    # STENO_DISABLED_PACKS: pack names separated by commas
+    disabled_packs: Annotated[list[str], NoDecode] = []
+
+    @field_validator("disabled_packs", mode="before")
+    @classmethod
+    def _split_names(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [n.strip() for n in value.split(",") if n.strip()]
+        return value
+
     # The JVM helper for Java symbol resolution (D69): `make resolver` builds it here
     resolver_jvm_dir: Path = (
         Path(__file__).resolve().parents[3]
@@ -48,12 +60,61 @@ class Settings(BaseSettings):
     # The JVM helper's heap ceiling per job: what a Java repository can cost in memory
     resolver_jvm_max_heap: str = "2g"
     resolver_jvm_timeout: int = 1800  # seconds per repository
+    # Resolve method bodies this many files at a time against a declaration index of the whole
+    # repository, so memory stays bounded (D127); 0 resolves everything in one pass
+    resolver_jvm_batch_files: int = 0
+    # A repository with more Java files than this resolves in batches from its first run: one
+    # pass ran a 5,500-file repository out of memory at a 2 GB heap (D127)
+    resolver_jvm_batch_above_files: int = 3000
 
-    # Ingestion jobs running at once, across every worker process and machine. Each job holds
-    # a clone and, for Java, a JVM: this is what bounds memory and disk (docs: storage.md)
-    max_parallel_jobs: int = 4
-    # Worker processes `steno worker` starts (each runs one job at a time)
-    worker_processes: int = 2
+    # Rule curation (D120, D130): which provider drafts rules, and the caps on each pattern.
+    # claude_agent_sdk uses this machine's Claude Code login, or ANTHROPIC_API_KEY when set
+    rule_drafter: str = "claude_agent_sdk"  # claude_agent_sdk | openai | gemini | azure_openai
+    rule_drafter_model: str = "claude-opus-5-5"  # the default; a search can pick another
+    # The models a search may choose from, as model id → name shown in the UI
+    rule_drafter_models: dict[str, str] = {
+        "claude-opus-5-5": "Claude Opus 5.5",
+        "claude-sonnet-5-5": "Claude Sonnet 5.5",
+        "claude-haiku-5-5": "Claude Haiku 5.5",
+    }
+    rule_drafter_effort: str = "high"
+    rule_drafter_max_turns: int = 30
+    rule_drafter_max_usd: float = 2.0  # per pattern
+    curation_budget_usd: float = 10.0  # per run
+    # Patterns of one run drafted at once, across every worker (each worker process drafts one
+    # at a time); a claim not finished within the timeout (a worker died) is drafted again
+    curation_parallel: int = 4
+    # The cost check (§9): a search whose projection passes its limit, or with no history to
+    # project from, is confirmed first, and can start as a pilot of this many patterns
+    curation_pilot: int = 10
+    rule_drafter_timeout_min: int = 30
+    # Times a draft goes back to the drafter with what Steno's checks found (recall, identity)
+    rule_drafter_revisions: int = 1
+    # Publishing approved rules (D131): `pr` collects them on one `steno/rules` branch with one
+    # open pull request per destination; `push` commits straight to the default branch
+    rules_publish_core: str = "pr"  # Steno's own rule-packs/ (rules for public libraries)
+    rules_publish_org: str = "pr"  # the organization's rule-pack repository
+    # Everything to the organization's repository: a rule for a public library becomes an
+    # extension pack there (core-extensions/, marked for upstreaming) instead of a change to
+    # Steno's own rule-packs/. For running Steno inside an organization whose code mustn't
+    # leave it, and that can't push to Steno's repository (D129). STENO_RULES_CORE_TO_ORG
+    rules_core_to_org: bool = False
+    # Steno's own working files (the worktrees it publishes rules from)
+    cache_dir: Path = Path.home() / ".cache" / "steno"
+
+    # A ceiling on ingestion jobs running at once across every machine. Within it, each
+    # machine takes only what fits its memory and CPUs (D128; docs: storage.md)
+    max_parallel_jobs: int = 16
+    # Worker processes `steno worker` starts (each runs one job at a time); 0: one per CPU
+    # this machine may use, up to 8
+    worker_processes: int = 0
+    # The share of this machine's memory (a container's limit when there is one) that jobs may
+    # reserve; the rest is left to the system and the API
+    worker_memory_fraction: float = 0.8
+    # What a job reserves for a repository never measured before (MB): its first run
+    job_memory_default_mb: int = 3072
+    # This machine's name for counting its jobs (default: the host name)
+    worker_host: str = ""
 
     # Worker queue polling
     worker_poll_seconds: float = 2.0

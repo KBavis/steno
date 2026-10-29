@@ -6,7 +6,9 @@ history and never compared. Re-ingesting the same commit changes no rows. The su
 what was added or removed are what reconcile recomputes.
 
 Only other witnesses' claims are stored (PLATFORM, DECLARED). CODE facts stay in the graph,
-and CODE names go to the identity registry through identify.
+and CODE names go to the identity registry through identify. The exception is a claim reconcile
+writes into the graph across repositories whatever its witness: a gateway's routes (D132), whose
+targets are other repositories' applications.
 """
 
 import hashlib
@@ -38,6 +40,10 @@ def claim_key(claim_type: str, fields: dict[str, object], file: str | None) -> s
     return hashlib.sha256(text.encode()).hexdigest()[:40]
 
 
+# CODE claims stored anyway: reconcile writes them into the graph across repositories (D132)
+STORED_CODE = {"route"}
+
+
 def store_claims(
     session: Session,
     repository_id: int,
@@ -54,7 +60,7 @@ def store_claims(
     }
     seen: set[tuple[str, str]] = set()
     for c in claims:
-        if c.witness_type == "CODE":
+        if c.witness_type == "CODE" and c.claim_type not in STORED_CODE:
             continue
         key = claim_key(c.claim_type, c.fields, c.origin.file)
         if (c.witness, key) in seen:

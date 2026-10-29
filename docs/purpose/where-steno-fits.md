@@ -6,6 +6,7 @@ What Steno owns, what it deliberately doesn't, and the guarantees it makes to th
 > - Steno is **one piece of a larger picture**: it answers *what is* (the architecture, from code). Project history (*what changed and why*), standards and constraints (*what should be*), and the workflows that use all of it are separate systems that link to Steno by ID.
 > - That larger picture (a "context layer" for an agent-first SDLC) is designed in **its own project**, not here (D98). Steno documents only its own scope and the contract it offers.
 > - Steno guarantees: the same answer to the same question, complete or says what's missing, every claim cited, current, and works at any organization.
+> - **Steno is the breadth; agents are the depth.** Steno maps the whole organization and points to the exact code; Claude Code or Copilot reasons over it, and clones only the few repositories a task needs.
 
 ---
 
@@ -57,3 +58,15 @@ An agent with every repository cloned and good search does well when a name appe
 | Must be complete | "Every consumer of this" | Can't know when it's found everything | Says what it couldn't see |
 
 Plus three costs regardless of question type: answers differ between sessions, every session re-pays the discovery, and every developer machine needs every repository and credentials for all of them. The POC measures this directly: the same questions, with and without Steno ([roadmap](../plan/roadmap.md#4-evaluation)).
+
+## 5. Breadth and depth (Decided, D119)
+
+Steno doesn't replace what agents are good at. It does what they can't do cheaply: know the whole organization.
+
+| | Steno (breadth) | The agent (depth) |
+|---|---|---|
+| Does | Finds what's involved across the organization: applications, flows, consumers, contracts, interceptors; says what it couldn't see | Reads the code Steno points to, reasons about it, plans, edits, runs tests |
+| Code | Serves it from the git host at the ingested commit, with exact pointers | Clones only the repositories a task needs, when it needs a working copy |
+| Never | Runs an agent to answer a question; manages workspaces | Has to search every repository to find which few matter |
+
+Cloning was never the problem; not knowing *which* repositories to clone was. Every Steno answer lists its `sources` (repository, commit, paths, why), so the consumer, or the harness it runs in, fetches exactly those. That harness belongs to the SDLC layer (D98). Details: [Retrieval §4](../how-it-works/retrieval-and-mcp.md#breadth-and-depth-decided-d119).

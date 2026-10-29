@@ -17,7 +17,6 @@ Designs that are parked until the POC and v1 prove out. Each is kept so the work
 | **Environments** | What's deployed where, on which servers, with what resources; matching a production stack trace to the commit that produced it | Deploy names are already PLATFORM name sources | `v2` |
 | **Project-aware planning** | Moved out of Steno (D98) to the separate context-layer project. Steno provides what it needs: [integration](../../purpose/integration.md). | Stable and planned IDs (stage A); `fact_change` | Elsewhere |
 | **Entity anchors** | Retrieval from a question's nouns and verbs to flows that perform that operation on those entities | `USES_ENTITY`, `MAPS_TO` | `v2` |
-| **Rule generation from templates** | Coverage items turned into rules by filling in a form | The coverage report and its triage | `v2` ([coverage report §4](../../how-it-works/ingestion/coverage-report.md#4-turning-a-coverage-item-into-a-rule-deferred)) |
 
 ## The UI's long-term vision
 

@@ -7,13 +7,13 @@ Every view returns the same shape:
 Groups are boxes that contain nodes (a space, a resource such as /api/jobs, a folder).
 """
 
-import json
 from collections import defaultdict
 from typing import Any
 
 from neo4j import Driver
 
 from steno.graph import ids
+from steno.graph import trace as trace_codec
 from steno.graph.build import step_of
 
 # The most specific label wins
@@ -63,7 +63,7 @@ PROVENANCE = {
     "name",
 }
 # Shown through the flow view, not as raw properties
-HIDDEN = {"trace", "trace_files", "trace_symbols", "shared"}
+HIDDEN = {"trace", "trace_files", "trace_symbols", "trace_entries", "shared"}
 EFFECT_TYPES = ["READS_FROM", "WRITES_TO", "CALLS", "PRODUCES", "CONSUMES"]
 LEVEL_UNITS = {"CALLS": "calls", "READS_FROM": "tables", "WRITES_TO": "tables"}
 
@@ -898,7 +898,7 @@ def _place_target(
 
 
 def _trace(raw: Any) -> list[dict[str, Any]]:
-    return json.loads(raw) if isinstance(raw, str) else []
+    return trace_codec.decode(raw)
 
 
 HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}

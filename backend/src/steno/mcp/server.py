@@ -3,8 +3,9 @@
 See docs/how-it-works/retrieval-and-mcp.md §5.
 
 Stateless (docs/how-it-works/README.md). The first tools (D54): `search`, `get_node`, `get_flow`,
-`find_dependents`, `view_flow_code`. Every result carries citations (D29), is cut to its
-`max_tokens`, and every call is logged in `tool_call` (tool, parameters, latency, result count).
+`find_dependents`, `view_flow_code`; then `route_request` (D132). Every result carries
+citations (D29), is cut to its `max_tokens`, and every call is logged in `tool_call` (tool,
+parameters, latency, result count).
 """
 
 import logging
@@ -30,6 +31,11 @@ mcp = MCPServer(
         "applications, the interfaces they expose and call, the flows that run when an "
         "interface, topic, or schedule triggers them, the data stores and topics they use, and "
         "the code behind each step.\n\n"
+        "Route the question first: find the application it's about with `search` (read "
+        '`where`) or `get_node`. When it could mean several ("the backend" when '
+        "`budget-app` and `contextualized-backend` both fit; `also_named` in `get_node`), "
+        "don't pick one: list the candidates, each with a line on what it is, and ask which "
+        "is meant. Answer directly only when one application clearly fits.\n\n"
         "Work top-down; an organization has thousands of flows, and no page shows them all:\n"
         "1. `search` with the words the code uses. Read `where` first: every space and "
         "application with matches, and how many. `results` shows only some; when several "
@@ -40,13 +46,23 @@ mcp = MCPServer(
         "`expand='sync'` follows calls into other applications.\n"
         "4. `view_flow_code` only for the steps the question is about.\n"
         "5. `find_dependents` for who uses something, or `direction='downstream'` for what "
-        "a change affects.\n\n"
+        "a change affects.\n"
+        "6. `route_request` when you have a URL from outside (`GET /api/vet/vets`): which "
+        "gateway route takes it, and which application, endpoint, and flow serve it.\n\n"
         "Before saying 'all', 'only', or 'none', check what the answer couldn't see: `where` "
-        "and `more` in search, `completeness` everywhere else (`complete: false` means there "
-        "may be more). `possible_callers` and `possible_targets` are unconfirmed hints. "
+        "and `more` in search; `completeness` everywhere else: `checked` is what Steno looked "
+        "at, `not_checked` what it couldn't, and `unexplained` counts code Steno sees but no "
+        "rule explains. No answer claims to be complete. `possible_callers` and "
+        "`possible_targets` are unconfirmed hints. "
         "Where another witness checked a fact, `agreement` is `confirmed`, `code_only` (no "
         "grant or declaration), or `declared_only` (stated, no code found): report the last "
-        "two as findings. Every answer cites file, lines, and commit; pass the citations on."
+        "two as findings. Every answer cites file, lines, and commit; pass the citations on.\n\n"
+        "Steno answers *what* and *where* across the organization; you do the reasoning. For "
+        "*exactly how*, read the cited code (`view_flow_code`) before concluding. `sources` "
+        "lists the repositories an answer cites, at the commit Steno read (`head_moved`: the "
+        "code has changed since), with the folders that matter: clone those, and only those, "
+        "when the task needs a working copy (editing, building, running tests) or code newer "
+        "than Steno's."
     ),
 )
 
@@ -124,6 +140,17 @@ def view_flow_code(
 
 
 @mcp.tool()
+def route_request(
+    path: str, ctx: Context, method: str | None = None, max_tokens: int = 3000
+) -> dict[str, Any]:
+    """What serves a request from outside, such as `GET /api/vet/vets`: the gateway route its
+    path matches, the request as the target application sees it after the route's rewrite
+    (`GET /vets`), and the endpoint and flow it reaches. Use it when you have a URL a user,
+    frontend, or another system calls; an endpoint's own `get_node` says how it's reached."""
+    return _run(ctx, "route_request", locals(), max_tokens, lambda t: t.route_request(path, method))
+
+
+@mcp.tool()
 def find_dependents(
     ref: str,
     ctx: Context,
@@ -157,8 +184,11 @@ def _run(
     params = {k: v for k, v in params.items() if k != "ctx"}
     started = time.perf_counter()
     with session_scope() as session:
+        tools = Tools(get_driver(), database(), session)
         try:
-            result = call(Tools(get_driver(), database(), session))
+            result = call(tools)
+            if result.get("citations"):
+                result["sources"] = tools.sources(result["citations"])
         except ToolError as exc:
             result = {"error": str(exc)}
         result = fit(result, max_tokens)

@@ -1,4 +1,4 @@
-import { Building2, FolderGit2, Layers, Network, Plug, ScanSearch, type LucideIcon } from 'lucide-react'
+import { Building2, FolderGit2, Layers, Network, Plug, ScanSearch, Sparkles, type LucideIcon } from 'lucide-react'
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { api, type Organization } from './api/client'
 import { HealthStatus } from './components/HealthStatus'
@@ -9,6 +9,7 @@ import { CoveragePage } from './pages/CoveragePage'
 import { IngestionPage } from './pages/IngestionPage'
 import { OnboardingPage } from './pages/OnboardingPage'
 import { OrganizationPage } from './pages/OrganizationPage'
+import { RulesPage } from './pages/RulesPage'
 import { SpacesPage } from './pages/SpacesPage'
 
 // The graph view pulls in React Flow and ELK; load it only when the tab opens
@@ -18,6 +19,7 @@ const TABS: Record<string, { label: string; icon: LucideIcon }> = {
   ingestion: { label: 'Ingestion', icon: FolderGit2 },
   visualize: { label: 'Visualize', icon: Network },
   coverage: { label: 'Coverage', icon: ScanSearch },
+  rules: { label: 'Rule Composer', icon: Sparkles },
   spaces: { label: 'Spaces', icon: Layers },
   connectors: { label: 'Connectors', icon: Plug },
   organization: { label: 'Organization', icon: Building2 },
@@ -103,6 +105,7 @@ export default function App() {
       <main className="content">
         {tab === 'ingestion' && <IngestionPage onNavigate={navigate} />}
         {tab === 'coverage' && <CoveragePage />}
+        {tab === 'rules' && <RulesPage />}
         {tab === 'spaces' && <SpacesPage />}
         {tab === 'connectors' && <ConnectorsPage />}
         {tab === 'organization' && <OrganizationPage organization={org} onChanged={setOrg} />}

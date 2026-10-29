@@ -6,7 +6,8 @@ The format of Steno's rules and rule packs: how a rule finds code, what it emits
 > - A rule is an **ast-grep pattern** (`match`, unchanged ast-grep syntax) plus **what it means** in Steno's vocabulary (`emit`: nodes, edges, clues, entry points). An optional `where` checks resolved types.
 > - Rules never reference each other. Facts spread across files are combined by **clues**, labeled with the symbol they're about, and a fixed set of **assemblers**.
 > - Rules come in versioned **packs**, grouped by ecosystem, auto-enabled by dependencies or imports. Every rule ships with **test cases**.
-> - Most organizations need only their framework packs plus a small **org pack** for in-house frameworks. See the [catalog](#10-pack-catalog) for what exists.
+> - Most organizations need only their framework packs plus an **org pack per in-house framework**. See the [catalog](#10-pack-catalog) for what exists.
+> - Rules are written by hand, with the `rule-pack-author` skill, or drafted by Steno's [rule curation](./rule-curation.md) job and approved by a person (D120). Either way, they're YAML in git.
 
 ```mermaid
 flowchart LR
@@ -30,7 +31,7 @@ emit:    # WHAT IT MEANS: Steno's vocabulary
 
 - `match` is plain [ast-grep](https://ast-grep.github.io/) rule syntax (tree-sitter based, many languages). Authors, and their AI assistants, can use ast-grep's docs and playground as they are.
 - `emit` is written in **Steno's vocabulary**: the node and edge types of the [knowledge graph](../graph-reference.md), plus clues (below). Whoever writes it has to know that vocabulary; §4 lists it.
-- Rules are **deterministic**. They're fixed YAML, executed by code. No LLM runs during ingestion. (An AI assistant may help a person *write* a rule; see §8.)
+- Rules are **deterministic**. They're fixed YAML, executed by code. No LLM runs during ingestion. (An LLM may *draft* a rule, which a person approves; see §8.)
 
 ## 2. Anatomy of a rule (Decided)
 
@@ -300,6 +301,24 @@ enabled_when:                   # any one of these turns the pack on
   # always: true                # for a language's standard library (asyncio, java.util.concurrent)
 ```
 
+**For an internal framework (D123)**, the pack also names the framework, so it's one reviewable, findable unit:
+
+```yaml
+framework:
+  name: Acme Messaging
+  description: The organization's messaging layer over Kafka; handlers consume, Bus publishes.
+  coordinates: [com.acme:acme-messaging]     # the library's artifacts
+  repository: acme/acme-messaging            # its source, when ingested
+```
+
+**Noise (D122).** Core packs may list what's never worth a rule, so organizations only handle their own unusual cases. Every entry is checked against the facets first (SQL migrations aren't noise: the Data facet reads them):
+
+```yaml
+noise:
+  files: ["**/*.md", "**/*.png", ".github/**", ".idea/**", "**/*.lock"]
+  config: ["logging.*", "management.endpoints.*"]
+```
+
 A pack is **auto-enabled** when any `enabled_when` condition holds (D25). Checking imports as well as declared dependencies matters: a library often arrives indirectly (Contextualized uses `requests` without listing it). Dependencies are read from every build file the build loads: Gradle scripts applied from others (`apply from: "dependencies.gradle"`), version catalogs (`libs.versions.toml`), Maven POMs, Python requirements and pyproject files. Lock files don't enable packs (they list what other libraries pull in), and neither does test code.
 
 ### Versions (Decided, D106)
@@ -329,7 +348,34 @@ emit:
       # applies_to: { validates: "@class" }   the resolver decides (Bean Validation groups, @Valid cascades)
 ```
 
+**Extended by D116 (not built).** The emit becomes an `Interceptor` node ([graph reference](../graph-reference.md#interceptors-decided-d116)) and gains:
+
+```yaml
+emit:
+  - interceptor:
+      function: "@function"
+      kind: response                   # filter | request | validation | aspect | response | error
+      phase: after                     # before (default) | after | on_error
+      applies_to: { paths: ["/api/**"] }
+      requires: { headers: [X-Tenant-Id] }        # optional: what a caller must send
+      adds: { envelope: com.acme.web.ApiResponse }  # optional: what it wraps around responses
+      activation:                      # optional: for a library's interceptor; any one turns it on
+        dependency: com.acme:acme-web-security     # on the classpath (auto-configuration)
+        annotation: com.acme.web.EnableAcmeAuth
+        config: { key: acme.auth.enabled, equals: "true" }
+        off_when: { config: { key: acme.auth.enabled, equals: "false" } }
+```
+
+A library's interceptor is defined in the library's own repository; Steno checks `activation` against every application that depends on the library and records `ACTIVATES` with the evidence. Without `activation`, the interceptor applies to the application that defines it.
+
 Each flow lists the interceptors that apply to it as its first steps. Two clues complete the picture: `access` (`matchers`, `rule`, `value`, or `function` for a handler's own annotation) gives endpoints an `access` property (`public`, `authenticated`, `role:ADMIN`), and `provides` (`function`) lets a `@Bean` whose body is the implementation stand in for the interface it returns. Packs: `steno-pack-spring-security` (filters, request matchers, `@PreAuthorize`), `steno-pack-bean-validation` (`ConstraintValidator`s), `steno-pack-spring-boot` (`@Bean` providers).
+
+### Contracts (Decided, D115; syntax settled when built)
+
+Payloads are described in two parts, matching the graph ([contracts](../graph-reference.md#contracts-decided-d115)):
+
+- **The class** (`Entity` with its `fields`): an entity rule marks a class as a payload or model; the symbol resolver reads its fields and types, and constraint and naming annotations (Bean Validation, Jackson) are read by rules in their own packs, as clues on the field, so a new validation library is a new pack, not new core code.
+- **The usage** (`USES_ENTITY`): the rule that recognizes an endpoint or a listener also emits the edge to the type of its body or message parameter, with `role`, `validated` (`@Valid` / `@Validated` on the parameter), `groups`, and `view`. Response types come from the handler's return type, unwrapped.
 
 ### The ledger: I/O and harmless libraries (Decided, D101)
 
@@ -384,14 +430,14 @@ entry_points:
 - Include at least one **negative case** (similar code that must *not* match) when a pattern could over-match.
 - A case for a rule that depends on clues includes the other files it needs (here, the router's `__init__.py`), so the test covers the whole join.
 
-## 8. Writing rules: by hand or with the skill (Decided)
+## 8. Writing rules: by hand, with the skill, or by curation (Decided)
 
-The person who adds a rule owns it, whether they write the YAML by hand or use an AI assistant.
+A person approves every rule, whether they write the YAML by hand, use an AI assistant, or approve a draft from Steno's rule curation job.
 
 - **By hand:** read this doc, write the rule and its tests, run `steno rules test`.
 - **With the `rule-pack-author` skill** (`.claude/skills/rule-pack-author/`): describe what you want recognized ("topics declared under `app.kafka.topics` in `application.yml` are Kafka topics"). The skill finds real examples in the code, maps them to existing node and edge types, writes the rule and its tests, checks how often the pattern matches, and **proposes** any new node, edge, or clue type instead of inventing one silently. Schema changes are design decisions.
 
-This is different from Steno *generating* rules on its own from the coverage report (templates, LLM drafting), which stays deferred ([Ingestion §4](./coverage-report.md#4-turning-a-coverage-item-into-a-rule-deferred)).
+- **By rule curation** (D120): Steno's own job drafts rules for what the coverage report couldn't explain, proves each draft (its tests, a shadow run across the organization), and queues it for a person to approve in plain English. Approved rules are committed as YAML, authored by Steno. The job and the skill share one authoring kit. See [Rule curation](./rule-curation.md).
 
 ## 9. Rules, assemblers, and plugins
 
@@ -413,7 +459,7 @@ This is different from Steno *generating* rules on its own from the coverage rep
 | `http/` | `steno-pack-saas-http`: HTTP signatures for well-known services |
 | `kafka/` (PLATFORM) | `steno-pack-strimzi`: `KafkaTopic` resources → `channel` claims; `KafkaUser` ACLs (Read / Write / All on literal topics) → `may_consume` / `may_produce` |
 | `catalog/` (DECLARED) | `steno-pack-backstage`: `catalog-info.yaml` Components → `deployable` (kind, title) and `name` (manifest slot) |
-| `org/` | Empty: organization packs go here |
+| `org/` | Empty: organization packs go here, unless the organization keeps them in their own repository (`STENO_RULE_PACK_DIRS`) |
 
 **Java packs:**
 

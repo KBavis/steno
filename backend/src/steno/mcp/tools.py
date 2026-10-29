@@ -1,7 +1,8 @@
 """What Steno's MCP tools answer (docs/how-it-works/retrieval-and-mcp.md §5; first tools, D54).
 
 Each tool returns a compact answer for an agent: the facts, a `citations` list (D29: each
-claim with its file, lines, commit, and a link), `next` hints for the call after this one,
+claim with its file, lines, commit, and a link), `completeness` (what was checked and what
+wasn't, D118), `sources` (where to read more, D119), `next` hints for the call after this one,
 and, when the answer had to be cut to its `max_tokens`, what was left out. The server
 (`server.py`) registers these and logs every call.
 
@@ -10,6 +11,7 @@ Search is full-text for now (D54); cards and Jev routing come later.
 
 import json
 import re
+import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
@@ -20,9 +22,13 @@ from sqlalchemy.orm import Session
 
 from steno.api.links import source_url
 from steno.claims.store import active
+from steno.connectors.git import CloneError, remote_head
 from steno.connectors.source import SourceError, read_file, slice_lines
+from steno.coverage.runs import unexplained
 from steno.db.models import Connector, Repository
 from steno.extraction.facts import split_url
+from steno.graph import routing
+from steno.graph import trace as trace_codec
 from steno.graph.build import step_of
 from steno.graph.views import GraphViews, kind_of, search_words
 
@@ -50,6 +56,8 @@ AGREEMENT = {
 }
 CHARS_PER_TOKEN = 4
 OUTLINE = 25  # steps a flow's outline aims for, before folding deeper levels
+HEAD_TTL = 300  # seconds a repository's remote head is trusted before it's read again
+_heads: dict[int, tuple[float, str | None]] = {}  # repository id → (when read, head commit)
 
 
 class ToolError(ValueError):
@@ -128,6 +136,54 @@ class Tools:
                 out[c["kind"]] = c["label"]
             elif c["kind"] == "space":
                 out["space"] = c["label"]  # the innermost space
+        return out
+
+    def _unexplained(self, applications: list[str]) -> dict[str, dict[str, int]]:
+        return unexplained(self.session, [a for a in applications if a])
+
+    def _head(self, repo: Repository) -> str | None:
+        """The commit the repository's default branch points at now, read at most every
+        HEAD_TTL seconds; None when the host can't be reached."""
+        cached = _heads.get(repo.id)
+        if cached and time.monotonic() - cached[0] < HEAD_TTL:
+            return cached[1]
+        connector = self.session.get(Connector, repo.connector_id)
+        try:
+            head = remote_head(
+                repo.clone_url,
+                repo.default_branch,
+                connector.kind,  # type: ignore[union-attr]
+                connector.credentials_ref,  # type: ignore[union-attr]
+                timeout=5,
+            )
+        except CloneError:
+            head = None
+        _heads[repo.id] = (time.monotonic(), head)
+        return head
+
+    def sources(self, citations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Where an answer's citations come from, one entry per repository: what a consumer
+        would fetch to read further, and whether the code has moved since Steno read it
+        (D119). Steno decides nothing here; the consumer chooses whether to clone."""
+        out = []
+        for name, group in _source_groups(citations).items():
+            row = self._repo(name)
+            entry: dict[str, Any] = {"kind": "git", "repo": name}
+            if row is not None:
+                commit = row.last_ingested_sha
+                cited = group["commits"]
+                if commit and cited and not any(commit.startswith(c) for c in cited):
+                    commit = sorted(cited)[0]  # the graph is older than the last run recorded
+                entry["clone_url"] = row.clone_url
+                entry["branch"] = row.default_branch
+                if commit:
+                    entry["commit"] = commit
+                    head = self._head(row)
+                    if head:
+                        entry["head_moved"] = not head.startswith(commit)
+            entry["paths"] = group["paths"]
+            entry["why"] = group["why"]
+            out.append(entry)
         return out
 
     # ------------------------------------------------------------------- search
@@ -217,6 +273,133 @@ class Tools:
                     "nodes": others,
                 }
         return out
+
+    # ------------------------------------------------------------ routing (D132)
+
+    def _routes(self, app_ids: list[str] | None = None) -> list[dict[str, Any]]:
+        """Gateways' routes, with the application each forwards to (all, or to these)."""
+        rows = self._read(
+            "MATCH (g)-[:EXPOSES]->(r:Route) "
+            "OPTIONAL MATCH (r)-[:FORWARDS_TO]->(a:Application) "
+            "WITH g, r, a WHERE $apps IS NULL OR a.id IN $apps "
+            "RETURN g.id AS gateway_id, g.name AS gateway, properties(r) AS route, "
+            "a.id AS app_id, a.name AS app, a.stub AS stub",
+            apps=app_ids,
+        )
+        return [dict(r) for r in rows]
+
+    def _route_citation(self, route: dict[str, Any], claim: str) -> list[dict[str, Any]]:
+        out = []
+        for src in json.loads(route.get("sources") or "[]"):
+            out.append(
+                self._cite(claim, src.get("repo"), src.get("commit"), src.get("file"),
+                           src.get("line"))
+            )  # fmt: skip
+        return out
+
+    def route_request(self, path: str, method: str | None = None) -> dict[str, Any]:
+        """What serves a request from outside (D132): the gateway route its path matches, the
+        path the application sees after the route's rewrite, and the endpoint and flow it
+        reaches. Without a matching route, the endpoints anywhere that serve the path as is."""
+        path = "/" + path.strip().lstrip("/").split("?")[0]
+        method = method.upper() if method else None
+        hits, citations = [], []
+        for r in self._routes():
+            route = r["route"]
+            inside = routing.inside_path(route, path)
+            if inside is None or not routing.takes(route, method):
+                continue
+            endpoints = self._endpoints_serving(r["app_id"], inside, method) if r["app_id"] else []
+            hits.append(
+                {
+                    "gateway": r["gateway"],
+                    "route": route.get("path"),
+                    "router": route.get("router"),
+                    "rewrite": {
+                        k: route[k]
+                        for k in ("strip_prefix", "rewrite", "prefix")
+                        if route.get(k) is not None
+                    },  # fmt: skip
+                    "application": r["app"] or route.get("target"),
+                    **({"application_not_ingested": True} if r["stub"] else {}),
+                    "request_as_application_sees_it": f"{method or '*'} {inside}",
+                    "endpoints": endpoints,
+                }
+            )
+            citations += self._route_citation(
+                route,
+                f"{r['gateway']} routes {route.get('path')} to {r['app'] or route.get('target')}",
+            )
+        direct = [] if hits else self._endpoints_serving(None, path, method)
+        checked = [f"the routes of every gateway Steno knows ({len(self._routes())})"]
+        not_checked = {
+            "routes_in_code": "routes defined in Java code (RouteLocator beans) or in routers "
+            "no pack reads",
+            "frontends": "requests a frontend makes (v2, D92)",
+        }
+        return {
+            "request": f"{method or '*'} {path}",
+            "through_gateways": hits,
+            **({"served_directly_by": direct} if direct else {}),
+            **(
+                {"note": "no gateway route or endpoint serves this path"}
+                if not hits and not direct
+                else {}
+            ),
+            "completeness": _completeness(checked, not_checked, None),
+            "citations": citations,
+            "next": [
+                "get_flow(flow) for what the request does",
+                "get_node(endpoint) for who else calls it",
+            ],  # fmt: skip
+        }
+
+    def _endpoints_serving(
+        self, app_id: str | None, path: str, method: str | None
+    ) -> list[dict[str, Any]]:
+        rows = self._read(
+            "MATCH (a:Application)-[:EXPOSES]->(e:HttpEndpoint) "
+            "WHERE $app IS NULL OR a.id = $app "
+            "OPTIONAL MATCH (e)-[:STARTS]->(f:Flow) "
+            "RETURN e.id AS id, e.method AS method, e.path AS path, a.name AS app, "
+            "collect(f.id)[0] AS flow",
+            app=app_id,
+        )
+        return [
+            {
+                "endpoint": r["id"],
+                "request": f"{r['method']} {r['path']}",
+                "application": r["app"],
+                **({"flow": r["flow"]} if r["flow"] else {}),
+            }  # fmt: skip
+            for r in rows
+            if r["path"]
+            and routing.serves(r["path"], path)
+            and (method is None or (r["method"] or "").upper() in (method, "ANY", "*"))
+        ]
+
+    def _outside(self, node: Any) -> dict[str, Any]:
+        """How an endpoint is reached from outside: each gateway route to its application
+        whose rewrite leads to it, with the outside path. Public when any does."""
+        app = self._read(
+            "MATCH (a:Application)-[:EXPOSES]->(e {id: $id}) RETURN a.id AS id LIMIT 1",
+            id=node["id"],
+        )
+        if not app:
+            return {}
+        reached = []
+        for r in self._routes([app[0]["id"]]):
+            route = r["route"]
+            outside = routing.outside_path(route, node.get("path") or "")
+            if outside is not None and routing.takes(route, node.get("method")):
+                reached.append(
+                    {
+                        "gateway": r["gateway"],
+                        "route": route.get("path"),
+                        "outside_request": f"{node.get('method')} {outside}",
+                    }  # fmt: skip
+                )
+        return {"public": bool(reached), **({"reached_through": reached} if reached else {})}
 
     # ------------------------------------------------- witnesses (D109, claims)
 
@@ -365,17 +548,40 @@ class Tools:
             "data": {k: sorted(v) for k, v in data.items()},
             "outbound": {k: sorted(v) for k, v in outbound.items()},
             "modules": modules,
-            "completeness": {
-                **_hooks_note(app.get("unknown_hooks") or []),
-                "incomplete_flows": sum(1 for f in flows if f.get("incomplete")),
-                "inferred_flows": sum(1 for f in flows if f.get("inferred")),
-            },
+            "completeness": self._app_completeness(app, flows, bool(uses)),
             "citations": citations,
             "next": [
                 "get_flow(flow id) for what a flow does, step by step",
                 "find_dependents(id) for who depends on this application",
             ],
         }
+
+    def _app_completeness(
+        self, app: Any, flows: list[dict[str, Any]], witnessed: bool
+    ) -> dict[str, Any]:
+        incomplete = sum(1 for f in flows if f.get("incomplete"))
+        inferred = sum(1 for f in flows if f.get("inferred"))
+        not_checked: dict[str, Any] = {}
+        if incomplete:
+            not_checked["calls_not_followed"] = (
+                f"{incomplete} of its flows {_has(incomplete)} calls Steno couldn't follow "
+                "(see get_flow)"
+            )
+        if inferred:
+            not_checked["triggers"] = (
+                f"{inferred} of its flows {_has(inferred)} no known trigger: nothing in the code "
+                "starts it"
+            )
+        not_checked.update(_hooks_note(app.get("unknown_hooks") or []))
+        checked = (
+            []
+            if app.get("stub")
+            else [f"{app.get('name')}'s code" + _at(app.get("commit")) + f": {len(flows)} flows"]
+        )
+        if witnessed:
+            checked.append("what other witnesses (deploy and ACL files, manifests) say about the "
+                           "topics it uses")  # fmt: skip
+        return _completeness(checked, not_checked, self._unexplained([app.get("name")]))
 
     def _level(self, node: Any, kind: str) -> dict[str, Any]:
         level = self.views.level(node["id"] if kind == "space" else None)
@@ -423,6 +629,7 @@ class Tools:
             edges[label].append(f"{n['node']['label']} [{n['node']['id']}]")
         prov = detail["provenance"]
         channel = kind == "interface" and not ({"HttpEndpoint", "GrpcMethod"} & set(node.labels))
+        outside = self._outside(node) if "HttpEndpoint" in node.labels else {}
         uses, use_citations = self._uses(node["id"]) if channel else ([], [])
         return {
             "id": node["id"],
@@ -430,6 +637,7 @@ class Tools:
             "name": detail["label"],
             **self._where(node["id"]),
             "properties": detail["properties"],
+            **outside,
             **(
                 {"uses": uses, "agreement_means": _meanings(uses)}
                 if uses
@@ -482,7 +690,7 @@ class Tools:
         if "Flow" not in fl.labels:
             raise ToolError(f"{ref!r} is a {kind_of(list(fl.labels))}, not a flow")
         flow_id = fl["id"]
-        trace = json.loads(fl.get("trace") or "[]")
+        trace = trace_codec.decode(fl.get("trace"))
         repo, commit = fl.get("repo"), fl.get("commit")
 
         # Effects with their call sites, per step
@@ -661,7 +869,7 @@ class Tools:
         fl = self._resolve(ref)
         if "Flow" not in fl.labels:
             raise ToolError(f"{ref!r} isn't a flow")
-        trace = json.loads(fl.get("trace") or "[]")
+        trace = trace_codec.decode(fl.get("trace"))
         wanted = set(paths or [])
         picked = [
             t
@@ -789,11 +997,13 @@ class Tools:
         # What the answer can't vouch for: unknown framework hooks in the applications found
         # (a request filter reading this table would be missing from the list)
         hooks: list[str] = []
+        apps: list[str] = [a] if (a := self._where(start).get("application")) else []
         for row in self._read(
             "MATCH (fl:Flow)-[:BELONGS_TO]->(a:Application) WHERE fl.id IN $ids "
             "RETURN DISTINCT a.name AS app, a.unknown_hooks AS h",
             ids=list(found),
         ):
+            apps.append(row["app"])
             hooks += [f"{row['app']}: {h}" for h in row["h"] or []]
         incomplete = sum(
             1
@@ -808,18 +1018,21 @@ class Tools:
             "direction": direction,
             **({"via": via} if via else {}),
             "dependents" if direction == "upstream" else "downstream_flows": grouped,
-            "completeness": {
-                **_hooks_note(hooks),
-                **(
-                    {
-                        "incomplete_flows": f"{incomplete} of these flows have calls Steno "
-                        "couldn't follow (see get_flow)"
-                    }
-                    if incomplete
-                    else {}
-                ),
-                "complete": not hooks and not incomplete,
-            },  # fmt: skip
+            "completeness": _completeness(
+                [f"the code of every ingested application ({self._ingested_apps()})"],
+                {
+                    **(
+                        {
+                            "calls_not_followed": f"{incomplete} of these flows "
+                            f"{_has(incomplete)} calls Steno couldn't follow (see get_flow)"
+                        }
+                        if incomplete
+                        else {}
+                    ),
+                    **_hooks_note(hooks),
+                },
+                self._unexplained(apps),
+            ),
             "citations": _unique(citations),
             "next": ["get_flow(flow id) for how a dependent uses it"],
         }
@@ -831,14 +1044,16 @@ class Tools:
                 out["agreement"] = uses
                 out["agreement_means"] = _meanings(uses)
                 out["citations"] = _unique(out["citations"] + use_citations)
+                out["completeness"]["checked"].append(
+                    "what other witnesses (ACL and deploy files, manifests) say about who uses it"
+                )
                 declared = [u for u in uses if u["agreement"] == "declared_only"]
                 if declared:
-                    out["completeness"]["declared_only"] = (
+                    out["completeness"]["not_checked"]["declared_only"] = (
                         f"{len(declared)} application{'s' if len(declared) != 1 else ''} "
                         "another witness says use this, with no code found doing it (see "
                         "`agreement`): not ingested, an unused grant, or a missed rule"
                     )
-                    out["completeness"]["complete"] = False
         if direction == "downstream":
             out["touches"] = sorted(
                 (f"{v['how']} {v['name']}" for v in touched.values()), key=str.lower
@@ -853,13 +1068,20 @@ class Tools:
                     "calls from flows whose host is set outside the repository and whose method "
                     "and path match; not confirmed"
                 )
-                out["completeness"]["unconfirmed_callers"] = (
+                out["completeness"]["not_checked"]["unconfirmed_callers"] = (
                     f"{len(possible)} possible caller{'s' if len(possible) != 1 else ''} can't be "
                     "confirmed or ruled out (see "
                     "`possible_callers`)"
                 )
-                out["completeness"]["complete"] = False
         return out
+
+    def _ingested_apps(self) -> str:
+        row = self._read(
+            "MATCH (a:Application) WHERE NOT coalesce(a.stub, false) "
+            "OPTIONAL MATCH (a)-[:BUILT_FROM]->(:Module)-[:BELONGS_TO]->(r:Repository) "
+            "RETURN count(DISTINCT a) AS apps, count(DISTINCT r) AS repos"
+        )[0]
+        return f"{row['apps']} applications in {row['repos']} repositories"
 
     def _possible_callers(self, targets: list[str]) -> list[dict[str, Any]]:
         endpoints = [
@@ -929,9 +1151,11 @@ class Tools:
         framework hooks in its application (filters, validators, callbacks) that may run around
         it without the graph showing it."""
         rows = self._read(
-            "MATCH (:Flow {id: $id})-[:BELONGS_TO]->(a:Application) RETURN a.unknown_hooks AS h",
+            "MATCH (:Flow {id: $id})-[:BELONGS_TO]->(a:Application) "
+            "RETURN a.name AS app, a.unknown_hooks AS h",
             id=fl["id"],
         )
+        app = rows[0]["app"] if rows else None
         hooks = (rows[0]["h"] if rows else None) or []
         out: dict[str, Any] = {}
         if fl.get("incomplete"):
@@ -952,8 +1176,17 @@ class Tools:
                    else "something outside the code runs it")
             )  # fmt: skip
         out.update(_hooks_note(hooks))
-        out["complete"] = not out
-        return out
+        functions = fl.get("functions") or len(trace_codec.decode(fl.get("trace")))
+        checked = [
+            f"the {functions} functions this flow runs"
+            + (f", in {app}'s code" if app else "")
+            + _at(fl.get("commit"))
+        ]
+        if fl.get("interceptors"):
+            checked.append(
+                f"{len(fl['interceptors'])} interceptors that run before it (filters, validators)"
+            )
+        return _completeness(checked, out, self._unexplained([app] if app else []))
 
     def _path_matches(self, method: str | None, url: str | None, flow_id: str) -> list[str]:
         """Endpoints in other applications whose method and path match a call whose host isn't
@@ -1146,6 +1379,60 @@ def _meanings(uses: list[dict[str, Any]]) -> dict[str, str]:
     return {a: AGREEMENT[a] for a in sorted({u["agreement"] for u in uses}) if a in AGREEMENT}
 
 
+def _completeness(
+    checked: list[str], not_checked: dict[str, Any], unexplained: dict[str, dict[str, int]]
+) -> dict[str, Any]:
+    """What an answer covered and what it couldn't (D118). Never `complete: true`: that would
+    be a claim about what Steno can't see. `unexplained`: the applications' open coverage
+    items, so something Steno sees but can't explain is never silent."""
+    out: dict[str, Any] = {"checked": checked, "not_checked": not_checked}
+    if unexplained:
+        out["unexplained"] = unexplained
+        out["unexplained_note"] = (
+            "open coverage items in these applications: code Steno sees but no rule explains; "
+            "any of it could add to this answer"
+        )
+    return out
+
+
+def _has(n: int) -> str:
+    return "has" if n == 1 else "have"
+
+
+def _at(commit: str | None) -> str:
+    return f" at {commit[:12]}" if commit else ""
+
+
+def _source_groups(citations: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Citations grouped by repository: the commits cited, the folders a sparse clone needs
+    (at most 8), and up to 3 claims saying why the repository matters."""
+    groups: dict[str, dict[str, Any]] = {}
+    for c in citations:
+        repo = c.get("repo")
+        if not repo:
+            continue
+        g = groups.setdefault(repo, {"commits": set(), "dirs": [], "why": []})
+        if c.get("commit"):
+            g["commits"].add(c["commit"])
+        if c.get("file"):
+            folder = c["file"].rsplit("/", 1)[0] + "/" if "/" in c["file"] else c["file"]
+            if folder not in g["dirs"]:
+                g["dirs"].append(folder)
+        if c.get("claim") and c["claim"] not in g["why"] and len(g["why"]) < 3:
+            g["why"].append(c["claim"])
+    out = {}
+    for repo, g in groups.items():
+        dirs = sorted(g["dirs"])
+        # A folder inside another listed folder adds nothing to a sparse clone
+        dirs = [d for d in dirs if not any(d != o and d.startswith(o) for o in dirs)]
+        out[repo] = {
+            "commits": g["commits"],
+            "paths": dirs[:8] + ([f"…and {len(dirs) - 8} more"] if len(dirs) > 8 else []),
+            "why": g["why"],
+        }
+    return out
+
+
 def _hooks_note(hooks: list[str]) -> dict[str, Any]:
     if not hooks:
         return {}
@@ -1278,7 +1565,7 @@ def fit(result: dict[str, Any], max_tokens: int) -> dict[str, Any]:
 
     while size(result) > budget and trim("citations", 3):
         pass
-    lists = [k for k, v in result.items() if isinstance(v, list) and k not in ("next",)]
+    lists = [k for k, v in result.items() if isinstance(v, list) and k not in ("next", "sources")]
     while size(result) > budget:
         candidates = [k for k in lists if len(result[k]) > 1]
         if not candidates:

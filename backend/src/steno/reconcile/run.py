@@ -25,7 +25,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from steno.claims.store import active
-from steno.claims.types import channel_key
+from steno.claims.types import channel_key, route_target
 from steno.db.models import Claim, Repository, UnmatchedName, UnmatchedStatus
 from steno.identity.registry import resolve
 from steno.reconcile.compare import ROLES, Result, Source, Use, compare
@@ -44,6 +44,7 @@ class Summary:
     results: list[dict[str, Any]] = field(default_factory=list)
     unmatched: list[dict[str, Any]] = field(default_factory=list)
     stubs: int = 0
+    routes: int = 0
 
     def counts(self) -> dict[str, Any]:
         by: dict[str, int] = {}
@@ -54,6 +55,7 @@ class Summary:
             "agreement": by,
             "unmatched_names": sorted({u["name"] for u in self.unmatched}),
             "stub_applications": self.stubs,
+            "routes": self.routes,
         }
 
 
@@ -79,9 +81,9 @@ def reconcile(
     for channel in sorted(s.removeprefix("channel:") for s in subjects if s.startswith("channel:")):
         summary.results += run.channel(channel)
         summary.channels += 1
-    run.deployables(
-        {s.removeprefix("application:") for s in subjects if s.startswith("application:")}
-    )
+    names = {s.removeprefix("application:") for s in subjects if s.startswith("application:")}
+    run.deployables(names)
+    summary.routes = run.routes(names)
     summary.stubs = run.tidy_stubs()
     summary.unmatched = run.unmatched
     return summary
@@ -292,6 +294,99 @@ class _Run:
             owner=OWNER,
         )
         return len(stubs) - len(remove)
+
+    # ------------------------------------------------------------- routes (D132)
+
+    def routes(self, names: set[str]) -> int:
+        """Rewrite the routes of every gateway these names touch, as the gateway or as a
+        route's target: all of that gateway's route claims become `Route` nodes it `EXPOSES`,
+        each `FORWARDS_TO` the application it targets (a stub when the name matches none).
+        Rewritten whole per gateway, so a route no witness states any more disappears."""
+        touched = [c for c in active(self.s, {f"application:{n}" for n in names})
+                   if c.claim_type == "route"]  # fmt: skip
+        gateways = {self._gateway_name(c) for c in touched} - {None}
+        written = 0
+        for name in sorted(gateways):  # type: ignore[type-var]
+            claims = [
+                c for c in active(self.s, {f"application:{name}"})
+                if c.claim_type == "route" and self._gateway_name(c) == name
+            ]  # fmt: skip
+            gateway = self._gateway_node(name, claims)
+            self._write(
+                "MATCH (g {id: $g})-[:EXPOSES]->(r:Route) WHERE r.repo = $owner DETACH DELETE r",
+                g=gateway,
+                owner=OWNER,
+            )
+            for c in claims:
+                self._route(gateway, c)
+                written += 1
+        self._write(
+            "MATCH (g:Gateway) WHERE g.repo = $owner AND NOT (g)-[:EXPOSES]->() DELETE g",
+            owner=OWNER,
+        )
+        return written
+
+    def _gateway_name(self, claim: Claim) -> str | None:
+        return claim.fields.get("gateway") or None
+
+    def _gateway_node(self, name: str, claims: list[Claim]) -> str:
+        """The application that is the gateway, or for a router that's infrastructure
+        (nginx, an Ingress) a `Gateway` node of its own."""
+        steno_id = resolve(self.s, name)
+        if steno_id is not None:
+            return f"app:{steno_id}"
+        router = next((c.fields.get("router") for c in claims if c.fields.get("router")), None)
+        node = f"gateway:{name}"
+        self._write(
+            "MERGE (g:Gateway {id: $id}) SET g:Searchable, g.name = $name, g.router = $router, "
+            "g.repo = $owner, g.extracted_by = $owner",
+            id=node,
+            name=name,
+            router=router,
+            owner=OWNER,
+        )
+        return node
+
+    def _route(self, gateway: str, claim: Claim) -> None:
+        f = claim.fields
+        path = str(f["path"])
+        target = str(f["target"])
+        app_name = route_target(target)
+        node = f"route:{gateway}:{f.get('id') or ''}:{path}"
+        props = {
+            "name": f"{path} → {app_name or target}",
+            "path": path,
+            "methods": f.get("methods"),
+            "strip_prefix": int(f["strip_prefix"]) if str(f.get("strip_prefix", "")).isdigit()
+            else None,
+            "rewrite": f.get("rewrite"),
+            "prefix": f.get("prefix"),
+            "target": target,
+            "router": f.get("router"),
+            "route_id": f.get("id"),
+            "witness_type": claim.witness_type,
+            "sources": json.dumps([self._source(claim).as_dict()]),
+        }  # fmt: skip
+        self._write(
+            "MATCH (g {id: $g}) "
+            "MERGE (r:Route {id: $id}) SET r:Searchable, r += $props, "
+            "r.repo = $owner, r.extracted_by = $owner "
+            "MERGE (g)-[e:EXPOSES]->(r) SET e.repo = $owner",
+            g=gateway,
+            id=node,
+            props={k: v for k, v in props.items() if v is not None},
+            owner=OWNER,
+        )
+        if app_name is None:
+            return  # an outside host: no application to forward to
+        app = self.application(app_name, claim)
+        self._write(
+            "MATCH (r:Route {id: $r}), (a:Application {id: $a}) "
+            "MERGE (r)-[e:FORWARDS_TO]->(a) SET e.repo = $owner",
+            r=node,
+            a=app,
+            owner=OWNER,
+        )
 
     def _source(self, claim: Claim) -> Source:
         return Source(

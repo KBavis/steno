@@ -29,7 +29,8 @@ flowchart LR
 
 | Principle | Status |
 |---|---|
-| **Deterministic first.** Rules extract facts. Decisions rules can't make go to a decision model (stand-ins in the POC, Jev later). An LLM only writes text. | Decided |
+| **Deterministic first.** Rules extract facts. Decisions rules can't make go to a decision model (stand-ins in the POC, Jev later). An LLM writes text and drafts rules a person approves; it never produces facts (D120). | Decided |
+| **Breadth, not depth.** Steno is the map of the organization; agents reason over the code it points them to (D119). | Decided |
 | **Built bottom-up, searched top-down.** Applications are ingested first; spaces and the organization are rollups. Queries start at the highest layer a question needs. | Decided |
 | **Agnostic core, organization-specific rules.** The graph schema and facets never change per organization. Rule packs and witnesses do. | Decided |
 | **Passive.** Nothing is required of an organization's repositories. Steno reads what already exists. | Decided |

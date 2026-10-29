@@ -90,6 +90,17 @@ def _write_all(tx: Any, plan: GraphPlan, repo: str) -> Delta:
             f"SET n += row.props {('SET n' + extra) if extra else ''}",
             rows,
         )
+    # Labels a node no longer has, so a rewrite equals a fresh build
+    stale: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for nid, gone in delta.stale_labels.items():
+        for lbl in gone:
+            stale[(primary[nid], lbl)].append(nid)
+    for (main, lbl), node_ids in stale.items():
+        _run(
+            tx,
+            f"UNWIND $rows AS id MATCH (n:{_safe(main)} {{id: id}}) REMOVE n:{_safe(lbl)}",
+            node_ids,
+        )
     edge_before = {key: b for key, b, _ in delta.edges}
     edges: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for key in delta.edges_to_write():
@@ -179,10 +190,10 @@ ID_PREFIXES = {
 
 
 def _clean(props: dict[str, Any]) -> dict[str, Any]:
-    """Neo4j properties are scalars or lists of scalars."""
+    """Neo4j properties are scalars, lists of scalars, or bytes (a flow's compressed trace)."""
     out = {}
     for k, v in props.items():
-        if isinstance(v, (str, int, float, bool)) or (
+        if isinstance(v, (str, int, float, bool, bytes)) or (
             isinstance(v, list) and all(isinstance(x, (str, int, float, bool)) for x in v)
         ):
             out[k] = v

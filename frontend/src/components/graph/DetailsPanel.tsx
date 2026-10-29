@@ -71,7 +71,11 @@ export function DetailsPanel({
       <div className="gpanel-head">
         <span className={`gpanel-icon tone-${style.tone}`}><Icon size={16} /></span>
         <div className="gpanel-title">
-          <div className="gpanel-kind">{style.label}{detail.labels.includes('Service') ? ' · Service' : ''}</div>
+          <div className="gpanel-kind">
+            {style.label}
+            {/* An application's kinds (D85), from what starts its flows */}
+            {['Service', 'Consumer', 'Gateway', 'Job'].filter((k) => detail.labels.includes(k)).map((k) => ` · ${k}`)}
+          </div>
           <h3>{detail.label}</h3>
         </div>
         <button className="btn btn-ghost btn-icon" onClick={onClose} aria-label="Close details"><X size={16} /></button>

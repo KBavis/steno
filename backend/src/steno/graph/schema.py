@@ -22,12 +22,14 @@ ARCHITECTURE_LABELS = (
     "Column",
     "ExternalSystem",
     "KafkaCluster",
+    "Gateway",  # a router that's infrastructure (nginx, an Ingress); D132
+    "Route",  # one route rule of a gateway, forwarding to an application; D132
 )
 
 # Code nodes: how it's built. Functions aren't nodes: they live in each Flow's trace (D60).
 CODE_LABELS = (
     "Repository",
-    "Module",  # + Service / Library / Contract / Migrations / Test / Build
+    "Module",  # + Deployable / Library / Contract / Migrations / Test / Build
     "File",
 )
 

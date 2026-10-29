@@ -1,0 +1,16 @@
+name: steno-pack-spring-cloud-gateway
+version: 0.1.0
+language: java
+source: core
+description: Spring Cloud Gateway - each route in the gateway's YAML config is a route claim (D132), path pattern and rewrite to the service it forwards to
+# The gateway's own config, in its repository: what the application says it routes
+witness_type: CODE
+facets: [Routing]
+versions:
+  org.springframework.cloud: ">=3.0, <5"
+enabled_when:
+  dependencies:
+    - org.springframework.cloud:spring-cloud-starter-gateway
+    - org.springframework.cloud:spring-cloud-starter-gateway-server-webflux
+    - org.springframework.cloud:spring-cloud-starter-gateway-mvc
+    - org.springframework.cloud:spring-cloud-starter-gateway-server-webmvc

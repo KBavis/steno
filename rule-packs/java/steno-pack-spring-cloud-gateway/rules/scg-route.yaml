@@ -1,0 +1,16 @@
+id: scg-route
+description: "A route under spring.cloud.gateway.routes (Spring Cloud Gateway 3 and 4 (reactive)), e.g. - id: vets-service, uri: lb://vets-service, predicates: [Path=/api/vet/**], filters: [StripPrefix=2]"
+kind: config
+match:
+  each: "spring.cloud.gateway.routes[*]"
+emit:
+  - claim: route
+    gateway: $doc.spring.application.name
+    id: $.id
+    target: $.uri
+    path: { from: $.predicates, regex: "^Path=(.+)$", split: "," }
+    methods: { from: $.predicates, regex: "^Method=(.+)$" }
+    strip_prefix: { from: $.filters, regex: "^StripPrefix=(\\d+)$" }
+    rewrite: { from: $.filters, regex: "^RewritePath=(.+)$" }
+    prefix: { from: $.filters, regex: "^PrefixPath=(.+)$" }
+    router: spring-cloud-gateway

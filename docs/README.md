@@ -5,7 +5,8 @@
 > **In one minute**
 > - Agents are strong inside one repository and blind beyond it. Most of what matters for a change (who consumes this topic, which flows cross this service, what breaks downstream) lives outside it.
 > - Steno answers **what is**, for the people and agents who plan, implement, review, test, and operate software. Five lead use cases set the bar: PR review with context, breaking-change checks, "grill me" planning, delta-driven testing, and stack trace to flow.
-> - It builds a **knowledge graph** bottom-up: applications first, then spaces, then the organization. Rules read the code deterministically; nothing is guessed silently.
+> - It builds a **knowledge graph** bottom-up: applications first, then spaces, then the organization. Rules read the code deterministically; nothing is guessed silently. Steno drafts new rules itself as the code changes, and a person approves each one.
+> - **Steno is the breadth, agents are the depth:** Steno maps the whole organization and points to the exact code; agents reason over it without cloning everything.
 > - **Accuracy is the bar.** An answer is either correct, or it says exactly what it couldn't see.
 > - **Status:** proof of concept. Python and Java ingest end to end; MCP tools are live. See [Plan](./plan/README.md).
 
@@ -77,6 +78,10 @@ Decisions are numbered (`D61`) and listed in the [decision log](./plan/decisions
 | **Trigger** | What starts a flow: an interface or a schedule (or, when nothing in the code starts it, *inferred*) |
 | **Step / Trace** | A flow's significant functions as nodes (L2), and the full ordered list of every function it runs (L3) |
 | **Rule / Rule pack** | "When you see this pattern, emit this fact", in YAML; a versioned bundle of rules for one framework or org |
+| **Rule curation** | Steno's job that drafts rules for what no rule explains, proves them, and queues them for a person's approval |
+| **Pattern** | One kind of thing no rule explains (an annotation, a library call, a file convention), counted across the organization |
+| **Interceptor** | Code a framework runs around entry points without their code calling it: a filter, a response wrapper, an error handler |
+| **Contract** | What an interface takes and returns: an entity, and how this interface uses it |
 | **Symbol resolver** | Per-language code that answers *what is this?*: which symbol a name is, a value's type, a constant's value |
 | **Clue / Assembler** | A partial fact a rule emits (a router's URL prefix); the code that combines clues into complete facts |
 | **Witness** | One concrete source of statements about the system at one organization: an application's code, the XLD repository, `component_manifest.yaml`, an admin |
@@ -94,3 +99,4 @@ Decisions are numbered (`D61`) and listed in the [decision log](./plan/decisions
 | **Coverage report** | What no rule explained, ranked by how many applications one fix would help |
 | **Card** | A fixed-size summary of a node used for search: deterministic facts plus, for flows and applications, LLM-written purpose |
 | **Citation** | Where a claim comes from: space, app, repo, file, lines, commit, and a link |
+| **Sources** | The repositories (or other sources) an answer's citations come from, with what to fetch |

@@ -51,13 +51,14 @@ flowchart TD
     C["Outbound HTTP call"] --> T["Resolver keeps the URL as a template<br/>https://{domain}/rest/api/2/search"]
     T --> H{"Host known?"}
     H -- "constant host matching an<br/>HTTP signature" --> SIG["ExternalSystem by service name<br/>(GitHub, Plaid)"]
-    H -- "constant host of an ingested<br/>application (planned: via Routing)" --> APP["That application's endpoint"]
+    H -- "constant host naming an application<br/>in this same repository (built)" --> APP["That application's endpoint"]
     H -- "constant, unknown" --> HOST["ExternalSystem keyed by host"]
     H -- "runtime data" --> STUB["Stub per calling class:<br/>Unknown host · JiraDataProvider<br/>+ URL template; unmet join"]
 ```
 
 - **URL templates.** The resolver keeps every constant part of a URL, with runtime parts as `{placeholders}`, following values through parameters and `self.x`.
 - **HTTP signatures** (an `http.yaml` in a pack) name well-known services by their **hosts**. Paths never name a service: an internal service can use the same API shape.
+- **A bare host naming another module of the same repository** (`http://customers-service/...`, `lb://vets-service`, a Feign `@FeignClient("service")` name: the same shape D132's gateway routes resolve) joins straight to that module's own `HttpEndpoint`, by the exact method and path, instead of a per-caller `ExternalSystem` (built 2026-10-28). It's a lookup only: every real endpoint in the repository is already built before outbound calls are resolved, so a miss (no handler at that exact path) falls through to the host-keyed `ExternalSystem` below, not a fabricated stub. **Cross-repository** service names (each microservice its own git repository) aren't resolved this way yet: that needs identity read across ingestions, like Routing's claims (reconcile), which is Open.
 - **Feign `@FeignClient("service")`:** the service name is the host, which joins to the application with that canonical name once [identity](../../concepts/identity.md) is in place.
 - **Declarative clients whose source is in the repository** (Feign, `@HttpExchange`) get `CALLS` on the interface method itself, so callers' flows step into the call. **Generated clients and internal SDKs** use the `client` clue with `calls` and `base` (D73).
 - **Naming the service behind an unknown-host stub is Open:** an LLM or decision reading the calling class, or an admin's declaration ("host X is Billing", ADMIN).
@@ -76,7 +77,7 @@ flowchart LR
     L -- "publishes (its own build file)" --> K["com.acme:payments-client"]
 ```
 
-Today a dependency on another repository's library is a name with nothing behind it. With Artifacts A1, the producing repository's build file says it publishes the coordinate, and the consumer's build file says it depends on it: the coordinate is the shared key, joined like a topic. "Which services use this library?" and "what does a change to `payments-platform` affect?" then work across repositories. An artifact repository (PLATFORM, `v1`) can confirm. **A2** (flows continuing into the library's code) is a separate, later design.
+Today a dependency on another repository's library is a name with nothing behind it. With Artifacts A1, the producing repository's build file says it publishes the coordinate, and the consumer's build file says it depends on it: the coordinate is the shared key, joined like a topic. "Which services use this library?" and "what does a change to `payments-platform` affect?" then work across repositories. An artifact repository (PLATFORM, `v1`) can confirm. The same join tells Steno which applications turn on a library's **interceptors** (a shared JWT filter, a response wrapper): each dependent is checked against the interceptor's activation conditions (D116). Library **entities** (DTOs in a shared model library) join the same way, so a contract defined once is found from every interface that uses it (D115). **A2** (flows continuing into the library's code) is a separate, later design.
 
 ### Routing: the URL the caller uses isn't the endpoint's path (POC stages B–C)
 

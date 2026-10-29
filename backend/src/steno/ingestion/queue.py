@@ -6,8 +6,9 @@ poll at once without claiming the same job.
 - **One job per repository at a time.** A unique index allows one queued-or-running job per
   repository, so a second run can't be queued while one is waiting or running: two runs would
   race on the repository's graph and change history.
-- **A limit on jobs running at once**, across every worker (`max_parallel_jobs`). Each job
-  holds a clone and, for Java, a JVM, so the limit is what bounds memory and disk.
+- **Only what fits the machine** (D128). A job reserves the memory its repository needed last
+  time; a worker claims it only when that fits what its machine has left (`resources.py`).
+  `max_parallel_jobs` is a ceiling across every machine.
 """
 
 from sqlalchemy import func, select
@@ -16,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from steno.config import get_settings
 from steno.db.models import IngestionJob, JobMode, JobStatus, JobTrigger
+from steno.ingestion.resources import Machine, estimate, fits, reserved_mb
 
 # Postgres advisory lock that serializes claims, so the running-jobs limit can't be overshot
 CLAIM_LOCK = 0x5734_0001
@@ -62,9 +64,13 @@ def enqueue(
     return job
 
 
-def claim_next(session: Session) -> IngestionJob | None:
-    """Claim one queued job and mark it running, unless `max_parallel_jobs` are already
-    running. The caller commits."""
+def claim_next(
+    session: Session, host: str | None = None, machine: Machine | None = None
+) -> IngestionJob | None:
+    """Claim the oldest queued job and mark it running, unless `max_parallel_jobs` are already
+    running, or (given this worker's `host` and `machine`) its memory doesn't fit what the
+    machine has left. A job that doesn't fit waits at the head of the queue rather than let
+    smaller ones pass, so a large repository is never starved. The caller commits."""
     session.execute(select(func.pg_advisory_xact_lock(CLAIM_LOCK)))
     running = session.scalar(
         select(func.count())
@@ -80,9 +86,31 @@ def claim_next(session: Session) -> IngestionJob | None:
         .limit(1)
         .with_for_update(skip_locked=True)
     )
-    if job is not None:
-        job.status = JobStatus.RUNNING
-        job.started_at = func.now()
+    if job is None:
+        return None
+    if host is not None and machine is not None:
+        plan = estimate(session, job.repository_id, machine)
+        reserved, here = reserved_mb(session, host)
+        if not fits(plan.reserve_mb, machine, reserved, here):
+            return None
+        job.host = host
+        job.memory_reserved_mb = plan.reserve_mb
+        job.stats = {
+            **(job.stats or {}),
+            "resources": {
+                "host": host,
+                "reserved_mb": plan.reserve_mb,
+                "jvm_heap_mb": plan.jvm_heap_mb,
+                "batched": plan.batched,
+                "estimated_from": plan.source,
+                "machine_memory_mb": machine.memory_mb,
+                "machine_available_mb": machine.available_mb,
+                "cpus": machine.cpus,
+                "jobs_already_running_here": here,
+            },
+        }
+    job.status = JobStatus.RUNNING
+    job.started_at = func.now()
     return job
 
 

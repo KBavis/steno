@@ -1,6 +1,5 @@
 """The graph plan: architecture nodes, code nodes, and each flow's trace and steps (D60, D63)."""
 
-import json
 from pathlib import Path
 from textwrap import dedent
 
@@ -8,6 +7,7 @@ from steno.config import get_settings
 from steno.extraction.facts import Extraction, NodeFact, Origin
 from steno.graph.build import Context, build
 from steno.graph.structure import detect
+from steno.graph.trace import decode as decode_trace
 from steno.ingestion.local import run_folder
 from steno.rule_packs.packs import is_enabled, load_packs
 
@@ -97,7 +97,7 @@ def _app(tmp_path: Path) -> Path:
 
 
 def _trace(plan, flow=FLOW):
-    return {t["path"]: t for t in json.loads(plan.nodes[flow].props["trace"])}
+    return {t["path"]: t for t in decode_trace(plan.nodes[flow].props["trace"])}
 
 
 def test_architecture_and_code_nodes_without_function_nodes():
@@ -207,3 +207,98 @@ def test_an_effect_keeps_every_operation_and_call_site():
     props = plan.edges[("WRITES_TO", "step:a", "table:t")].props
     assert props["operation"] == "delete, upsert"
     assert props["call_sites"] == ["120 upsert", "140 upsert", "164 delete"]
+
+
+def test_an_application_is_a_service_by_the_triggers_of_its_flows():
+    # D85: kinds are labels from what starts the flows; the module that builds it is Deployable
+    plan = _plan()
+    app = plan.nodes["app:demo"]
+    assert "Service" in app.labels and app.props["kinds"] == ["Service"]
+    assert "Deployable" in plan.nodes["module:demo:."].labels
+    assert plan.stats["applications_without_kind"] == []
+
+
+# ----------------------------------------------------------- cross-module HTTP joins
+
+
+def _service_pair(tmp_path: Path) -> Path:
+    """Two modules of one repository: `gateway` calls `orders` by its bare service name,
+    the shape a gateway route's `uri` or a Feign `@FeignClient` name takes (D132's
+    `route_target`), with no scheme and no dots."""
+    (tmp_path / "orders").mkdir()
+    (tmp_path / "orders/requirements.txt").write_text("fastapi\n")
+    (tmp_path / "orders/__init__.py").write_text("")
+    (tmp_path / "orders/orders_api.py").write_text(
+        dedent(
+            """
+            from fastapi import FastAPI
+
+            orders_app = FastAPI()
+
+
+            @orders_app.get("/items")
+            def list_items():
+                return []
+            """
+        ).lstrip()
+    )
+    (tmp_path / "gateway").mkdir()
+    (tmp_path / "gateway/requirements.txt").write_text("fastapi\nrequests\n")
+    (tmp_path / "gateway/__init__.py").write_text("")
+    (tmp_path / "gateway/gateway_api.py").write_text(
+        dedent(
+            """
+            import requests
+            from fastapi import FastAPI
+
+            gateway_app = FastAPI()
+
+
+            @gateway_app.get("/gateway/items")
+            def proxy_items():
+                return requests.get("http://demo-orders/items").json()
+            """
+        ).lstrip()
+    )
+    return tmp_path
+
+
+def test_a_call_to_another_modules_bare_service_name_joins_its_endpoint(tmp_path: Path):
+    plan = _plan(_service_pair(tmp_path))
+    # Each module is its own application, named after the repository plus its folder (no
+    # identity stage in this test, same fallback production uses)
+    assert "app:demo-orders" in plan.nodes and "app:demo-gateway" in plan.nodes
+
+    target = plan.nodes["endpoint:demo-orders:GET:/items"]
+    assert "HttpEndpoint" in target.labels and target.props["path"] == "/items"
+    # Written once, by orders' own build (not a second, fabricated copy from the caller)
+    assert sum(1 for n in plan.nodes.values() if n.props.get("path") == "/items") == 1
+
+    edges = {(e.type, e.src, e.dst) for e in plan.edges.values()}
+    assert (
+        "CALLS",
+        "flow:demo-gateway:GET /gateway/items",
+        "endpoint:demo-orders:GET:/items",
+    ) in edges
+    # Not also filed as an ExternalSystem keyed by the bare host
+    assert "external:demo-orders" not in plan.nodes
+
+
+def test_a_bare_host_that_names_no_known_module_still_becomes_an_external_system(
+    tmp_path: Path,
+):
+    (tmp_path / "requirements.txt").write_text("fastapi\nrequests\n")
+    (tmp_path / "main.py").write_text(
+        dedent(
+            """
+            import requests
+
+
+            def call_unknown():
+                return requests.get("http://totally-unrelated-service/items").json()
+            """
+        ).lstrip()
+    )
+    plan = _plan(tmp_path)
+    externals = [n for n in plan.nodes.values() if "ExternalSystem" in n.labels]
+    assert any(n.props.get("host") == "totally-unrelated-service" for n in externals)

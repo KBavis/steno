@@ -24,6 +24,7 @@ from steno.claims.store import store_claims
 from steno.config import get_settings
 from steno.connectors.git import clone as git_clone
 from steno.coverage.collect import collect as collect_coverage
+from steno.coverage.patterns import record as record_patterns
 from steno.db.models import (
     ChangeKind,
     Connector,
@@ -31,6 +32,7 @@ from steno.db.models import (
     CoverageKind,
     CoverageStatus,
     FactChange,
+    IgnoredFile,
     IngestionJob,
     IngestionStage,
     JobMode,
@@ -51,7 +53,10 @@ from steno.graph.writer import write_plan
 from steno.identity.identify import deployables
 from steno.identity.identify import identify as run_identify
 from steno.identity.registry import SqlRegistry
+from steno.ingestion import memory
+from steno.ingestion.resources import JVM_HEAP_MIN_MB, budget_mb, machine, size_mb
 from steno.reconcile.run import reconcile as run_reconcile
+from steno.resolvers.java import JVM_BATCHED, JVM_HEAP_MB
 from steno.rule_packs.packs import is_enabled, load_all_packs
 from steno.rule_packs.versions import dependencies
 
@@ -115,11 +120,21 @@ def parse(ctx: JobContext) -> dict[str, Any]:
     ctx.state["packs"] = packs
     # Library versions, checked against what each pack is tested on (coverage)
     ctx.state["dependencies"] = deps = dependencies(ctx.workspace)
+    memory_plan = _plan_java(ctx)
     engine = Engine(ctx.workspace, packs)
     engine.parse()
+    if _out_of_memory(engine) and _more_memory(ctx, memory_plan):
+        # Retry here rather than fail and wait for the next run: in batches, with more heap
+        engine = Engine(ctx.workspace, packs)
+        engine.parse()
+    if engine.resolver is not None and engine.resolver.failed:
+        # Every flow in that language would come out hollow, and writing it would remove the
+        # repository's good facts: fail here so nothing is written
+        raise RuntimeError(f"symbol resolution failed: {engine.resolver.failed}")
     ctx.state["engine"] = engine
     return {
         "packs": [p.name for p in packs],
+        "java_memory": memory_plan,
         "files": len(engine.files),
         "resolvers": engine.resolver.stats() if engine.resolver else {},
         "libraries": len({d.name for d in deps}),
@@ -216,7 +231,7 @@ def flows(ctx: JobContext) -> dict[str, Any]:
         "modules": {m.path: sorted(m.roles) for m in structure.modules},
         "flows": len(flow_nodes),
         "steps": sum(1 for n in plan.nodes.values() if n.labels[0] == "Step"),
-        "trace_entries": sum(n.props.get("trace", "").count('"path"') for n in flow_nodes),
+        "trace_entries": sum(n.props.get("trace_entries") or 0 for n in flow_nodes),
         **plan.stats,
         "unmet_joins": len(plan.stats.get("unmet_joins", [])),
         "unmet_join_samples": plan.stats.get("unmet_joins", [])[:20],
@@ -296,13 +311,24 @@ def coverage(ctx: JobContext) -> dict[str, Any]:
         enabled=ctx.state.get("packs"),
         deps=ctx.state.get("dependencies"),
         **_agreement_items(ctx),
+        files=[p.relative_to(engine.repo).as_posix() for p in engine.files],
+        read=engine.read,
+        root=engine.repo,
+        in_library=_in_library(ctx),
+        ignored_files={(f.fingerprint, f.name) for f in ctx.session.scalars(select(IgnoredFile))},
+        config_used=(
+            engine.config_used
+            | (getattr(engine.resolver.properties, "used", set()) if engine.resolver else set())
+        ),
     )
     previous = _previous_triage(ctx)
+    statuses: dict[str, CoverageStatus] = {}
     for it in report.items:
         status = previous.get((it.kind, it.target), CoverageStatus.UNEXPLAINED)
         # "Explained" means a rule covers it now; if it's back, it isn't
         if status == CoverageStatus.EXPLAINED:
             status = CoverageStatus.UNEXPLAINED
+        statuses[it.fingerprint] = status
         ctx.session.add(
             CoverageItem(
                 job_id=ctx.job.id,
@@ -317,7 +343,25 @@ def coverage(ctx: JobContext) -> dict[str, Any]:
                 status=status,
             )
         )
-    return report.metrics
+    # The organization's patterns: what rule curation works from (D121)
+    started = time.perf_counter()
+    patterns = record_patterns(ctx.session, ctx.repository.id, ctx.job.id, report.items, statuses)
+    timings = {
+        **report.metrics.get("timings", {}),
+        "patterns": round(time.perf_counter() - started, 2),
+    }
+    return {**report.metrics, "timings": timings, "patterns": patterns}
+
+
+def _in_library(ctx: JobContext) -> Any:
+    """Whether a file is in one of the repository's library modules (D122 evidence)."""
+    structure = ctx.state["structure"]
+
+    def check(file: str) -> bool:
+        module = structure.module_of(file)
+        return module is not None and "Library" in module.roles
+
+    return check
 
 
 def _application_of(ctx: JobContext) -> Any:
@@ -333,12 +377,12 @@ def _application_of(ctx: JobContext) -> Any:
         identity = identities.get(module.path)
         return identity.canonical if identity else str(structure.application_name(repo, module))
 
-    services = [m for m in structure.modules if "Service" in m.roles]
+    services = [m for m in structure.modules if "Deployable" in m.roles]
     only = name(services[0]) if len(services) == 1 else ""
 
     def app_of(file: str | None) -> str:
         module = structure.module_of(file) if file else None
-        if module is not None and "Service" in module.roles:
+        if module is not None and "Deployable" in module.roles:
             return name(module)
         return only
 
@@ -396,6 +440,52 @@ STAGES: list[tuple[StageName, StageFn]] = [
 ]
 
 
+def _plan_java(ctx: JobContext) -> dict[str, Any]:
+    """How the Java resolver runs for this job: in batches when the job's plan says so (its
+    last run ran out of memory) or the repository is large (D127)."""
+    assert ctx.workspace is not None
+    settings = get_settings()
+    java = sum(1 for _ in ctx.workspace.rglob("*.java"))
+    if java > settings.resolver_jvm_batch_above_files and not JVM_BATCHED.get():
+        JVM_BATCHED.set(True)
+    return {
+        "java_files": java,
+        "batched": JVM_BATCHED.get(),
+        "heap_mb": JVM_HEAP_MB.get() or size_mb(settings.resolver_jvm_max_heap),
+        "retried": False,
+    }
+
+
+def _out_of_memory(engine: Engine) -> bool:
+    return bool(
+        engine.resolver is not None
+        and engine.resolver.failed
+        and "OutOfMemoryError" in engine.resolver.failed
+    )
+
+
+def _more_memory(ctx: JobContext, plan: dict[str, Any]) -> bool:
+    """After the resolver ran out of memory: batches, and twice the heap within this
+    machine's budget. Recorded in the job's plan, so the next run starts from it. False when
+    there's nothing more to give (already batched at the most the machine allows)."""
+    settings = get_settings()
+    cap = max(JVM_HEAP_MIN_MB, budget_mb(machine()) - settings.job_memory_default_mb)
+    heap = min(plan["heap_mb"] * 2, cap)
+    if plan["batched"] and heap <= plan["heap_mb"]:
+        return False
+    JVM_BATCHED.set(True)
+    JVM_HEAP_MB.set(heap)
+    log.warning(
+        "job %s: the Java resolver ran out of memory at %s MB; retrying in batches at %s MB",
+        ctx.job.id, plan["heap_mb"], heap,
+    )  # fmt: skip
+    plan.update(retried=True, batched=True, heap_mb=heap)
+    stats = dict(ctx.job.stats or {})
+    stats["resources"] = {**(stats.get("resources") or {}), "jvm_heap_mb": heap, "batched": True}
+    ctx.job.stats = stats
+    return True
+
+
 def run_job(session: Session, job: IngestionJob) -> None:
     """Run every stage in order, committing each stage's row so progress is visible."""
     repository = session.get_one(Repository, job.repository_id)
@@ -405,10 +495,17 @@ def run_job(session: Session, job: IngestionJob) -> None:
         connector=session.get_one(Connector, repository.connector_id),
         session=session,
     )
+    # The JVM heap this repository needed last time, with headroom (D128)
+    resources = (job.stats or {}).get("resources") or {}
+    heap = resources.get("jvm_heap_mb")
+    token = JVM_HEAP_MB.set(heap if isinstance(heap, int) else None)
+    batched = JVM_BATCHED.set(bool(resources.get("batched")))
     try:
         for name, fn in STAGES:
             _run_stage(session, ctx, name, fn)
     finally:
+        JVM_HEAP_MB.reset(token)
+        JVM_BATCHED.reset(batched)
         if ctx.workspace is not None and ctx.workspace.exists():
             shutil.rmtree(ctx.workspace, ignore_errors=True)
 
@@ -421,6 +518,7 @@ def _run_stage(session: Session, ctx: JobContext, name: StageName, fn: StageFn) 
     session.commit()
 
     started = time.perf_counter()
+    measured = memory.reset_peak()
     try:
         metrics = fn(ctx)
         stage.status = StageStatus.SUCCEEDED
@@ -433,7 +531,12 @@ def _run_stage(session: Session, ctx: JobContext, name: StageName, fn: StageFn) 
         stage.finished_at = _now()
         session.commit()
         raise
-    stage.metrics = {**metrics, "seconds": round(time.perf_counter() - started, 3)}
+    peak = memory.peak_mb() if measured else None
+    stage.metrics = {
+        **metrics,
+        "seconds": round(time.perf_counter() - started, 3),
+        **({"rss_peak_mb": peak} if peak is not None else {}),
+    }
     stage.finished_at = _now()
     session.commit()
     log.info("job %s: %s %s", ctx.job.id, name, stage.status)

@@ -163,6 +163,7 @@ class PythonResolver:
         self.by_path: dict[Path, ModuleInfo] = {}
         self.aliases: dict[str, ModuleInfo] = {}  # package-qualified names of modules
         self.errors: list[tuple[Path, str]] = []
+        self.failed: str | None = None
         # Return types of library methods, taught by `client` clues: (type, method) → type
         self.return_hints: dict[tuple[str, str], str] = {}
         # Configuration values (property clues): key → value

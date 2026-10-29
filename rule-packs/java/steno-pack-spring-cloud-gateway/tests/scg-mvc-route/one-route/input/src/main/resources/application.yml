@@ -1,0 +1,11 @@
+spring:
+  application:
+    name: edge
+  cloud:
+    gateway:
+      mvc:
+        routes:
+          - id: users
+            uri: http://users:8080
+            predicates:
+              - Path=/users/**

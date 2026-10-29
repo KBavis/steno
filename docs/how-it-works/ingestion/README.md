@@ -7,6 +7,7 @@ How Steno turns repositories into graph facts: deterministically, idempotently, 
 > - **Parse** reads the code once. **Extract** runs every rule of every enabled rule pack over every file. **Assemble** fills in facts whose pieces were in different files. **Flows** builds the call graph in memory and derives every flow. **Write** compares with the graph by stable ID and writes only differences. **Coverage** reports what no rule explained.
 > - Each night, every repository whose main branch moved is re-analyzed in full; only changes are written. Re-ingesting the same commit writes nothing.
 > - **Identify** gives every application a permanent Steno ID and its real name; **reconcile** compares the code with other witnesses (deploy and ACL files, manifests). See [identify and reconcile](./identify-and-reconcile.md) and [claims and reconcile](./claims-and-reconcile.md).
+> - **Rule curation**, a separate job after the nightly runs, drafts rules for what coverage couldn't explain; a person approves them ([rule curation](./rule-curation.md)).
 
 ---
 
@@ -15,7 +16,7 @@ How Steno turns repositories into graph facts: deterministically, idempotently, 
 | Principle | Status |
 |---|---|
 | **Build bottom-up.** Applications first; space and organization views are rollups. | Decided |
-| **Deterministic first.** Rules extract facts. A decision model decides only what rules can't. An LLM only writes prose. | Decided |
+| **Deterministic first.** Rules extract facts. A decision model decides only what rules can't. An LLM writes prose and drafts rules a person approves, never facts (D120). | Decided |
 | **Agnostic core, organization-specific rules.** The core defines fact types and facets; rule packs and witnesses are what organizations extend. | Decided |
 | **Passive.** Nothing is required of an organization's repositories. No OpenTelemetry, Terraform, or annotations. | Decided |
 | **Idempotent.** Re-running any ingestion yields the same graph. | Decided |
@@ -93,6 +94,8 @@ sequenceDiagram
 ```
 
 - **Two workers never get the same job** (`SKIP LOCKED`), so more worker processes run more jobs in parallel.
+- **Work fits the machine (D128).** A worker claims the oldest job only when the memory that repository needed last time (plus headroom) fits what its machine has left; a job alone on a machine always starts. The same Steno runs one large job at a time on a laptop and many on a large worker, with nothing to tune. A repository whose run ran out of JVM memory gets twice the heap and batched resolution next time.
+- **A resolver that fails as a whole fails the job**, so a repository's last good graph is never replaced by hollow flows.
 - **A failed stage stops the job**, marks it failed with the error, and the clone is deleted either way. Nothing is written to Neo4j, so a failed job can't remove anything.
 - **Stopping a worker** (Ctrl+C) lets the current job finish first.
 
@@ -148,7 +151,7 @@ Measured runs, for scale:
 | Contextualized (Python) | 190 files, 112 modules, 486 functions | About 500 nodes, 1,300 edges, and 33 flows (counts vary slightly by commit and rule version), about 12 s end to end. In one run: parse 0.16 s, extract 1.8 s, assemble 1.7 s, flows 5.3 s. |
 | budgeting-app (Java) | 205 Java files | 54 flows (53 endpoints, one schedule), all 15 entities mapped to tables, 94.6% of I/O calls explained, about 5 s; the JVM helper takes about 2 s |
 
-**Flows is the slowest stage**: it asks the symbol resolver for every call in every function. **Assemble's** time is mostly the client assembler visiting every method call. Scale work (one pass per language for all rules, lazy indexing, per-file caching) is planned when a large repository shows it matters.
+**Flows is the slowest stage**: it asks the symbol resolver for every call in every function. **Assemble's** time is mostly the client assembler visiting every method call. Scale work (one pass per language for all rules, lazy indexing, per-file caching) is planned when a large repository shows it matters. For memory, very large Java repositories are resolved in two passes and batches, and peak memory is recorded per stage ([resolvers §5.3](./resolvers.md#53-large-repositories-decided-d127-partly-built), D127).
 
 ## 7. Sub-pages
 
@@ -162,3 +165,5 @@ Measured runs, for scale:
 | [Identify and reconcile](./identify-and-reconcile.md) | Application identity; combining witnesses |
 | [Claims and reconcile](./claims-and-reconcile.md) | What other witnesses say, the claim store, and agreement with the code |
 | [Coverage report](./coverage-report.md) | What no rule explained, and agreement between witnesses |
+| [Rule curation](./rule-curation.md) | Drafting, proving, and approving rules for what no rule explained |
+| [Large repositories](./large-repositories.md) | Ingesting very large repositories within memory: two-pass Java resolution, streaming, compact traces, workers sized to the machine |

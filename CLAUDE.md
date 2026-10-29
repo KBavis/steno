@@ -5,14 +5,14 @@ An organization-wide context engine for AI agents. It ingests repositories into 
 ## Start here
 
 - **`docs/` is the source of truth. Start at `docs/README.md`.** It has four sections, each with a hub page (`README.md`) that summarizes it and links deeper: `docs/purpose/` (what Steno is for, lead use cases, where it fits, integration contract), `docs/concepts/` (the graph, witnesses and facets, identity, trust), `docs/how-it-works/` (architecture, ingestion stage by stage, rules, resolvers, graph schema, MCP, storage, security), `docs/plan/` (roadmap, onboarding, decisions).
-- Every design point is marked **Decided**, **Proposed**, or **Open**, and scoped `POC`, `v1`, or `v2`. The decision log is `docs/plan/decisions.md` (D1–D114 and open questions). Follow Decided items; raise Proposed or Open items with the user before relying on them. Design choices belong to the user.
+- Every design point is marked **Decided**, **Proposed**, or **Open**, and scoped `POC`, `v1`, or `v2`. The decision log is `docs/plan/decisions.md` (D1–D132 and open questions). Follow Decided items; raise Proposed or Open items with the user before relying on them. Design choices belong to the user.
 - Reference pages: the node and edge vocabulary is `docs/how-it-works/graph-reference.md` (§3–4); the rule format is `docs/how-it-works/ingestion/rules-and-packs.md`; the Postgres tables are `docs/how-it-works/storage.md`.
 - `docs/next-steps.md` is a local, gitignored working list; never link it from tracked files. `docs/my_docs/` is the user's personal notes (gitignored).
 - Docs are Markdown only, layered: a short "In one minute" summary and a diagram at the top of each page, detail in linked sub-pages.
 
 ## Current stage
 
-**Proof of concept, stage A** (`docs/plan/roadmap.md`): application identity (Steno IDs, the name ladder), application kinds, witness types on facts, a completeness block in MCP answers, the reconcile design, and a scored question set compared against an agent without Steno. Then B (a stub organization exercising every facet), C (spring-petclinic-microservices), D (our organization). Accuracy of MCP answers is the bar, and a feature belongs in Steno only if a use case in `docs/purpose/use-cases.md` needs it. Jev and runtime evidence are `v2`; decisions use stand-ins.
+**Proof of concept, stage A** (`docs/plan/roadmap.md`). Built: identity, witness types, claims and reconcile, the completeness block. Remaining: the work in the roadmap's build order for D115–D127 (answers that say what they checked and list their sources, Java at scale, patterns and rule curation), and a scored question set compared against an agent without Steno. Then B (a stub organization exercising every facet), C (spring-petclinic-microservices), D (our organization). Accuracy of MCP answers is the bar, and a feature belongs in Steno only if a use case in `docs/purpose/use-cases.md` needs it. Jev and runtime evidence are `v2`; decisions use stand-ins.
 
 ## Repository layout
 
@@ -32,9 +32,11 @@ Run from the repo root (see `Makefile`): `make up`, `make migrate`, `make graph-
 
 ## Key decisions to keep in mind
 
-- **One Neo4j graph** with **architecture nodes** (what the software does: applications, interfaces, flows, steps, tables) and **code nodes** (how it's built: repository, module, file), joined by `BUILT_FROM`. Functions aren't nodes: each flow stores its trace (D60). Search covers the searchable architecture nodes (flows, applications, spaces, organization, interfaces, entities, tables, data stores, external systems; D104) plus function names in traces; never code nodes.
-- **Postgres** holds what Steno is told and what it did (connectors, jobs, change history, logs; planned: the identity registry and claim store). Neo4j must stay rebuildable from Postgres + git.
-- **Deterministic first:** rules produce facts; decisions rules can't make use stand-ins (Jev in `v2`); an LLM only writes text (flow purposes and narratives, cards).
+- **One Neo4j graph** with **architecture nodes** (what the software does: applications, interfaces, flows, steps, tables) and **code nodes** (how it's built: repository, module, file), joined by `BUILT_FROM`. Functions aren't nodes: each flow stores its trace (D60). Search covers the searchable architecture nodes (flows, applications, spaces, organization, interfaces, entities, tables, data stores, external systems, and, once built, interceptors; D104, D116) plus function names in traces; never code nodes.
+- **Postgres** holds what Steno is told and what it did (connectors, jobs, change history, logs, the identity registry, the claim store, coverage patterns, curation runs and rule proposals). Neo4j must stay rebuildable from Postgres + git.
+- **Deterministic first:** rules produce facts; decisions rules can't make use stand-ins (Jev in `v2`); an LLM writes text (flow purposes and narratives, cards) and drafts rules, never facts. Drafted rules are proven (tests, a shadow run) and approved by a person before they run (rule curation, D120).
+- **Breadth, not depth:** Steno is the map and serves code from the git host; consuming agents reason and clone only what a task needs. Answers list their `sources`; Steno never runs an agent to answer a question (D119).
+- **Rules stay YAML in git.** Postgres holds only state about rules (patterns, proposals, rule health). Approved rules are committed by Steno: rules for public libraries to the core packs in `rule-packs/`, rules for internal frameworks to the organization's pack repository, as one `steno/rules` pull request per destination by default (D125, D129, D131).
 - **Witnesses and facets:** a **witness** is one concrete source of statements (an application's code, the XLD repository, a manifest, an admin); its **witness type** is CODE, PLATFORM, DECLARED, or ADMIN (OBSERVED in `v2`). Steno answers a fixed set of facets; each organization's witnesses supply them; independent witnesses are compared (D76–D80, D112). "Provider" means an LLM provider only.
 - **Application identity:** a permanent Steno ID, a canonical (deployed) name, a display name, and aliases; child IDs are built on the Steno ID (D81–D84).
 - **Gaps are visible, never silent.** No file contents are stored; code tools read from the git host at the ingested commit. **Every MCP result carries citations.**

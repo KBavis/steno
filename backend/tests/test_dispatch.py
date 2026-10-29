@@ -1,13 +1,13 @@
 """Calls through base classes: an inherited method runs as the subclass it was called on, and a
 call to an abstract method whose implementation is chosen at runtime goes to every candidate."""
 
-import json
 import textwrap
 from pathlib import Path
 
 from steno.config import get_settings
 from steno.graph.build import Context, build
 from steno.graph.structure import detect
+from steno.graph.trace import decode as decode_trace
 from steno.ingestion.local import run_folder
 from steno.rule_packs.packs import is_enabled, load_packs
 
@@ -80,7 +80,7 @@ def _plan(tmp_path: Path):
 
 def _trace(plan) -> list[dict]:
     flow = next(n for n in plan.nodes.values() if n.labels[0] == "Flow")
-    return json.loads(flow.props["trace"])
+    return decode_trace(flow.props["trace"])
 
 
 def _children(trace: list[dict], path: str) -> list[dict]:

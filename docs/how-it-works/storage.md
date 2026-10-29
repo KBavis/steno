@@ -3,7 +3,7 @@
 Where Steno keeps things: **Postgres holds what Steno is told and what it did; Neo4j holds what it knows.** Part of [How it works](./README.md).
 
 > **In one minute**
-> - **Postgres:** the organization, spaces, connectors, repositories; every job and stage; coverage items; change history; logs of LLM, decision, and tool calls. Also the work queue. Also the identity registry and the claim store.
+> - **Postgres:** the organization, spaces, connectors, repositories; every job and stage; coverage items; change history; logs of LLM, decision, and tool calls. Also the work queue. Also the identity registry and the claim store, and (planned) rule curation's patterns, proposals, and rule health.
 > - **Neo4j:** the graph. Declared structure (organization, spaces) is projected into it from Postgres; everything else comes from ingestion.
 > - **Neo4j can always be rebuilt** from Postgres plus git, without re-spending on the LLM. Postgres is what must be backed up.
 > - No facts and no file contents are stored in Postgres.
@@ -48,7 +48,7 @@ flowchart LR
 - **Neo4j can be rebuilt** from Postgres plus the repositories, **without re-spending on the LLM**, because every generated text is cached in `llm_output`. Nothing is stored only in Neo4j. (Decided)
 - **One Steno deployment per organization**, so no tables carry an `organization_id`. The organization itself is the single row in `organization`. (Decided)
 - **The work queue lives in Postgres:** workers claim `queued` jobs with `SELECT … FOR UPDATE SKIP LOCKED`, so no separate broker is needed. (Decided)
-- **One job per repository, a cap on jobs at once (Decided, D99).** A unique index allows one queued-or-running job per repository (two runs would race on its graph and change history). Claims are serialized with an advisory lock and stop at `STENO_MAX_PARALLEL_JOBS` running jobs across all workers; `steno worker` starts `STENO_WORKER_PROCESSES` processes. Measured per job: 70–500 MB for Python's side, about 500 MB for the JVM helper on a 200-file Java service (capped by `STENO_RESOLVER_JVM_MAX_HEAP`), plus the clone. A safe limit is about one job per 2 GB of RAM, and no more than the CPU cores.
+- **One job per repository; work fits the machine (Decided, D99, D128).** A unique index allows one queued-or-running job per repository (two runs would race on its graph and change history). Claims are serialized with an advisory lock. A worker claims the oldest job only when its memory reservation fits what its machine has left: the reservation comes from the repository's last measured run, the machine is read at claim time (a container's limits when there are any), and jobs on a machine may reserve `STENO_WORKER_MEMORY_FRACTION` (80%) of its memory. `STENO_MAX_PARALLEL_JOBS` is a ceiling across machines; `steno worker` starts one process per CPU (up to 8) unless `STENO_WORKER_PROCESSES` says otherwise. Measured: budgeting-app (205 Java files) peaks around 135 MB in the worker and 350 MB in the JVM helper; ThingsBoard (5,494 Java files, resolved in batches) peaks at 1.5 GB in the worker (4.6 GB before traces were stored compact) and about 2.4 GB in the JVM helper. Each job's reservation and the machine it saw are in `ingestion_job.stats.resources`.
 - **Identity and external claims live in Postgres (Decided, D81, D87).** Steno IDs can't be recreated from git, and claims from systems reached through an API aren't in git, so both must be in Postgres for Neo4j to stay rebuildable.
 
 ## 3. Tables
@@ -89,6 +89,17 @@ erDiagram
 | `application_identity`, `application_alias`, `application_link`, `unmatched_name` | The identity registry: Steno IDs, names and their sources, lifecycle, conflicts, admin renames, names no application matched | [Identify and reconcile §2](./ingestion/identify-and-reconcile.md#2-identify) |
 | `claim` | What PLATFORM, DECLARED, and ADMIN witnesses say, per facet and subject, with witness type, witness, citation, and as-of jobs (D109) | [Claims and reconcile §5](./ingestion/claims-and-reconcile.md#5-the-claim-store) |
 
+**Rule curation** (D120–D126; [rule curation](./ingestion/rule-curation.md)). Rules themselves stay YAML in git; these tables hold only what Steno knows and did about them. `coverage_pattern`, `coverage_occurrence`, `ignored_file`, `curation_run`, and `rule_proposal` are built; `rule_health` is planned:
+
+| Table | Holds |
+|---|---|
+| `coverage_pattern` | One row per fingerprint across the organization (`signal:target`, e.g. `unknown_hook:com.acme.messaging.AcmeHandler`): `kind`, `signal`, `label`, `owner` (the library, package root, or config prefix it's clustered by; none for an application's own code), reach (`repositories`, `applications`, `occurrences`), `score`, `state` (open / queued / drafting / proposed / approved / covered / rejected / ignored / blocked_vocabulary / needs_person), `first_seen_job`, `note` (why it's in its state) |
+| `coverage_occurrence` | One row per place a pattern occurs in a repository's latest run: `pattern_id`, `repository_id`, `file`, `symbol` (the enclosing function, so moved lines aren't new code), `application`, `first_seen_job`. Each run replaces its repository's rows: what's gone is deleted. Reach is counted from these; new code is the rows a run saw first. |
+| `ignored_file` | A file name ignored within one unread-files pattern: `fingerprint`, `name`, `note`. Approving an ignore for `unread_file:.yml@/` because of `docker-compose.local.yml` ignores that name there, not every root-level `.yml` file; coverage skips only those names, and the pattern reopens when other files appear. |
+| `rule_proposal` | A draft and its review: `kind` (rule / framework / ignore / vocabulary / fix), its patterns, the drafted files (rule YAML and tests), the plain-English summary, the shadow run's impact (json), samples and near misses, flags, the drafter backend, its LLM cost, `status` (drafting / proving / ready / approved / rejected / superseded / needs_person), the reviewer and comment, and the commit it landed in |
+| `curation_run` | One row per curation job: trigger, budget, spent, patterns considered, proposals made |
+| `rule_health` | Per rule and run: matches, confirmations by other witnesses, `version_untested`; what the "rule broke" alarms read (D126) |
+
 **Planned:** the setup sheet (per organization: witnesses per facet, their witness types and precedence, naming patterns; [Onboarding](../plan/onboarding.md)).
 
 ### Columns
@@ -102,7 +113,7 @@ erDiagram
 | `glossary_term` | `id`, `space_id`, `term`, `target_node_id`, `definition` |
 | `rule_pack` | `id`, `name`, `version`, `source` (core / org) |
 | `repository_rule_pack` | `repository_id`, `rule_pack_id`, `enabled`, `reason` (auto / manual) |
-| `ingestion_job` | `id`, `repository_id`, `trigger` (initial / nightly / manual), `mode` (full / dry_run), `from_sha`, `to_sha`, `status` (queued / running / succeeded / failed), `queued_at`, `started_at`, `finished_at`, `error`, `stats` (json) |
+| `ingestion_job` | `id`, `repository_id`, `trigger` (initial / nightly / manual), `mode` (full / dry_run), `from_sha`, `to_sha`, `status` (queued / running / succeeded / failed), `queued_at`, `started_at`, `finished_at`, `error`, `stats` (json), `host` and `memory_reserved_mb` (the machine running it and what it reserved there, D128) |
 | `ingestion_stage` | `id`, `job_id`, `stage` (clone / deps / parse / extract / assemble / identify / flows / write / reconcile / coverage / cards), `started_at`, `finished_at`, `status`, `metrics` (json), `llm_cost`, `jev_cost` |
 | `coverage_item` | `id`, `job_id`, `repository_id`, `kind` (external call / library / unreachable / unmet join / inconsistency / config), `target_symbol`, `occurrences`, `samples` (json), `status` (unexplained / ignored / explained) |
 | `fact_change` | `id`, `job_id`, `fact_id`, `fact_type`, `change` (added / removed / modified), `before` (json), `after` (json), `commit_sha` |
@@ -128,7 +139,7 @@ erDiagram
 | Table | Why |
 |---|---|
 | `ingestion_job` | Every job (`trigger`: initial / nightly / manual; `mode`: full / **dry_run**) and its status (**queued** / running / succeeded / failed). **It's also the work queue.** |
-| `ingestion_stage` | Per stage (clone, deps, parse, extract, assemble, identify, flows, write, reconcile, coverage, cards): timings, metrics (files, functions, flows), and **cost** (`llm_cost`, `jev_cost`, summed from the calls made in that stage). This is the dry-run report. |
+| `ingestion_stage` | Per stage (clone, deps, parse, extract, assemble, identify, flows, write, reconcile, coverage, cards): timings, metrics (files, functions, flows; planned: peak memory and the JVM helper's peak heap, D127), and **cost** (`llm_cost`, `jev_cost`, summed from the calls made in that stage). This is the dry-run report. |
 | `coverage_item` | What **no rule explained** but looks like it matters (the coverage signals; see [Coverage report](./ingestion/coverage-report.md)), with occurrence counts and sample locations. `status` is unexplained / ignored / explained, so it's tracked across jobs, noise stays hidden once ignored, and open items measure how complete an app's graph is. The org-wide report groups items by `target_symbol` across repositories. |
 
 ### Change history
@@ -146,7 +157,7 @@ erDiagram
 
 | Table | Why |
 |---|---|
-| `llm_call` | Every LLM call: purpose (flow purpose, flow narrative, app card, …), model, tokens (including cached), cost, latency, and the stage it ran in |
+| `llm_call` | Every LLM call: purpose (flow purpose, flow narrative, app card, rule triage and drafting, …), model, tokens (including cached), cost, latency, and the stage it ran in |
 | `llm_output` | The text each call produced, tied to its `llm_call` and its node. Looked up by `(node_id, kind, input_hash)` before calling the LLM, so unchanged inputs are never paid for twice. `is_current` keeps earlier versions. |
 | `jev_decision` | Every Jev input, output, confidence, and latency. From ingestion, it's linked to the stage; at query time, to the request. |
 | `tool_call` | Every MCP tool call from agents: tool, parameters, latency, result count, grouped by `session_id`. It measures round trips per question and the latency targets, shows chatty patterns worth a batch tool, and joins with `jev_decision` to debug a bad answer. |
