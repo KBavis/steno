@@ -15,9 +15,11 @@ there, and the call says so (D71). Lombok-generated members are added by the hel
 import json
 import logging
 import re
+import shutil
 import subprocess
 import tempfile
-from collections.abc import Iterator
+from collections import defaultdict
+from collections.abc import Iterator, Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,6 +37,7 @@ from steno.resolvers.base import (
     UnresolvedCall,
     span,
 )
+from steno.resolvers.disk_index import HelperIndex
 from steno.source.files import is_test_file, source_files
 
 log = logging.getLogger(__name__)
@@ -119,10 +122,14 @@ class JavaResolver:
 
     def __init__(self, root: Path, files: list[Path] | None = None, jars: list[Path] | None = None):
         self.root = root
+        self._rels: dict[Path, str] = {}  # each path's relative form, asked once per rule match
         self.errors: list[tuple[Path, str]] = []
         self.failed: str | None = None
         self.properties: dict[str, Any] = {}
         self.return_hints: dict[tuple[str, str], str] = {}  # not used yet: no library types
+        # Expressions and calls, indexed on disk for as long as this resolver lives (D127)
+        self._parts = tempfile.TemporaryDirectory(prefix="steno-java-index-")
+        self._index: HelperIndex | None = None
         sources = [
             p
             for p in (files if files is not None else source_files(root, (".java",)))
@@ -192,17 +199,15 @@ class JavaResolver:
             for f in data.get("functions", [])
             if f.get("implementations")
         }
-        self._calls: dict[str, list[dict[str, Any]]] = data.get("calls", {})
-        self._exprs: dict[tuple[str, int, int, int, int], dict[str, Any]] = {}
-        self._by_lines: dict[tuple[str, int, int], list[dict[str, Any]]] = {}
-        for e in data.get("exprs", []):
-            self._exprs[(e["file"], e["sl"], e["sc"], e["el"], e["ec"])] = e
-            self._by_lines.setdefault((e["file"], e["sl"], e["el"]), []).append(e)
+        self._calls: Mapping[str, list[dict[str, Any]]] = self._index.calls if self._index else {}
         self._imports: dict[str, list[str]] = data.get("imports", {})
         self._by_file: dict[str, list[JavaFunction]] = {}
         for fn in self._functions.values():
             self._by_file.setdefault(self._rel(fn.path), []).append(fn)
         self._packages = {t.rsplit(".", 1)[0] for t in self.types}
+        self._types_by_file: dict[str, list[JavaType]] = {}
+        for t in self.types.values():
+            self._types_by_file.setdefault(t.file, []).append(t)
         self._ancestors: dict[str, list[str]] = {}
 
     # ------------------------------------------------------------- the helper
@@ -211,11 +216,60 @@ class JavaResolver:
         batch = get_settings().resolver_jvm_batch_files or (
             DEFAULT_BATCH_FILES if JVM_BATCHED.get() else 0
         )
-        data, error = run_helper(self.root, sources, jars, self.language_level, batch)
+        parts = Path(self._parts.name)
+        if JVM_BY_MODULE.get():
+            return self._run_by_module(sources, jars, batch, parts)
+        data, error = run_helper(self.root, sources, jars, self.language_level, batch, parts)
         if error:
             self.errors.append((self.root, error))
             self.failed = error
+            return data
+        self._index = HelperIndex(parts)
         return data
+
+    def _run_by_module(
+        self, sources: list[Path], jars: list[Path], batch: int, parts: Path
+    ) -> dict[str, Any]:
+        """The whole repository failed even with more heap: resolve each build module on its
+        own, so one module that can't be resolved is a gap and the rest still are (D127). A
+        call from one module into another can't be resolved this way, and says so."""
+        merged: dict[str, Any] = {"types": [], "functions": [], "imports": {}, "errors": []}
+        done: list[str] = []
+        failed: list[dict[str, Any]] = []
+        totals: dict[str, int] = defaultdict(int)
+        with (parts / "exprs.jsonl").open("w") as exprs, (parts / "calls.jsonl").open("w") as calls:
+            for module, files in sorted(build_modules(self.root, sources).items()):
+                own = parts / f"module-{len(done) + len(failed)}"
+                own.mkdir()
+                data, error = run_helper(self.root, files, jars, self.language_level, batch, own)
+                if error:
+                    failed.append({"module": module, "files": len(files), "error": error})
+                    self.errors.append((self.root / module, error))
+                    continue
+                done.append(module)
+                for key in ("types", "functions", "errors"):
+                    merged[key] += data.get(key, [])
+                merged["imports"].update(data.get("imports", {}))
+                for key, value in (data.get("stats") or {}).items():
+                    if isinstance(value, int):
+                        totals[key] += value
+                for name, out in (("exprs.jsonl", exprs), ("calls.jsonl", calls)):
+                    if (own / name).exists():
+                        with (own / name).open() as f:
+                            for line in f:
+                                out.write(line if line.endswith("\n") else line + "\n")
+                shutil.rmtree(own)
+        merged["stats"] = {
+            **totals,
+            "by_module": True,
+            "modules": len(done) + len(failed),
+            "modules_failed": failed,
+        }
+        if not done:
+            self.failed = failed[0]["error"] if failed else "no Java modules to resolve"
+            return merged
+        self._index = HelperIndex(parts)
+        return merged
 
     # ------------------------------------------------- reading a rule's match
 
@@ -227,7 +281,7 @@ class JavaResolver:
         rel = self._rel(path)
         inside = [f for f in self._by_file.get(rel, []) if f.span[0] <= line <= f.span[1]]
         fn = min(inside, key=lambda f: f.span[1] - f.span[0]) if inside else None
-        types = [t for t in self.types.values() if t.file == rel and t.span[0] <= line <= t.span[1]]
+        types = [t for t in self._types_by_file.get(rel, []) if t.span[0] <= line <= t.span[1]]
         cls = min(types, key=lambda t: t.span[1] - t.span[0]).name if types else None
         return JavaScope(rel, fn), fn, (fn.container if fn else cls)
 
@@ -260,12 +314,14 @@ class JavaResolver:
     def _entry(self, expr: Any) -> dict[str, Any]:
         if not isinstance(expr, JavaExpr):
             return {}
-        found = self._exprs.get((expr.file, expr.sl, expr.sc, expr.el, expr.ec))
+        if self._index is None:
+            return {}
+        found = self._index.expr(expr.file, expr.sl, expr.sc, expr.el, expr.ec)
         if found is not None:
             return found
         # Columns can disagree on lines with tabs or non-ASCII text: same lines, same width
         width = expr.ec - expr.sc
-        for e in self._by_lines.get((expr.file, expr.sl, expr.el), []):
+        for e in self._index.exprs_on(expr.file, expr.sl, expr.el):
             if e["ec"] - e["sc"] == width:
                 return e
         return {}
@@ -635,10 +691,14 @@ class JavaResolver:
         )
 
     def _rel(self, path: Path) -> str:
-        try:
-            return path.relative_to(self.root).as_posix()
-        except ValueError:
-            return str(path)
+        rel = self._rels.get(path)
+        if rel is None:
+            try:
+                rel = path.relative_to(self.root).as_posix()
+            except ValueError:
+                rel = str(path)
+            self._rels[path] = rel
+        return rel
 
     def stats(self) -> dict[str, Any]:
         out = {**self._stats, "language_level": self.language_level or "default (21)"}
@@ -761,6 +821,40 @@ JVM_HEAP_MB: ContextVar[int | None] = ContextVar("jvm_heap_mb", default=None)
 # Resolve the job running now in batches (D127): its last run ran out of memory
 JVM_BATCHED: ContextVar[bool] = ContextVar("jvm_batched", default=False)
 DEFAULT_BATCH_FILES = 200
+# Resolve the job running now one build module at a time (D127): the whole repository failed
+# even in batches with more heap
+JVM_BY_MODULE: ContextVar[bool] = ContextVar("jvm_by_module", default=False)
+BUILD_FILES = ("pom.xml", "build.gradle", "build.gradle.kts")
+
+
+def build_modules(root: Path, sources: list[Path]) -> dict[str, list[Path]]:
+    """Each source under the nearest folder with a build file (Maven, Gradle), by that
+    folder's path from the repository root ("." for the root)."""
+    modules: dict[str, list[Path]] = defaultdict(list)
+    found: dict[Path, Path] = {}
+    for path in sources:
+        folder = path.parent
+        chain = []
+        while folder not in found:
+            chain.append(folder)
+            if folder == root or root not in folder.parents:
+                found[folder] = root
+                break
+            if any((folder / b).is_file() for b in BUILD_FILES):
+                found[folder] = folder
+                break
+            folder = folder.parent
+        module = found[folder]
+        for f in chain:
+            found[f] = module
+        modules[module.relative_to(root).as_posix() if module != root else "."].append(path)
+    return modules
+
+
+def helper_timeout(files: int) -> float:
+    """Seconds the helper may run for this many Java files: grows with the repository."""
+    settings = get_settings()
+    return settings.resolver_jvm_timeout + settings.resolver_jvm_timeout_per_file * files
 
 
 def run_helper(
@@ -769,9 +863,11 @@ def run_helper(
     jars: list[Path],
     language_level: str | None,
     batch_files: int = 0,
+    parts: Path | None = None,
 ) -> tuple[dict[str, Any], str | None]:
     """Run the JVM helper over `sources`; its output, or why it failed. `batch_files` > 0
-    resolves method bodies that many files at a time (D127)."""
+    resolves method bodies that many files at a time (D127). With `parts`, expressions and
+    calls are left there as JSON Lines for `HelperIndex` instead of in the output."""
     settings = get_settings()
     lib = settings.resolver_jvm_dir / "lib"
     if not lib.is_dir():
@@ -802,10 +898,11 @@ def run_helper(
             str(jar_list),
             *(["--language-level", language_level] if language_level else []),
             *(["--batch-files", str(batch_files)] if batch_files > 0 else []),
+            *(["--parts", str(parts)] if parts is not None else []),
         ]
         try:
             done = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=settings.resolver_jvm_timeout
+                cmd, capture_output=True, text=True, timeout=helper_timeout(len(sources))
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             return {}, f"Java resolver failed: {exc}"

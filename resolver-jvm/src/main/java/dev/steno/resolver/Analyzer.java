@@ -396,7 +396,25 @@ final class Analyzer {
             errors.add(Map.of("file", rel, "message",
                     "syntax error: " + (p == null ? "unparseable" : p.getMessage().split("\n")[0]) + line));
         }
-        return result.getResult().orElse(null);
+        CompilationUnit cu = result.getResult().orElse(null);
+        if (cu != null && !Boolean.getBoolean("steno.keepTokens")) {
+            dropTokens(cu);
+        }
+        return cu;
+    }
+
+    /** Release a file's tokens, keeping every node's range. The parser links all of a file's
+     *  tokens into one list that every node points into, so a dropped body's tokens would
+     *  otherwise stay alive with the rest of the file. Nothing here reads tokens; ranges come
+     *  from them, so each is put back after. */
+    private static void dropTokens(CompilationUnit cu) {
+        List<Node> nodes = new ArrayList<>(cu.findAll(Node.class));
+        nodes.addAll(cu.getAllComments());
+        for (Node n : nodes) {
+            Range r = n.getRange().orElse(null);
+            n.setTokenRange(null);
+            n.setRange(r);
+        }
     }
 
     /** Drop the bodies of a file's methods (an empty block, so a method with a body still has
@@ -2149,17 +2167,17 @@ final class Analyzer {
             try {
                 String cls = classOf(e);
                 if (cls != null) {
-                    m.put("class", cls);
-                    m.put("symbol", cls);
+                    m.put("class", stable(cls));
+                    m.put("symbol", stable(cls));
                 } else {
                     String sym = symbolOf(e);
                     if (sym != null) {
-                        m.put("symbol", sym);
+                        m.put("symbol", stable(sym));
                     }
                     if (!(e instanceof MethodReferenceExpr)) {
                         Typed t = typeOf(e);
                         if (t.fqn() != null) {
-                            m.put("type", t.fqn());
+                            m.put("type", stable(t.fqn()));
                         }
                     }
                     Object v = valueOf(e, 0);
@@ -2185,6 +2203,15 @@ final class Analyzer {
     }
 
     /** What an expression refers to: a field (`Owner.name`), a local, or the method a call runs. */
+    private static final Pattern ANONYMOUS =
+            Pattern.compile("Anonymous-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
+
+    /** The solver names an anonymous class with a random UUID, different on every run; the same
+     *  commit must read the same each time. */
+    static String stable(String name) {
+        return name.contains("Anonymous-") ? ANONYMOUS.matcher(name).replaceAll("Anonymous") : name;
+    }
+
     private String symbolOf(Expression e) {
         if (e instanceof NameExpr n) {
             Var v = variable(n.getNameAsString(), n);

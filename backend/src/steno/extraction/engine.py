@@ -12,7 +12,7 @@ import fnmatch
 import itertools
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -118,11 +118,12 @@ class Engine:
         self.read: set[str] = set()
         # Config keys a config rule turned into a fact or claim (not just a property clue)
         self.config_used: set[str] = set()
-        self._roots: dict[Path, SgNode] = {}
+        self._rels: dict[Path, str] = {}  # each file's path from the repository root
+        self._tests: dict[Path, bool] = {}
 
     def parse(self) -> None:
-        """Read the code once: list the files, read them into the symbol table, and build
-        a syntax tree for every file a code rule will look at. No rules run here."""
+        """Read the code once: list the files and read them into the symbol table. No rules
+        run here; syntax trees are built during extraction, one file at a time."""
         self.files = list(source_files(self.repo))
         languages = {p.language for p in self.packs}
         if languages & {"python", "java"}:
@@ -131,9 +132,6 @@ class Engine:
                 f"{p.relative_to(self.repo).as_posix() if p != self.repo else '.'}: {msg}"
                 for p, msg in self.resolver.errors
             ]
-        for language in {r.language for p in self.packs for r in p.rules if r.kind == "code"}:
-            for path in self._code_files(language):
-                self._root(path, language)
 
     def extract(self) -> Extraction:
         """Run every rule on every file."""
@@ -145,12 +143,7 @@ class Engine:
             self._run_config(rule)
             self._learn_properties()
         self._learn_properties()
-        for rule in rules:
-            if rule.kind == "code":
-                self._run_code(rule)
-        # Every rule has run: the syntax trees aren't needed again, and on a large repository
-        # they're a large share of the job's memory (D127)
-        self._roots.clear()
+        self._run_code([r for r in rules if r.kind == "code"])
         return self.out
 
     def _learn_properties(self) -> None:
@@ -163,41 +156,69 @@ class Engine:
 
     def _code_files(self, language: str) -> list[Path]:
         exts = EXTENSIONS.get(language, ())
-        return [
-            p for p in self.files if p.suffix in exts and not is_test_file(p.relative_to(self.repo))
-        ]
+        return [p for p in self.files if p.suffix in exts and not self._is_test(p)]
 
-    def _run_code(self, rule: Rule) -> None:
-        config = {
-            k: rule.match[k]
-            for k in ("rule", "constraints", "utils", "transform")
-            if k in rule.match
-        }
-        for path in self._code_files(rule.language):
-            root = self._root(path, rule.language)
-            if root is None:
-                continue
-            self.read.add(path.relative_to(self.repo).as_posix())
-            try:
-                matches = root.find_all(config)  # type: ignore[arg-type]
-            except Exception as exc:  # an invalid rule: report once, skip the rule
-                self.out.errors.append(f"{rule.id}: {exc}")
-                return
-            for match in matches:
-                self._emit_match(rule, path, match)
+    def _run_code(self, rules: list[Rule]) -> None:
+        """Every code rule on every file, a file at a time: its syntax tree is built once, used
+        by every rule, and dropped, so a large repository never holds all its trees at once
+        (D127). Each rule's matches go to a buffer of its own, joined in rule order, so the
+        facts come out in the same order as running each rule over every file in turn."""
+        out = self.out
+        buffers = [Extraction() for _ in rules]
+        configs = [
+            {k: r.match[k] for k in ("rule", "constraints", "utils", "transform") if k in r.match}
+            for r in rules
+        ]
+        broken: set[int] = set()
+        try:
+            for language in dict.fromkeys(r.language for r in rules):
+                mine = [i for i, r in enumerate(rules) if r.language == language]
+                for path in self._code_files(language):
+                    root = self._root(path, language)
+                    if root is None:
+                        continue
+                    self.read.add(self._rel(path))
+                    for i in mine:
+                        if i in broken:
+                            continue
+                        self.out = buffers[i]
+                        try:
+                            matches = root.find_all(configs[i])  # type: ignore[arg-type]
+                        except Exception as exc:  # an invalid rule: report once, skip the rule
+                            self.out.errors.append(f"{rules[i].id}: {exc}")
+                            broken.add(i)
+                            continue
+                        for match in matches:
+                            self._emit_match(rules[i], path, match)
+                    self.out = out
+        finally:
+            self.out = out
+        for buffer in buffers:
+            for f in fields(Extraction):
+                getattr(out, f.name).extend(getattr(buffer, f.name))
+
+    def _rel(self, path: Path) -> str:
+        rel = self._rels.get(path)
+        if rel is None:
+            rel = self._rels[path] = path.relative_to(self.repo).as_posix()
+        return rel
+
+    def _is_test(self, path: Path) -> bool:
+        test = self._tests.get(path)
+        if test is None:
+            test = self._tests[path] = is_test_file(path.relative_to(self.repo))
+        return test
 
     def _root(self, path: Path, language: str) -> SgNode | None:
-        if path not in self._roots:
-            try:
-                self._roots[path] = SgRoot(path.read_text(errors="replace"), language).root()
-            except Exception as exc:
-                self.out.errors.append(f"{path.relative_to(self.repo)}: {exc}")
-                return None
-        return self._roots[path]
+        try:
+            return SgRoot(path.read_text(errors="replace"), language).root()
+        except Exception as exc:
+            self.out.errors.append(f"{path.relative_to(self.repo)}: {exc}")
+            return None
 
     def _emit_match(self, rule: Rule, path: Path, match: SgNode) -> None:
         line = match.range().start.line + 1
-        origin = Origin(rule.id, rule.pack, path.relative_to(self.repo).as_posix(), line)
+        origin = Origin(rule.id, rule.pack, self._rel(path), line)
         resolver = self.resolver.for_path(path) if self.resolver else None
         scope, fn, cls = resolver.scope_at(path, line) if resolver else (None, None, None)
         captures = {
@@ -241,9 +262,9 @@ class Engine:
         globs = rule.files or default
         out = []
         for path in self.files:
-            rel = path.relative_to(self.repo).as_posix()
+            rel = self._rel(path)
             # Test configuration (src/test/resources, test fixtures) describes no running app
-            if is_test_file(path.relative_to(self.repo)):
+            if self._is_test(path):
                 continue
             if any(
                 fnmatch.fnmatch(rel, g) or fnmatch.fnmatch(path.name, g.rsplit("/", 1)[-1])

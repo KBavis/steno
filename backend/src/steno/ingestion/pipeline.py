@@ -56,7 +56,7 @@ from steno.identity.registry import SqlRegistry
 from steno.ingestion import memory
 from steno.ingestion.resources import JVM_HEAP_MIN_MB, budget_mb, machine, size_mb
 from steno.reconcile.run import reconcile as run_reconcile
-from steno.resolvers.java import JVM_BATCHED, JVM_HEAP_MB
+from steno.resolvers.java import JVM_BATCHED, JVM_BY_MODULE, JVM_HEAP_MB
 from steno.rule_packs.packs import is_enabled, load_all_packs
 from steno.rule_packs.versions import dependencies
 
@@ -111,8 +111,8 @@ def deps(ctx: JobContext) -> dict[str, Any]:
 
 
 def parse(ctx: JobContext) -> dict[str, Any]:
-    """Pick the rule packs that apply, then read the code once: the symbol resolver's symbol table
-    and a syntax tree per file. No rules run yet."""
+    """Pick the rule packs that apply, then read the code once into the symbol resolver's symbol
+    table. No rules run yet; extraction builds each file's syntax tree as it goes."""
     assert ctx.workspace is not None
     all_packs = load_all_packs()
     ctx.state["all_packs"] = all_packs  # coverage: which libraries any pack covers
@@ -125,6 +125,15 @@ def parse(ctx: JobContext) -> dict[str, Any]:
     engine.parse()
     if _out_of_memory(engine) and _more_memory(ctx, memory_plan):
         # Retry here rather than fail and wait for the next run: in batches, with more heap
+        engine = Engine(ctx.workspace, packs)
+        engine.parse()
+    if _java_failed(engine):
+        # Still failing: one build module at a time, so a module that can't be resolved is a
+        # gap and the rest of the repository is still read (D127)
+        log.warning("job %s: the Java resolver failed for the whole repository; "
+                    "resolving each module on its own", ctx.job.id)  # fmt: skip
+        JVM_BY_MODULE.set(True)
+        memory_plan["by_module"] = True
         engine = Engine(ctx.workspace, packs)
         engine.parse()
     if engine.resolver is not None and engine.resolver.failed:
@@ -456,6 +465,11 @@ def _plan_java(ctx: JobContext) -> dict[str, Any]:
     }
 
 
+def _java_failed(engine: Engine) -> bool:
+    java = engine.resolver.by_language.get("java") if engine.resolver is not None else None
+    return bool(java is not None and java.failed)
+
+
 def _out_of_memory(engine: Engine) -> bool:
     return bool(
         engine.resolver is not None
@@ -500,12 +514,14 @@ def run_job(session: Session, job: IngestionJob) -> None:
     heap = resources.get("jvm_heap_mb")
     token = JVM_HEAP_MB.set(heap if isinstance(heap, int) else None)
     batched = JVM_BATCHED.set(bool(resources.get("batched")))
+    by_module = JVM_BY_MODULE.set(False)
     try:
         for name, fn in STAGES:
             _run_stage(session, ctx, name, fn)
     finally:
         JVM_HEAP_MB.reset(token)
         JVM_BATCHED.reset(batched)
+        JVM_BY_MODULE.reset(by_module)
         if ctx.workspace is not None and ctx.workspace.exists():
             shutil.rmtree(ctx.workspace, ignore_errors=True)
 

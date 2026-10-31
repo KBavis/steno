@@ -336,10 +336,11 @@ def _dropped(x: Extraction, item: Any) -> None:
 
 
 def _unparsed(x: Extraction, item: Any) -> None:
-    """Files Steno couldn't read at all: nothing in them is in the graph."""
+    """Files Steno couldn't read at all, and build modules the Java resolver couldn't resolve
+    when it read a repository module by module (D127): nothing in them is in the graph."""
     for error in x.errors:
         file, _, message = error.partition(": ")
-        if "syntax error" in message:
+        if "syntax error" in message or message.startswith("Java resolver failed"):
             item("unparsed", "unparsed", file, file).add({"file": file, "detail": message})
 
 

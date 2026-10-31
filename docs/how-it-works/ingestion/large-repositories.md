@@ -7,6 +7,7 @@ How Steno ingests a very large repository without running out of memory, and fit
 > - Five changes fixed it, each keeping the graph identical: **two-pass Java resolution** in batches, **streaming** the resolver's output, **compact traces**, **a failed resolver fails the job**, and **workers sized to the machine**.
 > - ThingsBoard now ingests at a 2 GB heap with a 1.5 GB worker peak (from 4.6 GB), producing the same 1,623 flows and 116,269 nodes.
 > - Every run records its peak memory per stage, so a repository outgrowing its budget shows up before it fails.
+> - **A second round (2026-10-31), for monorepos the size of Elasticsearch (21,229 Java files):** the helper releases tokens after parsing (§2), its output is indexed on disk instead of loaded whole (§3), extraction holds one syntax tree at a time (§3a), a repository that still fails is resolved module by module (§3b), and repeated work in the flows stage is done once (§3c). On ThingsBoard, with an identical graph: flows 2,459 → 125 s, extract 119 → 74 s, parse 193 → 120 s, Python's peak 1.6 → 0.8 GB.
 
 ```mermaid
 flowchart LR
@@ -44,9 +45,54 @@ Methods inside other bodies (local and anonymous classes) are never stripped sep
 
 **When it's on:** `STENO_RESOLVER_JVM_BATCH_FILES` (0 = one pass), and automatically for a repository whose last run ran out of JVM memory (§5).
 
-## 3. Streaming the resolver's output (D127)
+**Tokens released after parsing** (built 2026-10-31). JavaParser links every token of a file into one list that every node points into, so dropping a method's body kept its tokens alive with the rest of the file, and the declaration index held nearly every token of the repository. The helper now releases each file's tokens as soon as it's parsed and keeps every node's line range (ranges come from tokens, so each is put back; turning tokens off in the parser drops ranges too, and pass 2 matches bodies by position). Nothing in the helper reads tokens.
 
-The resolver's two largest outputs, every expression a rule may capture and every function's calls, are written to disk after each batch instead of held until the end. The output file reads exactly as before, so the Python side didn't change. On ThingsBoard this cut the live heap from 1.9 to 1.6 GB and made the run faster.
+| | Live heap before | After | Time |
+|---|---|---|---|
+| Keycloak (5,772 files) | 1,791 MB | 473 MB | 107 → 83 s |
+| ThingsBoard (5,498 files) | 1,611 MB | 560 MB | 123 → 110 s |
+
+Keycloak now resolves within a 600 MB heap. The outputs match call for call except a handful of generic types that resolve differently (one call of 184,724 on Keycloak became unresolved; on ThingsBoard two expressions got a more precise type): never a different target.
+
+**Stable names for anonymous classes.** JavaParser names an anonymous class `Anonymous-` and a random UUID, which reached the symbols of expressions inside one, so the same commit read differently on every run. They're written as `Outer.Anonymous`.
+
+## 3. The resolver's output, on disk (D127)
+
+The resolver's two largest outputs, every expression a rule may capture and every function's calls, are written to disk after each batch instead of held until the end (on ThingsBoard this cut the live heap from 1.9 to 1.6 GB). They used to be joined into one JSON file that Python loaded whole, at about 4.5 times its size: Keycloak's 223 MB took 994 MB, and Elasticsearch's 2 GB would have taken about 9 GB.
+
+Now (built 2026-10-31) the helper leaves them as JSON Lines (`--parts`), and the Java resolver reads each line once into a SQLite file beside them (`resolvers/disk_index.py`):
+
+| Table | Key | Asked |
+|---|---|---|
+| `exprs` | (file, start line, start column, end line, end column), and (file, start line, end line) for the same-width fallback | When a rule's capture needs a symbol, type, or value: a small share of all expressions |
+| `calls` | the function's symbol | By the flow walk, once per function and call site (the last 20,000 functions' calls are cached, decoded); in full by coverage |
+
+The rest of the resolver asks the same questions it asked of the dictionaries. The index lives in a temporary folder for as long as the resolver does.
+
+## 3a. Extraction, a file at a time
+
+Every file's syntax tree (ast-grep) used to be built in the parse stage and kept until the last rule had run. Now extraction builds a file's tree, runs every code rule on it, and drops it. Each rule's matches go to a buffer of its own, joined in rule order at the end, so the facts come out in exactly the order running each rule over every file gave. A file that can't be parsed is reported once instead of once per rule.
+
+## 3b. A module that can't be resolved (D127)
+
+If the helper still fails for the whole repository after the retry in batches with more heap (§5), the parse stage tries once more, **one build module at a time**: each Java file belongs to the nearest folder with a `pom.xml`, `build.gradle`, or `build.gradle.kts`. A module that fails is a gap: it's in the resolver's errors, in `resolvers.java.modules_failed` (module, files, error), and in the coverage report as an `unparsed` item; every other module is resolved. Read this way, a call from one module into another can't be resolved and is counted as unresolved. A job fails only if no module can be resolved.
+
+## 3c. Flows: work done once
+
+On ThingsBoard the flows stage took 41 of a job's 46 minutes. Three things repeated work that depends on one function, not the flow (built 2026-10-31):
+
+- **A path from the repository root** was computed for every trace entry (5.96 million on ThingsBoard); it's now remembered per file, here and in extraction (the same cost was half of extraction's time).
+- **A function's gaps** (calls it couldn't follow, I/O no rule explains) were worked out again in every flow that runs it; now once per function, each trace getting its own copy.
+- **Does this function reach an effect?** was a fresh search per uncalled function, quadratic on a large repository; it's now one backward walk from every function with an effect.
+
+| ThingsBoard, same graph (116,395 nodes, 246,687 edges, every property equal) | Before | After |
+|---|---|---|
+| parse | 193 s | 120 s |
+| extract | 119 s | 74 s |
+| flows | 2,459 s | 125 s |
+| Python's peak memory | 1,644 MB | 839 MB |
+
+**The helper's time limit** grows with the repository: `STENO_RESOLVER_JVM_TIMEOUT` (1,800 s) plus `STENO_RESOLVER_JVM_TIMEOUT_PER_FILE` (0.25 s) per Java file, so a monorepo isn't cut off for being large (Elasticsearch's 21,229 files ran past the old fixed 30 minutes).
 
 ## 4. Compact traces (D63, refined)
 
@@ -119,6 +165,4 @@ With batching from the first run above 3,000 Java files, Keycloak's first run is
 ## 8. Not built yet
 
 - **Flows per application** in a monorepo, so the call graph is never held for the whole repository at once.
-- **An on-disk index** for the resolver's output on the Python side (extraction still holds about 1 GB on ThingsBoard).
-- **Module isolation**: a module that still fails is recorded as a gap while the rest continues.
 - **Eclipse JDT**, only if the two-pass JavaParser helper fails a larger benchmark (Open).

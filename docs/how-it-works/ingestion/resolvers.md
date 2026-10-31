@@ -222,7 +222,7 @@ Each step is taken only when the **Unresolved library types** signal shows it's 
 
 The whole story, with every mechanism and the measurements, is on its own page: [Large repositories](./large-repositories.md). In short:
 
-**Today, memory grows with the whole repository, more than once.** The helper keeps every file's syntax tree for the whole run, its caches have no limit, and it builds the entire result before writing it (`resolver-jvm/.../Analyzer.java`, `Main.java`). Python then loads that whole JSON file (`resolvers/java.py`), and the flows stage holds the whole call graph. The helper runs as one process per repository with a capped heap (`STENO_RESOLVER_JVM_MAX_HEAP`, 2 GB by default, D99), so nothing builds up across runs, but a very large monorepo fails as a whole.
+**Before D127, memory grew with the whole repository, more than once:** the helper kept every file's syntax tree for the whole run, its caches had no limit, it built the entire result before writing it, Python loaded that whole JSON file, and the flows stage held the whole call graph. A very large monorepo failed as a whole. What's built now (two passes, tokens released, output streamed and indexed on disk, a module at a time when the whole fails) is on [Large repositories](./large-repositories.md); flows per application are next.
 
 **The design: split the work so memory stays under the budget by construction.**
 

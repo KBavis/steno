@@ -3,7 +3,7 @@
 Each ingestion stage taken apart: what it reads, what it does, what it leaves for the next one. Examples are real output from ingesting [Contextualized](https://github.com/KBavis/contextualized) at commit `ac93a3b` (190 files, 112 Python modules, 486 functions, 9 rule packs, 33 endpoints, 33 flows).
 
 > **In one minute**
-> - **Parse** prepares and never interprets: picks packs, lists files once, builds symbol tables and syntax trees.
+> - **Parse** prepares and never interprets: picks packs, lists files once, builds symbol tables.
 > - **Extract** runs every rule on every file. ast-grep finds shapes; the symbol resolver says what they mean; each match yields a fact, a fact with a blank, or a clue.
 > - **Assemble** fills the blanks: URL prefix chains, an entity's table, SDK client calls, partial references.
 > - **Flows** fits facts into the tree, builds the call graph in memory, and walks it from every entry point into flows, traces, and steps.
@@ -35,18 +35,17 @@ Eight parts. The first three are data people write; the rest is code.
 
 ## 3. parse
 
-Reads the clone and every pack's `pack.yaml`. Leaves the rule engine in memory, holding the symbol tables and the syntax trees. **No rule runs here.**
+Reads the clone and every pack's `pack.yaml`. Leaves the rule engine in memory, holding the symbol tables. **No rule runs here.**
 
-1. **Decide what to prepare.** Each pack says when it applies (`enabled_when`); parse checks every pack against this repository. Enabled packs decide which languages need a symbol resolver and which files need syntax trees.
+1. **Decide what to prepare.** Each pack says when it applies (`enabled_when`); parse checks every pack against this repository. Enabled packs decide which languages need a symbol resolver and which files code rules read.
 2. **List the files once,** never entering `.git`, `node_modules`, `.venv`, `build`, and similar folders. (Before this, walking a working copy with `node_modules` took 3.5 minutes; now about 7 seconds.)
 3. **Find source roots.** Every folder with a `pyproject.toml`, `setup.py`, `setup.cfg`, or `requirements*.txt` is a root module names start from. `apps/backend/app/api/routers/job.py` becomes `app.api.routers.job`, the name its own imports use.
-4. **Build the symbol tables.** Python's `ast` reads every non-test `.py` file. Java's JVM helper reads every module in one pass and writes its answers (D69).
-5. **Build the syntax trees.** ast-grep (tree-sitter) turns every file a code rule will look at into a tree: 112 of the 190 files.
+4. **Build the symbol tables.** Python's `ast` reads every non-test `.py` file. Java's JVM helper reads the repository and writes its answers (D69): in batches on a large one, and module by module if the whole still fails ([Large repositories](./large-repositories.md), D127).
 
 | | In parse | In extract |
 |---|---|---|
 | Rule packs | Which packs apply | The rules inside them run |
-| ast-grep | Builds a syntax tree per file | Searches the trees with each rule's pattern |
+| ast-grep | | Builds each file's syntax tree, runs every rule's pattern on it, and drops it (one tree at a time, D127) |
 | Symbol resolver | Builds its symbol table | Answers questions about each match |
 
 **Which packs are enabled, for Contextualized:**
@@ -78,7 +77,7 @@ functions  run_project_jobs  lines 16–…  params: project_id: UUID,
 
 ## 4. extract
 
-Reads the syntax trees, the enabled rules, and the symbol resolver. Runs config rules first (so their `property` clues can feed value lookups), then code rules. Leaves facts, facts with blanks, and clues: for Contextualized, 75 nodes, 230 edges, 91 clues, 33 entry points.
+Reads each file's syntax tree (built here, one file at a time: [Large repositories §3a](./large-repositories.md#3a-extraction-a-file-at-a-time)), the enabled rules, and the symbol resolver. Runs config rules first (so their `property` clues can feed value lookups), then code rules. Leaves facts, facts with blanks, and clues: for Contextualized, 75 nodes, 230 edges, 91 clues, 33 entry points.
 
 ### What ast-grep sees
 

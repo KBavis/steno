@@ -14,7 +14,7 @@ import java.util.Map;
  *
  * <pre>
  * steno-resolver --root REPO --files FILES.txt --out OUT.json [--jars JARS.txt]
- *                [--language-level 17] [--batch-files 500]
+ *                [--language-level 17] [--batch-files 500] [--parts DIR]
  * </pre>
  *
  * <p>FILES.txt lists the Java files to read, one path per line (the engine decides which are
@@ -22,7 +22,9 @@ import java.util.Map;
  * repository is resolved and written to OUT.json, which the Java resolver on the Python side
  * reads instead of asking one question at a time. With --batch-files, method bodies are resolved
  * that many files at a time against a declaration index of the whole repository, so memory stays
- * bounded on very large repositories (D127).
+ * bounded on very large repositories (D127). With --parts, expressions and calls are left in
+ * DIR as JSON Lines (exprs.jsonl, calls.jsonl) instead of in OUT.json, so the reader can index
+ * them on disk rather than load them whole.
  */
 public final class Main {
     private Main() {}
@@ -34,6 +36,7 @@ public final class Main {
         Path jars = null;
         String level = null;
         int batchFiles = 0;
+        Path parts = null;
         for (int i = 0; i + 1 < args.length; i += 2) {
             switch (args[i]) {
                 case "--root" -> root = Path.of(args[i + 1]);
@@ -42,6 +45,7 @@ public final class Main {
                 case "--jars" -> jars = Path.of(args[i + 1]);
                 case "--language-level" -> level = args[i + 1];
                 case "--batch-files" -> batchFiles = Integer.parseInt(args[i + 1]);
+                case "--parts" -> parts = Path.of(args[i + 1]);
                 default -> usage();
             }
         }
@@ -66,7 +70,7 @@ public final class Main {
             }
         }
         Path dir = out.toAbsolutePath().getParent();
-        try (Spill spill = new Spill(dir);
+        try (Spill spill = parts != null ? new Spill(parts, true) : new Spill(dir);
                 BufferedWriter w = Files.newBufferedWriter(out, StandardCharsets.UTF_8)) {
             Map<String, Object> result = new Analyzer(root, jarList, level).run(sources, batchFiles, spill);
             spill.writeWith(result, w);
@@ -75,7 +79,7 @@ public final class Main {
 
     private static void usage() {
         System.err.println("usage: steno-resolver --root REPO --files FILES.txt --out OUT.json"
-                + " [--jars JARS.txt] [--language-level 17] [--batch-files 500]");
+                + " [--jars JARS.txt] [--language-level 17] [--batch-files 500] [--parts DIR]");
         System.exit(2);
     }
 }

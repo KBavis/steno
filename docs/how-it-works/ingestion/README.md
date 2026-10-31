@@ -29,7 +29,7 @@ How Steno turns repositories into graph facts: deterministically, idempotently, 
 ```mermaid
 flowchart LR
     C["clone<br/><i>temporary workspace</i>"] --> DP["deps<br/><i>JARs, later</i>"]
-    DP --> P["parse<br/><i>files, symbol tables,<br/>syntax trees</i>"]
+    DP --> P["parse<br/><i>files,<br/>symbol tables</i>"]
     P --> X["extract<br/><i>rule packs → facts,<br/>facts with blanks, clues</i>"]
     X --> A["assemble<br/><i>clues → complete facts</i>"]
     A --> ID["identify<br/><i>structure, Steno IDs,<br/>names</i>"]
@@ -45,7 +45,7 @@ flowchart LR
 |---|---|---|---|
 | **clone** | What's the code, at which commit? | A folder on disk; the commit SHA | Built |
 | **deps** | Which library types does the code use? (Java) | Dependency JARs | Skipped (D69: source and JDK first) |
-| **parse** | Which rule packs apply, and what's in the code? | File list, symbol tables, syntax trees | Built |
+| **parse** | Which rule packs apply, and what's in the code? | File list, symbol tables | Built |
 | **extract** | What does each code shape mean? | Facts, facts with blanks, clues | Built |
 | **assemble** | What goes in each blank? | Completed facts; the facts JSON | Built |
 | **identify** | Which deployables exist, is each the same application as last time, and what's it called? | Structure (modules, applications); Steno IDs, canonical names, aliases, lifecycle | Built |

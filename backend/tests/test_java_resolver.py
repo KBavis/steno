@@ -286,7 +286,7 @@ def test_coverage_accounts_for_io_calls_and_hooks(engine, repo: Path) -> None:  
 
 def test_url_template_keeps_constant_parts(engine, repo: Path) -> None:  # type: ignore[no-untyped-def]
     java = engine.resolver.by_language["java"]
-    found = [e for e in java._exprs.values() if e.get("template", "").startswith("/charge/")]
+    found = [e for e in java._index.all_exprs() if e.get("template", "").startswith("/charge/")]
     assert found and found[0]["template"] == "/charge/{id}"
 
 

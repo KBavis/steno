@@ -59,7 +59,10 @@ class Settings(BaseSettings):
     java_bin: str = "java"
     # The JVM helper's heap ceiling per job: what a Java repository can cost in memory
     resolver_jvm_max_heap: str = "2g"
-    resolver_jvm_timeout: int = 1800  # seconds per repository
+    # Seconds the helper may take: at least this, plus `resolver_jvm_timeout_per_file` for each
+    # Java file, so a very large monorepo isn't cut off for being large
+    resolver_jvm_timeout: int = 1800
+    resolver_jvm_timeout_per_file: float = 0.25
     # Resolve method bodies this many files at a time against a declaration index of the whole
     # repository, so memory stays bounded (D127); 0 resolves everything in one pass
     resolver_jvm_batch_files: int = 0
