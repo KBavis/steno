@@ -343,8 +343,12 @@ final class Analyzer {
                 for (Map<String, Object> e : exprs) {
                     spill.expr(e);
                 }
+                for (Map<String, Object> f : fnOut) {
+                    spill.function(f);
+                }
                 callsOut.clear();
                 exprs.clear();
+                fnOut.clear();
             }
             Memory.sample();
         }
@@ -357,8 +361,8 @@ final class Analyzer {
         out.put("version", 1);
         out.put("errors", errors);
         out.put("types", typesOut);
-        out.put("functions", fnOut);
         if (spill == null) {
+            out.put("functions", fnOut);
             out.put("calls", callsOut);
             out.put("exprs", exprs);
         }
