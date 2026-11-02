@@ -11,6 +11,8 @@ poll at once without claiming the same job.
   `max_parallel_jobs` is a ceiling across every machine.
 """
 
+import shutil
+
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -125,4 +127,15 @@ def recover_interrupted(session: Session) -> list[int]:
         job.status = JobStatus.FAILED
         job.finished_at = func.now()
         job.error = "interrupted: the worker running it stopped"
+    remove_leftovers([job.id for job in jobs])
     return [job.id for job in jobs]
+
+
+def remove_leftovers(job_ids: list[int]) -> None:
+    """What a stopped worker left on disk: the interrupted jobs' clones, and every resolver
+    index (each is removed when its job ends, so one still there belongs to no running job).
+    A large repository's clone and index together can be gigabytes."""
+    root = get_settings().workspace_dir
+    for job_id in job_ids:
+        shutil.rmtree(root / f"job-{job_id}", ignore_errors=True)
+    shutil.rmtree(get_settings().index_dir, ignore_errors=True)

@@ -128,7 +128,11 @@ class JavaResolver:
         self.properties: dict[str, Any] = {}
         self.return_hints: dict[tuple[str, str], str] = {}  # not used yet: no library types
         # Expressions and calls, indexed on disk for as long as this resolver lives (D127)
-        self._parts = tempfile.TemporaryDirectory(prefix="steno-java-index-")
+        # Under the workspaces folder, so a worker that's killed leaves nothing elsewhere: the
+        # next `steno job recover` removes it
+        indexes = get_settings().index_dir
+        indexes.mkdir(parents=True, exist_ok=True)
+        self._parts = tempfile.TemporaryDirectory(prefix="java-", dir=indexes)
         self._index: HelperIndex | None = None
         sources = [
             p

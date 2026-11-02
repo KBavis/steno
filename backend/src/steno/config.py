@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     # Where ingestion workers clone repositories; deleted after each run
     workspace_dir: Path = Path("/tmp/steno-workspaces")
 
+    @property
+    def index_dir(self) -> Path:
+        """Each Java resolver's on-disk index (D127), removed when it's done; one a stopped
+        worker left is removed by `steno job recover`."""
+        return self.workspace_dir / "indexes"
+
     # Rule packs (docs/how-it-works/ingestion/rules-and-packs.md): the core packs here, plus
     # any folders in `rule_pack_dirs` (an organization's packs, kept in its own repository).
     # STENO_RULE_PACK_DIRS: folders separated by commas

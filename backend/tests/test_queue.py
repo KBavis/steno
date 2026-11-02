@@ -8,7 +8,13 @@ from sqlalchemy.exc import OperationalError
 from steno.config import get_settings
 from steno.db.models import Connector, ConnectorKind, IngestionJob, JobMode, JobStatus, Repository
 from steno.db.session import _session_factory
-from steno.ingestion.queue import RepositoryBusy, claim_next, enqueue, recover_interrupted
+from steno.ingestion.queue import (
+    RepositoryBusy,
+    claim_next,
+    enqueue,
+    recover_interrupted,
+    remove_leftovers,
+)
 
 
 @pytest.fixture
@@ -146,3 +152,12 @@ def test_a_worker_drafts_only_after_releasing_the_claim_lock(monkeypatch):
     monkeypatch.setattr(worker, "claim_next", lambda *a: None)
     monkeypatch.setattr(worker, "run_curation", lambda: seen.append(len(open_sessions)) or True)
     assert worker.run_once() is True and seen == [0]
+
+
+def test_a_stopped_workers_clones_and_indexes_are_removed(tmp_path, monkeypatch):
+    monkeypatch.setattr(get_settings(), "workspace_dir", tmp_path)
+    for folder in ("job-7", "job-8", "indexes/java-abc"):
+        (tmp_path / folder).mkdir(parents=True)
+        (tmp_path / folder / "file").write_text("x")
+    remove_leftovers([7])
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["job-8"]  # job 8 isn't interrupted

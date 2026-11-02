@@ -67,7 +67,7 @@ Now (built 2026-10-31) the helper leaves them as JSON Lines (`--parts`), and the
 | `exprs` | (file, start line, start column, end line, end column), and (file, start line, end line) for the same-width fallback | When a rule's capture needs a symbol, type, or value: a small share of all expressions |
 | `calls` | the function's symbol | By the flow walk, once per function and call site (the last 20,000 functions' calls are cached, decoded); in full by coverage |
 
-The rest of the resolver asks the same questions it asked of the dictionaries. The index lives in a temporary folder for as long as the resolver does.
+The rest of the resolver asks the same questions it asked of the dictionaries. The index lives under the workspaces folder (`STENO_WORKSPACE_DIR/indexes/`) for as long as the resolver does. A worker that's stopped mid-job leaves its clone and index behind (gigabytes on a large repository); `steno job recover`, run at startup when no worker is running, marks its jobs failed and removes both.
 
 ## 3a. Extraction, a file at a time
 
