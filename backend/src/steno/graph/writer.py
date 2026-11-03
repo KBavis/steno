@@ -14,6 +14,7 @@ from collections import defaultdict
 from typing import Any
 
 from neo4j import Driver
+from neo4j.exceptions import TransientError
 
 from steno.graph.build import SHARED, GraphPlan
 from steno.graph.delta import Delta, Existing, diff, nulls_for
@@ -21,6 +22,7 @@ from steno.graph.schema import ARCHITECTURE_LABELS, CODE_LABELS
 
 log = logging.getLogger(__name__)
 BATCH = 500
+OUT_OF_MEMORY = "Neo.TransientError.General.MemoryPoolOutOfMemoryError"
 _CONSTRAINED = set(ARCHITECTURE_LABELS) | set(CODE_LABELS)
 _LABEL = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
@@ -36,6 +38,10 @@ def _safe(label: str) -> str:
     return label
 
 
+class GraphWriteTooLarge(RuntimeError):
+    """The repository's graph didn't fit in one Neo4j transaction."""
+
+
 def write_plan(driver: Driver, database: str, plan: GraphPlan, repo: str) -> Delta:
     """Write the plan's differences from the graph and return them."""
     with driver.session(database=database) as session:
@@ -43,6 +49,41 @@ def write_plan(driver: Driver, database: str, plan: GraphPlan, repo: str) -> Del
 
 
 def _write_all(tx: Any, plan: GraphPlan, repo: str) -> Delta:
+    try:
+        delta = _write_changes(tx, plan, repo)
+    except TransientError as exc:
+        if getattr(exc, "code", "") != OUT_OF_MEMORY:
+            raise
+        # Not retried: the driver retries transient errors, and running out of memory again
+        # on the same write only costs time
+        raise GraphWriteTooLarge(
+            f"Neo4j ran out of transaction memory writing {repo}'s graph ({len(plan.nodes)} nodes"
+            f", {len(plan.edges)} edges). The whole write is one transaction, so Neo4j must hold"
+            " it: raise dbms.memory.transaction.total.max (and the heap it's a share of,"
+            " server.memory.heap.max_size). See docs/how-it-works/ingestion/large-repositories.md"
+            " §8a."
+        ) from exc
+    delta.transaction_estimate_mb = _transaction_estimate_mb(tx)
+    return delta
+
+
+def _transaction_estimate_mb(tx: Any) -> float | None:
+    """Neo4j's estimate of this transaction's heap so far; the limit counts more than this.
+    Best effort: the most any transaction running this query reports (two workers writing at
+    once may overstate it), None where the server doesn't say."""
+    try:
+        rows = tx.run(
+            "SHOW TRANSACTIONS YIELD currentQuery, estimatedUsedHeapMemory "
+            "WHERE currentQuery CONTAINS 'steno-transaction-size' "
+            "RETURN max(estimatedUsedHeapMemory) AS bytes"
+        ).single()
+        return round(rows["bytes"] / 1024 / 1024, 1) if rows and rows["bytes"] else None
+    except Exception:  # a metric must never fail the write
+        log.debug("couldn't read the write transaction's size", exc_info=True)
+        return None
+
+
+def _write_changes(tx: Any, plan: GraphPlan, repo: str) -> Delta:
     delta = diff(plan, _read_existing(tx, plan, repo))
     primary = {nid: _primary(labels) for nid, labels in delta.labels.items()}
 

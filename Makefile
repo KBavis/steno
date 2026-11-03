@@ -2,6 +2,11 @@
 COMPOSE := docker compose -f deploy/docker-compose.yml
 STENO   := cd backend && uv run steno
 
+# Neo4j's heap follows the machine: 40% of its memory, between 1 and 8 GB (D134). Set
+# NEO4J_HEAP_MB to override; where /proc/meminfo is missing the compose default (2 GB) applies.
+NEO4J_HEAP_MB ?= $(shell awk '/MemTotal/ {m = int($$2 / 1024 * 0.4); if (m < 1024) m = 1024; if (m > 8192) m = 8192; print m}' /proc/meminfo 2>/dev/null)
+export NEO4J_HEAP_MB
+
 .PHONY: dev up down setup migrate graph-init api worker web dry-run test lint resolver
 
 dev:           ## Install missing prerequisites, then start everything in one terminal (Ctrl+C to stop)

@@ -54,7 +54,15 @@ from steno.identity.identify import deployables
 from steno.identity.identify import identify as run_identify
 from steno.identity.registry import SqlRegistry
 from steno.ingestion import memory
-from steno.ingestion.resources import JVM_HEAP_MIN_MB, budget_mb, machine, size_mb
+from steno.ingestion.resources import (
+    JVM_HEAP_MIN_MB,
+    PYTHON_PARSE_MB,
+    budget_mb,
+    fit_heap,
+    free_mb,
+    machine,
+    size_mb,
+)
 from steno.reconcile.run import reconcile as run_reconcile
 from steno.resolvers.java import JVM_BATCHED, JVM_BY_MODULE, JVM_HEAP_MB
 from steno.rule_packs.packs import is_enabled, load_all_packs
@@ -281,6 +289,7 @@ def write(ctx: JobContext) -> dict[str, Any]:
     return {
         **plan.counts(),
         "delta": delta.counts(),
+        "transaction_estimate_mb": delta.transaction_estimate_mb,
         "fact_changes": len(rows),
         "claims": {"added": stored.added, "removed": stored.removed, "kept": stored.kept},
     }
@@ -457,12 +466,58 @@ def _plan_java(ctx: JobContext) -> dict[str, Any]:
     java = sum(1 for _ in ctx.workspace.rglob("*.java"))
     if java > settings.resolver_jvm_batch_above_files and not JVM_BATCHED.get():
         JVM_BATCHED.set(True)
-    return {
+    plan = {
         "java_files": java,
         "batched": JVM_BATCHED.get(),
         "heap_mb": JVM_HEAP_MB.get() or size_mb(settings.resolver_jvm_max_heap),
         "retried": False,
     }
+    if java:
+        _fit_to_free_memory(ctx, plan)
+    return plan
+
+
+class NotEnoughMemory(RuntimeError):
+    """The machine never had room for the Java resolver within the wait (D134)."""
+
+
+def _fit_to_free_memory(ctx: JobContext, plan: dict[str, Any]) -> None:
+    """Check the heap against the memory free right now, which may be less than when the job
+    was claimed (Neo4j and the system grow): cut it to fit (in batches), or wait for memory to
+    be freed, then fail with what was needed and what was free (D134). The heap never goes
+    below what the repository is known to need."""
+    settings = get_settings()
+    resources = (ctx.job.stats or {}).get("resources") or {}
+    python_mb = resources.get("python_mb", PYTHON_PARSE_MB)
+    floor_mb = resources.get("jvm_floor_mb", JVM_HEAP_MIN_MB)
+    want = plan["heap_mb"]
+    deadline = time.monotonic() + settings.memory_wait_minutes * 60
+    while True:
+        free = free_mb(machine())
+        heap = fit_heap(want, python_mb, free, floor_mb)
+        if heap is not None:
+            break
+        if time.monotonic() >= deadline:
+            raise NotEnoughMemory(
+                f"not enough free memory for the Java resolver: it needs a heap of at least "
+                f"{floor_mb} MB plus the worker's {python_mb} MB, and {free} MB is free "
+                f"(after {settings.memory_headroom_mb} MB kept back). Waited "
+                f"{settings.memory_wait_minutes} minutes. Free memory on this machine, or run "
+                "the job on a larger one."
+            )
+        log.warning(
+            "job %s: waiting for memory: the Java resolver needs a heap of at least %s MB, "
+            "%s MB is free", ctx.job.id, floor_mb, free,
+        )  # fmt: skip
+        time.sleep(15)
+    if heap < want:
+        log.warning(
+            "job %s: only %s MB is free; running the Java resolver in batches at a %s MB heap "
+            "instead of %s MB", ctx.job.id, free, heap, want,
+        )  # fmt: skip
+        JVM_HEAP_MB.set(heap)
+        JVM_BATCHED.set(True)
+        plan.update(heap_mb=heap, batched=True, cut_to_fit=True)
 
 
 def _java_failed(engine: Engine) -> bool:
@@ -479,14 +534,17 @@ def _out_of_memory(engine: Engine) -> bool:
 
 
 def _more_memory(ctx: JobContext, plan: dict[str, Any]) -> bool:
-    """After the resolver ran out of memory: batches, and twice the heap within this
-    machine's budget. Recorded in the job's plan, so the next run starts from it. False when
-    there's nothing more to give (already batched at the most the machine allows)."""
+    """After the resolver ran out of memory: batches, and twice the heap, within this machine's
+    budget and the memory free now (the failed helper's is back, D134). Recorded in the job's
+    plan, so the next run starts from it. False when there's nothing more to give (already
+    batched at the most the machine allows)."""
     settings = get_settings()
     cap = max(JVM_HEAP_MIN_MB, budget_mb(machine()) - settings.job_memory_default_mb)
-    heap = min(plan["heap_mb"] * 2, cap)
-    if plan["batched"] and heap <= plan["heap_mb"]:
-        return False
+    resources = (ctx.job.stats or {}).get("resources") or {}
+    python_mb = resources.get("python_mb", PYTHON_PARSE_MB)
+    heap = fit_heap(min(plan["heap_mb"] * 2, cap), python_mb, free_mb(machine()), plan["heap_mb"])
+    if heap is None or heap < plan["heap_mb"] or (plan["batched"] and heap == plan["heap_mb"]):
+        return False  # no more heap than the run that failed, and it already ran in batches
     JVM_BATCHED.set(True)
     JVM_HEAP_MB.set(heap)
     log.warning(

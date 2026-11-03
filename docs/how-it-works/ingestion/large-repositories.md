@@ -109,6 +109,13 @@ ThingsBoard's traces went from 2.5 GB to 61 MB, and Neo4j stores the same 40-tim
 
 **A resolver that fails as a whole fails the job.** Before, an out-of-memory resolver was an error string and the job carried on, so the write stage would have removed the repository's flows. Now parse stops the job, nothing is written, and the last good graph stays.
 
+**Jobs fit the memory free now (D134).** The totals above say what the machine has; what matters is what is free at the moment, which excludes Neo4j, Postgres, and the other jobs. A job starts only if its reservation fits the free memory less a headroom (`STENO_MEMORY_HEADROOM_MB`, 768 MB), **even when it is alone**:
+
+- If the plan from its last run doesn't fit, the JVM heap is cut to what does and the resolver runs in batches (Keycloak resolves in 600 MB), but never below what the repository is known to need (its last live heap plus 10%, or the heap that already ran out).
+- If nothing fits, the job stays queued and says why on itself (`stats.resources.waiting_for_memory`: what it needs, what is free). A job bigger than the machine's whole budget fails at once with the numbers.
+- When the Java step starts, free memory is read again, because Neo4j may have grown since the claim: the heap is cut, or the step waits up to `STENO_MEMORY_WAIT_MINUTES` (30) and then fails naming what was needed and what was free.
+- After an out-of-memory failure the retry with a doubled heap is bounded by the free memory, and is never smaller than the run that failed.
+
 **Workers take only what fits.** When a worker claims a job, it reads its machine:
 
 - the memory limit (a container's cgroup limit when there is one, otherwise physical memory);
@@ -161,6 +168,26 @@ Each job's reservation, the machine it saw, and why are in `ingestion_job.stats.
 | What it found | 0 flows: Keycloak uses Quarkus and JAX-RS, which no pack covers; 861 patterns (304 framework annotations, 111 unexplained I/O calls, 410 groups of unread files) |
 
 With batching from the first run above 3,000 Java files, Keycloak's first run is the batched one.
+
+## 8a. Writing the graph to Neo4j (measured 2026-11-02)
+
+A repository's graph is written in **one transaction**, so a failed write changes nothing ([stages §7](./stages.md)). Neo4j must hold the whole write in memory, and it limits a transaction to `dbms.memory.transaction.total.max`, 70% of the heap by default. ThingsBoard's graph (116,389 nodes, 246,687 edges, 351 MB of properties: 207 MB in the 1,567 flows' compressed traces, 84 MB in the steps) was written to Neo4j in a dry run of the whole job:
+
+| Neo4j | Result |
+|---|---|
+| Default heap (about 2 GiB), limit 1.4 GiB | Out of transaction memory, 55 s into the write: the write is refused and rolled back |
+| 3 GB heap, limit 2.1 GiB | Same, at 95 s |
+| 4 GB heap, limits 2.3, 2.7, 3.3 GiB | Same, during the edges |
+| 4 GB heap, **no limit** (a throwaway server) | Written in 60 s |
+| 3.1 GB heap, **no limit** (the real job) | **The database crashed.** The transaction was committed to Neo4j's log, then the heap ran out while applying it to the store (`OutOfMemoryError: Java heap space`) and Neo4j needed a restart. On restart it replayed the logged transaction (at a 4 GB heap) and the graph was complete, but the job had already recorded a failure |
+
+So **one ThingsBoard-size write needs about 3.5 GiB of transaction memory** (between 3.3 GiB, where it failed, and a 4 GB heap, where it passed): about ten times its properties. At Neo4j's default limit that means a heap of about 5.5 GB.
+
+**Keep Neo4j's default transaction limit.** It is what turns a write that is too large into a refused, rolled-back write. Without it the same write can crash the database mid-commit. `deploy/docker-compose.yml` sets the heap from the machine (`make up` computes `NEO4J_HEAP_MB`, 40% of memory, starting at 512 MB) and leaves the limit at its default, so on a machine with 8 GB a repository the size of ThingsBoard is refused with a clear error. A shared Neo4j should be sized for its largest repository: a heap of about 1.6 times the transaction memory it must hold.
+
+- The write stage records `transaction_estimate_mb`, Neo4j's own estimate of the transaction at its end (ThingsBoard: about 2,000 MB). It **understates what the limit counts** (that run failed at a 3.3 GiB limit), so use it to compare repositories, not to size the limit.
+- Running out of transaction memory is not retried (the driver retries transient errors, which only repeated the work for 30 s) and fails with a message naming the setting to raise.
+- Two ways to remove the ceiling are open and need a decision ([decisions](../../plan/decisions.md), open questions): writing in several transactions (gives up "a failed write changes nothing"), and keeping the flows' traces, 59% of the properties, out of the Neo4j transaction.
 
 ## 8. Not built yet
 

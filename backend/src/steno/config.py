@@ -122,6 +122,12 @@ class Settings(BaseSettings):
     worker_memory_fraction: float = 0.8
     # What a job reserves for a repository never measured before (MB): its first run
     job_memory_default_mb: int = 3072
+    # Memory (MB) kept free beyond what a job takes: other things on the machine grow while it
+    # runs (Neo4j, Postgres, the system). A job starts only if it fits the free memory minus
+    # this, even when it's the only one (D134)
+    memory_headroom_mb: int = 768
+    # How long (minutes) a job's Java step waits for free memory before failing (D134)
+    memory_wait_minutes: int = 30
     # This machine's name for counting its jobs (default: the host name)
     worker_host: str = ""
 
