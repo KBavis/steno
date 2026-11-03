@@ -7,7 +7,7 @@ Each ingestion stage taken apart: what it reads, what it does, what it leaves fo
 > - **Extract** runs every rule on every file. ast-grep finds shapes; the symbol resolver says what they mean; each match yields a fact, a fact with a blank, or a clue.
 > - **Assemble** fills the blanks: URL prefix chains, an entity's table, SDK client calls, partial references.
 > - **Flows** fits facts into the tree, builds the call graph in memory, and walks it from every entry point into flows, traces, and steps.
-> - **Write** compares with the graph by stable ID and writes only differences, in one transaction.
+> - **Write** compares with the graph by stable ID and writes only differences, in many small transactions (D135).
 >
 > Code: `backend/src/steno/ingestion/pipeline.py` (one function per stage).
 
@@ -221,7 +221,7 @@ Reads the completed facts, entry points, the resolver, and build files. Leaves a
 
 ## 7. write
 
-Reads the graph plan. In **one Neo4j transaction**, compares it with what Neo4j holds for this repository and writes only the differences. Leaves the graph matching this commit, a `fact_change` row per change, and `last_ingested_sha` moved.
+Reads the graph plan, compares it with what Neo4j holds for this repository, and writes only the differences **in many small transactions (D135)**, so Neo4j's memory depends on the size of a chunk, not of the repository. Leaves the graph matching this commit, a `fact_change` row per change, and `last_ingested_sha` moved. If part of it couldn't be written, the job fails, the repository is marked *incomplete*, and the next run writes the rest.
 
 **What "schema" means in Neo4j.** Neo4j has no tables to create: a node is labels plus properties, an edge a type plus properties. Steno's schema lives in two places: the [graph reference](../graph-reference.md) (which labels and edges exist, and what they mean; the builder only produces these) and `graph/schema.py` (`steno graph init`: a uniqueness constraint on `id` per label, a full-text index on `:Searchable`; a vector index once the embedding model is chosen).
 
@@ -241,11 +241,20 @@ Reads the graph plan. In **one Neo4j transaction**, compares it with what Neo4j 
 
 1. **Read** every node and edge whose `repo` is this repository, plus any plan node another repository wrote (a shared table, a channel).
 2. **Compare** by stable ID (`graph/delta.py`). A fact changed only if something other than provenance (job, commit, line) or code pointers differs. Moving a function down a file isn't a change; editing it is (each trace entry carries a hash of the function's syntax tree).
-3. **Remove** what this repository had that the plan doesn't. Shared nodes are kept while anything else points at them.
-4. **Write** new and changed nodes in batches of 500 (`MERGE … ON CREATE SET first_seen … SET n += props`, vanished properties set to null), then edges the same way. Unchanged facts aren't touched, so they keep the commit their lines were read at.
-5. **Record** each change in `fact_change` (before and after); for a flow whose trace changed, one row listing the functions added, removed, or modified.
+3. **Mark** the repository *writing* (a `GraphWrite` node of its own, which the comparison can't see).
+4. **Write** in this order, each batch its own transaction, merging on the stable ID (vanished properties set to null):
+   - the nodes outside any flow (applications, modules, files, interfaces, tables), then the edges among them;
+   - the flows, in groups packed up to `graph_write_chunk_mb` (32 MB) of properties and `graph_write_node_rows` (2,000) nodes: a flow and its steps stay together, then every edge whose *later* end is in the group (both ends exist by then);
+   - a batch Neo4j can't hold is halved and tried again; one row too big on its own fails that batch only.
+5. **Remove**, only if everything above succeeded: edges and nodes this repository no longer has, labels a node lost, and the shared nodes this write stopped referencing, if nothing else does. A failure therefore leaves stale facts in place, never a hole.
+6. **Record** each change in `fact_change` (before and after) **as its transaction commits**, so the history matches the graph even if a later batch fails; for a flow whose trace changed, one row listing the functions added, removed, or modified.
+7. **Mark** the repository *complete*, or *incomplete* with what failed.
 
-**Why re-running is safe:** a failed write changes nothing; the same commit writes nothing; a deleted function drops out of its flows' traces, and its Step is removed.
+**Why re-running is safe:** every write is idempotent by stable ID; the same commit writes nothing; a write that stopped partway is finished by the next run, which finds only what is left; a deleted function drops out of its flows' traces, and its Step is removed. **What changed from one transaction:** a failed write no longer "changes nothing". It leaves what it wrote, and the repository says it is mid-update (`incomplete`), which answers over the MCP report ([completeness](../retrieval-and-mcp.md#5-mcp-tools-decided)).
+
+**Shared nodes** keep their first writer (`repo`, `extracted_by`), decided in the database when the node is written, because another job may have written it since this one looked. Reconcile's stubs are taken over by the first repository whose code names them.
+
+**Edges whose end isn't in the graph** are not written (a `MATCH` finds nothing). The write counts them (`edges_missing` and samples in the stage's metrics) and the next run writes them once the end exists; before D135 they were dropped silently.
 
 ## 8. coverage and cards
 

@@ -17,6 +17,13 @@ from steno.ingestion.queue import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _workspace(tmp_path, monkeypatch):
+    """These tests run against the dev Postgres, where a worker may be running a real job: keep
+    them away from its workspace folder."""
+    monkeypatch.setattr(get_settings(), "workspace_dir", tmp_path)
+
+
 @pytest.fixture
 def session():
     s = _session_factory()()
@@ -161,3 +168,17 @@ def test_a_stopped_workers_clones_and_indexes_are_removed(tmp_path, monkeypatch)
         (tmp_path / folder / "file").write_text("x")
     remove_leftovers([7])
     assert sorted(p.name for p in tmp_path.iterdir()) == ["job-8"]  # job 8 isn't interrupted
+
+
+def test_recovering_jobs_marks_them_failed_but_leaves_the_disk_alone(session, tmp_path):
+    repo = _repo(session, "recover-disk")
+    job = enqueue(session, repo.id, JobMode.FULL)
+    job.status = JobStatus.RUNNING
+    session.flush()
+    clone = tmp_path / f"job-{job.id}"
+    clone.mkdir()
+    (clone / "A.java").write_text("class A {}")
+    assert job.id in recover_interrupted(session)
+    assert (
+        clone / "A.java"
+    ).exists()  # only the CLI, at startup, removes what a stopped worker left

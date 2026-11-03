@@ -7,6 +7,7 @@ How Steno ingests a very large repository without running out of memory, and fit
 > - Five changes fixed it, each keeping the graph identical: **two-pass Java resolution** in batches, **streaming** the resolver's output, **compact traces**, **a failed resolver fails the job**, and **workers sized to the machine**.
 > - ThingsBoard now ingests at a 2 GB heap with a 1.5 GB worker peak (from 4.6 GB), producing the same 1,623 flows and 116,269 nodes.
 > - Every run records its peak memory per stage, so a repository outgrowing its budget shows up before it fails.
+> - **The graph is written to Neo4j in many small transactions (D135, §8a)**, not one: a one-transaction write of ThingsBoard needed 3.5 GiB of Neo4j memory and crashed a 3.1 GB heap; chunked, the same size of graph writes in 42 s into a 1 GiB heap, and a write that fails partway is finished by the next run.
 > - **A second round (2026-10-31), for monorepos the size of Elasticsearch (21,229 Java files):** the helper releases tokens after parsing (§2), its output is indexed on disk instead of loaded whole (§3), extraction holds one syntax tree at a time (§3a), a repository that still fails is resolved module by module (§3b), and repeated work in the flows stage is done once (§3c). On ThingsBoard, with an identical graph: flows 2,459 → 125 s, extract 119 → 74 s, parse 193 → 120 s, Python's peak 1.6 → 0.8 GB.
 
 ```mermaid
@@ -169,25 +170,54 @@ Each job's reservation, the machine it saw, and why are in `ingestion_job.stats.
 
 With batching from the first run above 3,000 Java files, Keycloak's first run is the batched one.
 
-## 8a. Writing the graph to Neo4j (measured 2026-11-02)
+## 8a. Writing the graph to Neo4j in chunks (D135)
 
-A repository's graph is written in **one transaction**, so a failed write changes nothing ([stages §7](./stages.md)). Neo4j must hold the whole write in memory, and it limits a transaction to `dbms.memory.transaction.total.max`, 70% of the heap by default. ThingsBoard's graph (116,389 nodes, 246,687 edges, 351 MB of properties: 207 MB in the 1,567 flows' compressed traces, 84 MB in the steps) was written to Neo4j in a dry run of the whole job:
+**Why one transaction was dropped.** A repository's graph used to be written in one transaction, so a failed write changed nothing. Neo4j must hold a whole transaction in memory, and ThingsBoard's graph (116,389 nodes, 246,687 edges, 351 MB of properties, 207 MB of them the flows' compressed traces) needs about **3.5 GiB, ten times its properties**. Measured on the whole job, 2026-11-02:
 
-| Neo4j | Result |
+| Neo4j, one transaction | Result |
 |---|---|
-| Default heap (about 2 GiB), limit 1.4 GiB | Out of transaction memory, 55 s into the write: the write is refused and rolled back |
-| 3 GB heap, limit 2.1 GiB | Same, at 95 s |
+| Default heap (about 2 GiB), limit 1.4 GiB | Refused and rolled back, 55 s in |
+| 3 GB heap, limit 2.1 GiB | Same |
 | 4 GB heap, limits 2.3, 2.7, 3.3 GiB | Same, during the edges |
-| 4 GB heap, **no limit** (a throwaway server) | Written in 60 s |
-| 3.1 GB heap, **no limit** (the real job) | **The database crashed.** The transaction was committed to Neo4j's log, then the heap ran out while applying it to the store (`OutOfMemoryError: Java heap space`) and Neo4j needed a restart. On restart it replayed the logged transaction (at a 4 GB heap) and the graph was complete, but the job had already recorded a failure |
+| 4 GB heap, no limit (a throwaway server) | Written in 60 s |
+| 3.1 GB heap, no limit (the real job) | **The database crashed**: the transaction was committed to Neo4j's log, then the heap ran out applying it (`OutOfMemoryError: Java heap space`) and Neo4j needed a restart |
 
-So **one ThingsBoard-size write needs about 3.5 GiB of transaction memory** (between 3.3 GiB, where it failed, and a 4 GB heap, where it passed): about ten times its properties. At Neo4j's default limit that means a heap of about 5.5 GB.
+A bigger repository needs a bigger Neo4j, with no bound, and without a transaction limit an oversized write crashes the server. So the write is split.
 
-**Keep Neo4j's default transaction limit.** It is what turns a write that is too large into a refused, rolled-back write. Without it the same write can crash the database mid-commit. `deploy/docker-compose.yml` sets the heap from the machine (`make up` computes `NEO4J_HEAP_MB`, 40% of memory, starting at 512 MB) and leaves the limit at its default, so on a machine with 8 GB a repository the size of ThingsBoard is refused with a clear error. A shared Neo4j should be sized for its largest repository: a heap of about 1.6 times the transaction memory it must hold.
+**How it works** (`graph/writer.py`; the order is in [stages §7](./stages.md#7-write)):
 
-- The write stage records `transaction_estimate_mb`, Neo4j's own estimate of the transaction at its end (ThingsBoard: about 2,000 MB). It **understates what the limit counts** (that run failed at a 3.3 GiB limit), so use it to compare repositories, not to size the limit.
-- Running out of transaction memory is not retried (the driver retries transient errors, which only repeated the work for 30 s) and fails with a message naming the setting to raise.
-- Two ways to remove the ceiling are open and need a decision ([decisions](../../plan/decisions.md), open questions): writing in several transactions (gives up "a failed write changes nothing"), and keeping the flows' traces, 59% of the properties, out of the Neo4j transaction.
+1. The repository is marked *writing* (a `GraphWrite` node of its own).
+2. Nodes outside any flow, then the edges among them.
+3. The flows, packed into groups of up to `STENO_GRAPH_WRITE_CHUNK_MB` (32) of properties and `STENO_GRAPH_WRITE_NODE_ROWS` (2,000) nodes. A flow and its steps stay together, and each edge is written with the **later** of its two ends, so both exist when it is written. Edges go in batches of `STENO_GRAPH_WRITE_EDGE_ROWS` (5,000).
+4. A batch that still runs out of Neo4j's memory is **halved and tried again** (no setting needs to know the server's heap); a single row too big on its own fails only that batch. A deadlock is retried. Each batch is its own auto-commit statement, because the driver's managed transaction retries running out of memory for 30 seconds, which only repeats the work.
+5. **Removals come last**, only if every write succeeded: edges, nodes, labels a node lost, and the shared nodes this write stopped referencing. A failure therefore leaves stale facts in place, never a hole.
+6. The repository is marked *complete*, or *incomplete* with what failed, and the job fails with the application, the batch, and the error.
+
+**Splitting by module would not have worked**: in ThingsBoard one application holds 1,175 of 1,331 flows and 99.7% of the flow bytes. The unit is the flow (median 207 KB, largest 1.2 MB); the application only labels the batch in reports.
+
+**Retry is free.** Every write merges on the stable ID, so doing one twice is harmless, and the next run compares the plan with the graph again and finds only what is left. The change history (`fact_change`) is recorded as each transaction commits, so it matches the graph even after a failure.
+
+**Smaller things D135 fixed along the way:**
+
+- **Shared nodes keep their first writer, decided in the database.** The owner is set only when the node is created (or taken over from a reconcile stub), because with a long write another job may have written it since this one looked.
+- **Orphan cleanup is scoped.** It used to delete every unreferenced shared node in the whole graph; between a node chunk and its edge chunk, a table another job had just created would have looked unreferenced. It now considers only shared nodes this write stopped referencing.
+- **Edges whose end isn't in the graph** wrote nothing, silently. They are now counted (`edges_missing`, with samples, in the stage's metrics and the marker) and written by the next run once the end exists.
+- **MCP answers say when a repository is mid-update.** If the marker isn't *complete*, an application's or flow's completeness block carries `graph_update`: some facts may be from the previous commit, or missing.
+
+**Measured** (2026-11-03, a ThingsBoard-sized synthetic graph, valid traces from the real codec, written to a throwaway Neo4j with a **1 GiB heap**; the graph that crashed a 3.1 GB heap):
+
+| | Result |
+|---|---|
+| First write: 115,715 nodes, 242,549 edges, 252 MB of traces | **42 s in 590 transactions**, the heaviest holding 4.1 MB of properties; no batch needed halving; Neo4j's container peaked at 1.8 GiB (1 GiB heap, 256 MB page cache, JVM overhead) |
+| The graph afterwards | Equals the plan: every node, every edge, every trace byte |
+| The same plan again | Wrote 0 nodes and 0 edges |
+| A changed plan (40 traces edited, flows removed and moved) | 460 nodes written, 840 removed; graph equals the new plan |
+| One batch fails partway (a real Neo4j error, 22 batches) | 1 of 22 failed; 18,450 nodes written, **removals skipped**, marker *incomplete*, the old graph intact. The next run wrote exactly the 1,950 nodes of the failed batch; the graph equals the plan; marker *complete*. History: 18,450 + 1,950 = all 20,400 changes, none lost or duplicated |
+| Every batch fails | Stopped after 5 failed batches, not all of them |
+
+**Neo4j sizing now.** A batch holds at most a few MB, so the heap no longer grows with the repository: `make up` gives local Neo4j 25% of the machine's memory (1 to 4 GB), and a shared server needs no heap sized for its largest repository. Keep Neo4j's default transaction limit (70% of the heap): it is what turns an oversized batch into a refused one, which Steno halves.
+
+**What is still proportional to a repository's size** (open question in [decisions](../../plan/decisions.md)): comparing with the graph reads every existing node's properties into Python (the "same plan again" above took 61 s, almost all of it reading and decoding 252 MB of traces); flow traces are 59% of the properties and live in Neo4j.
 
 ## 8. Not built yet
 

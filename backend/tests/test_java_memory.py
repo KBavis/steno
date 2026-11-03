@@ -120,3 +120,13 @@ def test_the_retry_after_running_out_is_bounded_by_the_free_memory(tmp_path, mon
     assert (
         retry(3000)[0] is False
     )  # (3000 - 768 - 512) / 1.2 = 1433: less than the heap that failed
+
+
+def test_a_workspace_emptied_under_the_job_fails_the_parse_instead_of_looking_empty(tmp_path):
+    ctx = SimpleNamespace(
+        workspace=tmp_path, job=SimpleNamespace(id=1, stats={}), state={"clone_files": 3}
+    )
+    with pytest.raises(RuntimeError, match="the workspace lost its files: the clone had 3"):
+        contextvars.copy_context().run(pipeline.parse, ctx)
+    ctx.state = {"clone_files": 0}  # a repository that really has nothing in it is still fine
+    assert contextvars.copy_context().run(pipeline.parse, ctx)["files"] == 0

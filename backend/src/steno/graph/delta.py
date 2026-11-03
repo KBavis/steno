@@ -59,10 +59,6 @@ class Delta:
     labels: dict[str, list[str]] = field(default_factory=dict)  # node id → labels
     # Labels a node of this repository had and no longer has (a renamed role, a kind lost)
     stale_labels: dict[str, list[str]] = field(default_factory=dict)
-    # Neo4j's own estimate of the write transaction's heap at its end, in MB (None when
-    # unknown). An estimate only: the server's transaction limit counts more (ThingsBoard
-    # estimated about 2,000 MB and failed at a 3.3 GiB limit). Set by the writer.
-    transaction_estimate_mb: float | None = None
 
     def nodes_to_write(self) -> set[str]:
         return {nid for nid, _, after in self.nodes if after is not None}

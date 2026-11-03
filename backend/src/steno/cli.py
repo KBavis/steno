@@ -112,10 +112,11 @@ def job_recover() -> None:
     """Mark jobs left `running` by a worker that's no longer running as failed, so their
     repositories can be ingested again. Only run it when no worker is running (make dev does)."""
     from steno.db.session import session_scope
-    from steno.ingestion.queue import recover_interrupted
+    from steno.ingestion.queue import recover_interrupted, remove_leftovers
 
     with session_scope() as session:
         ids = recover_interrupted(session)
+    remove_leftovers(ids)  # the clones and indexes they left (no worker is running: see above)
     if ids:
         typer.echo(f"marked {len(ids)} interrupted job(s) failed: {', '.join(map(str, ids))}")
 

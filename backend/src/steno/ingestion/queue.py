@@ -178,14 +178,15 @@ def recover_interrupted(session: Session) -> list[int]:
         job.status = JobStatus.FAILED
         job.finished_at = func.now()
         job.error = "interrupted: the worker running it stopped"
-    remove_leftovers([job.id for job in jobs])
     return [job.id for job in jobs]
 
 
 def remove_leftovers(job_ids: list[int]) -> None:
     """What a stopped worker left on disk: the interrupted jobs' clones, and every resolver
     index (each is removed when its job ends, so one still there belongs to no running job).
-    A large repository's clone and index together can be gigabytes."""
+    A large repository's clone and index together can be gigabytes. Only for when no worker is
+    running (`steno job recover` at startup): it deletes a live job's clone out from under it,
+    which is why `recover_interrupted` leaves the disk alone."""
     root = get_settings().workspace_dir
     for job_id in job_ids:
         shutil.rmtree(root / f"job-{job_id}", ignore_errors=True)

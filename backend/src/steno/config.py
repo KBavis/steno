@@ -23,6 +23,14 @@ class Settings(BaseSettings):
     # Where ingestion workers clone repositories; deleted after each run
     workspace_dir: Path = Path("/tmp/steno-workspaces")
 
+    # How a repository's graph is written to Neo4j (D135): in many small transactions, so Neo4j's
+    # memory depends on the size of one, not of the repository. A transaction holds at most this
+    # many MB of properties and this many rows; one that still runs out of Neo4j's memory is
+    # halved and tried again.
+    graph_write_chunk_mb: int = 32
+    graph_write_node_rows: int = 2000
+    graph_write_edge_rows: int = 5000
+
     @property
     def index_dir(self) -> Path:
         """Each Java resolver's on-disk index (D127), removed when it's done; one a stopped

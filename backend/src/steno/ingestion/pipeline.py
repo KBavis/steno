@@ -46,7 +46,7 @@ from steno.extraction.report import to_json
 from steno.graph import ids
 from steno.graph.build import Context as GraphContext
 from steno.graph.build import build as build_graph
-from steno.graph.delta import changes
+from steno.graph.delta import Delta, changes
 from steno.graph.driver import database, get_driver
 from steno.graph.structure import detect as detect_structure
 from steno.graph.writer import write_plan
@@ -110,6 +110,7 @@ def clone(ctx: JobContext) -> dict[str, Any]:
     ctx.job.from_sha = repo.last_ingested_sha
     ctx.job.to_sha = sha
     files = [p for p in workspace.rglob("*") if p.is_file() and ".git" not in p.parts]
+    ctx.state["clone_files"] = len(files)
     return {"sha": sha, "files": len(files), "bytes": sum(p.stat().st_size for p in files)}
 
 
@@ -148,6 +149,14 @@ def parse(ctx: JobContext) -> dict[str, Any]:
         # Every flow in that language would come out hollow, and writing it would remove the
         # repository's good facts: fail here so nothing is written
         raise RuntimeError(f"symbol resolution failed: {engine.resolver.failed}")
+    if ctx.state.get("clone_files") and not engine.files:
+        # The clone had files and the parse found none: the workspace was emptied under the job.
+        # Parsing nothing must never look like a repository with nothing in it, or the write
+        # would remove the repository's good facts
+        raise RuntimeError(
+            f"the workspace lost its files: the clone had {ctx.state['clone_files']} and the "
+            "parse found none"
+        )
     ctx.state["engine"] = engine
     return {
         "packs": [p.name for p in packs],
@@ -257,22 +266,36 @@ def flows(ctx: JobContext) -> dict[str, Any]:
 
 def write(ctx: JobContext) -> dict[str, Any]:
     """Write only what changed since this repository's last run (D59): compare the plan with
-    the graph by stable ID, delete what's gone, write what's new or changed, and record each
-    change in `fact_change` (D18). A dry run writes the graph too: it only skips LLM text (D26).
+    the graph by stable ID and write the difference in many small transactions (D135), recording
+    each change in `fact_change` (D18) as its transaction commits, so the history matches the
+    graph even if a later one fails. A dry run writes the graph too: it only skips LLM text
+    (D26).
     """
     plan = ctx.state["plan"]
-    delta = write_plan(get_driver(), database(), plan, ctx.repository.name)
-    rows = changes(delta)
-    ctx.session.add_all(
-        FactChange(
-            job_id=ctx.job.id,
-            fact_id=r["fact_id"],
-            fact_type=r["fact_type"],
-            change=ChangeKind(r["change"]),
-            before=r["before"],
-            after=r["after"],
+    job_id = ctx.job.id
+    recorded = 0
+
+    def record(done: Delta) -> None:
+        nonlocal recorded
+        rows = changes(done)
+        if not rows:
+            return
+        ctx.session.add_all(
+            FactChange(
+                job_id=job_id,
+                fact_id=r["fact_id"],
+                fact_type=r["fact_type"],
+                change=ChangeKind(r["change"]),
+                before=r["before"],
+                after=r["after"],
+            )
+            for r in rows
         )
-        for r in rows
+        ctx.session.commit()
+        recorded += len(rows)
+
+    delta, written = write_plan(
+        get_driver(), database(), plan, ctx.repository.name, job_id=job_id, on_written=record
     )
     ctx.repository.last_ingested_sha = ctx.job.to_sha
     # The run succeeded: applications it no longer found are removed (identity tombstones)
@@ -289,8 +312,8 @@ def write(ctx: JobContext) -> dict[str, Any]:
     return {
         **plan.counts(),
         "delta": delta.counts(),
-        "transaction_estimate_mb": delta.transaction_estimate_mb,
-        "fact_changes": len(rows),
+        "write": written.as_dict(),
+        "fact_changes": recorded,
         "claims": {"added": stored.added, "removed": stored.removed, "kept": stored.kept},
     }
 
@@ -601,7 +624,11 @@ def _run_stage(session: Session, ctx: JobContext, name: StageName, fn: StageFn) 
         stage.status = StageStatus.SKIPPED
     except Exception as exc:
         stage.status = StageStatus.FAILED
-        stage.metrics = {"error": f"{type(exc).__name__}: {exc}"}
+        # A stage can say more than its error: the graph write reports what it did and failed
+        stage.metrics = {
+            "error": f"{type(exc).__name__}: {exc}",
+            **getattr(exc, "metrics", {}),
+        }
         stage.finished_at = _now()
         session.commit()
         raise

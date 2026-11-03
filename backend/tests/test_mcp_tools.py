@@ -123,3 +123,51 @@ def test_unexplained_counts_items_per_application_in_words():
         "auth-svc": {"framework hooks no rule explains": 1},
         "users-svc": {"I/O calls no rule explains": 1, "framework hooks no rule explains": 2},
     }
+
+
+class _Rows:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def run(self, query, **params):
+        self.query = query
+        return self.rows
+
+
+class _Driver:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def session(self, database=None):
+        return _Rows(self.rows)
+
+
+def _tools(rows):
+    from steno.mcp.tools import Tools
+
+    return Tools(driver=_Driver(rows), database="neo4j", session=None)  # type: ignore[arg-type]
+
+
+def test_an_answer_says_when_its_repository_is_mid_update():
+    assert _tools([{"state": "complete"}])._graph_update("thingsboard") == {}
+    assert _tools([])._graph_update("thingsboard") == {}  # never written with a marker
+    assert _tools([{"state": "writing"}])._graph_update(None) == {}
+    note = _tools([{"state": "incomplete"}])._graph_update("thingsboard")["graph_update"]
+    assert "thingsboard's graph is only partly updated" in note and "previous commit" in note
+    assert "being updated now" in _tools([{"state": "writing"}])._graph_update("x")["graph_update"]
+
+
+def test_a_failing_marker_lookup_never_fails_an_answer():
+    class Broken:
+        def session(self, database=None):
+            raise RuntimeError("neo4j is down")
+
+    from steno.mcp.tools import Tools
+
+    assert Tools(driver=Broken(), database="neo4j", session=None)._graph_update("x") == {}  # type: ignore[arg-type]

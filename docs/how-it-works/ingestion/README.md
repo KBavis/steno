@@ -88,7 +88,7 @@ sequenceDiagram
       W->>W: run the stage
       W->>PG: stage → succeeded / skipped / failed, seconds, metrics
     end
-    W->>N: write (one transaction)
+    W->>N: write (many small transactions)
     W->>PG: job → succeeded (or failed with the error)
     UI->>API: GET /api/jobs/{id} every 2 s (live progress)
 ```
@@ -138,7 +138,7 @@ sequenceDiagram
 - Every node and edge has a **stable ID derived from natural keys**, so re-ingesting finds the same nodes. (Applications move to a Steno ID from the identity registry; see [Identity](../../concepts/identity.md).)
 - Re-ingesting a repository compares the new facts with what the graph holds for it, by stable ID: new and changed facts are written, facts gone from the code are removed. **Shared nodes** (topics, tables, data stores, external systems) are removed only when nothing references them.
 - **The delta** (added, removed, changed) is logged in `fact_change`. Re-ingesting the same commit must produce **zero rows**: an automated idempotency test.
-- **The whole write is one Neo4j transaction.** A failed write changes nothing.
+- **The write is many small Neo4j transactions (D135), not one.** Neo4j's memory then depends on the size of a chunk, not of the repository. Every write merges on the stable ID, so doing one twice is harmless; nothing is removed until everything has been written; and the repository is marked *writing*, *complete*, or *incomplete*. A write that stopped partway is finished by the next run, whose comparison with the graph finds only what is left. See [stages §7](./stages.md#7-write) and [Large repositories §8a](./large-repositories.md#8a-writing-the-graph-to-neo4j-in-chunks-d135).
 
 **Steno owns re-ingestion (Decided, D11).** Only Steno's rules produce facts in Steno's model. Contextualized later adds *which project* and *why*; it never supplies structural facts.
 
