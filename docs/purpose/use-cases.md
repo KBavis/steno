@@ -5,7 +5,7 @@ The questions Steno has to answer well, starting with the five that set the bar.
 > **In one minute**
 > - Five **lead use cases** (★) need only the static graph, have no strong existing tool, and are easy to demonstrate: PR review with context, breaking-change checks, "grill me" planning, delta-driven testing, and stack trace to flow.
 > - Each lead use case below lists the **questions** it asks, the **MCP tools** that answer them (built or planned), and **what a correct answer contains**. The POC's question sets are drawn from these.
-> - **Scope test:** a feature belongs in Steno only if a use case needs it (D98). The tools that act on the answers (review bots, test generators, planning workflows) are built on top, not inside Steno.
+> - **Scope test:** a feature belongs in Steno only if a use case needs it (D98, D141). What it stores stops at an application's surface and what each flow reaches; the agent reads the rest from the code (D136). The tools that act on the answers (review bots, test generators, planning workflows) are built on top, not inside Steno.
 
 **MCP tools today:** `search`, `get_node`, `get_flow`, `view_flow_code`, `find_dependents`. **Planned:** `analyze_change`, `get_interface`, `find_symbols`, `get_changes`, `find_paths`, `search_code`. See [Retrieval and MCP](../how-it-works/retrieval-and-mcp.md#5-mcp-tools-decided).
 
@@ -55,9 +55,9 @@ A tester or test agent needs to know how a flow starts, what it touches, and wha
 
 | | |
 |---|---|
-| **Questions** | What triggers this flow, and with what input (method and path with the request entity, a topic and its message, a schedule)? What makes a request valid: required fields, constraints, nested objects, headers an interceptor requires? What comes back? What does it read and write, and call? What changed in it (before and after)? What's downstream to regression-test? How does this team already test similar flows? |
-| **Tools** | Today: `get_flow` (trigger, steps, effects), `view_flow_code`, `find_dependents` (downstream). Planned: `get_interface` (effective request and response contracts, interceptor requirements, validation pointers, a skeleton example, example callers; D117), `get_changes` (before and after). |
-| **A correct answer contains** | The trigger and its **effective contract** (structure, required fields, constraints, discriminators, headers interceptors require), enough for an agent to write a valid request or message; what can't be resolved, said so; every effect (tables, topics, calls), the downstream flows, the change, and the existing tests or conventions to copy (test conventions come from a standards source outside Steno). |
+| **Questions** | What triggers this flow, and with what input (method and path with the request entity, a topic and its message, a schedule)? What does the request look like: its fields, nested objects, and the interceptors that run around it (with pointers to the validation and interceptor code the agent reads)? What comes back? What does it read and write, and call? What changed in it (before and after)? What's downstream to regression-test? How does this team already test similar flows? |
+| **Tools** | Today: `get_flow` (trigger, steps, effects), `view_flow_code`, `find_dependents` (downstream). Planned: `get_interface` (request and response fields, interceptors, validation pointers, a skeleton example, example callers; D117, D137), `get_changes` (before and after). |
+| **A correct answer contains** | The trigger and its **payload classes** (fields, nesting, discriminators), with pointers to the validation and interceptor code, enough for an agent to read what's required and write a valid request or message; what can't be resolved, said so; every effect (tables, topics, calls), the downstream flows, the change, and the existing tests or conventions to copy (test conventions come from a standards source outside Steno). |
 | **Needs** | Graph; Δ; Projects for attribution |
 | **Testable from** | POC stage A (triggers and effects), stage B (downstream, contracts, interceptors) |
 
@@ -147,7 +147,7 @@ What each one needs:
 
 ## Scope boundary
 
-Steno supplies **grounded, current, attributable context** through MCP. The generators and automations above (test generators, CI bots, planning workflows, incident copilots) are **built on top of** that context by agents and workflows. They aren't features inside Steno. That keeps Steno from turning into "every SDLC tool." How those tools combine into an agent-first SDLC is designed in a separate project (D98).
+Steno supplies **grounded, current, attributable context** through MCP. The generators and automations above (test generators, CI bots, planning workflows, incident copilots) are **built on top of** that context by agents and workflows. They aren't features inside Steno. That keeps Steno from turning into "every SDLC tool." They live in other repositories and read Steno through its MCP; after the POC, Steno becomes the context layer they build on (D141).
 
 ## Illustrative scenarios
 

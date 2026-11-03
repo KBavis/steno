@@ -4,7 +4,8 @@ Where Steno is, where it's going, how an organization gets onboarded, and every 
 
 > **In one minute**
 > - **Now:** proof of concept, stage **A** (foundations + one application). Python and Java ingest end to end; MCP tools are live; the coverage report works.
-> - **Next:** application kinds, a scored question set compared against an agent without Steno, and the work decided on 2026-10-20 (D115–D127): answers that say what they checked, Java at scale, and **rule curation** (Steno drafts rules, a person approves). See the [build order](./roadmap.md#5-build-order-for-d115d127).
+> - **Next:** a scored question set compared against an agent without Steno, with **routing accuracy** as its headline and the trace ablation (D140); the investigation plugin (D133); and the rest of the work decided on 2026-10-20 (D115–D127): Java at scale and **rule curation** (Steno drafts rules, a person approves). See the [build order](./roadmap.md#5-build-order-for-d115d141).
+> - **Direction:** Steno stores the surface and points to the body (D136); after the POC it becomes the organization's context layer, adding Projects and Constraints (D141, `v1`).
 > - **Then:** a stub organization built to exercise every facet and identity case (B), real multi-service code (C), our own organization (D).
 > - **Stops:** v1 adds what a client deployment needs; v2 holds Jev, runtime evidence, frontends, and more.
 

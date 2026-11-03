@@ -3,37 +3,38 @@
 What Steno owns, what it deliberately doesn't, and the guarantees it makes to the people and systems that rely on it. Part of [Purpose](./README.md).
 
 > **In one minute**
-> - Steno is **one piece of a larger picture**: it answers *what is* (the architecture, from code). Project history (*what changed and why*), standards and constraints (*what should be*), and the workflows that use all of it are separate systems that link to Steno by ID.
-> - That larger picture (a "context layer" for an agent-first SDLC) is designed in **its own project**, not here (D98). Steno documents only its own scope and the contract it offers.
+> - Steno answers *what is*: the architecture, from code. That's the POC. After it, Steno becomes **the context layer** (D141): Projects (*what's changing, why, and who*) and Constraints (*what must be respected*) join as pillars, linked by Steno IDs, behind the same MCP. See [the context layer](./context-layer.md).
+> - The workflows that use the context (review agents, planning, test generators: the agent-first SDLC) are built on top, in other repositories.
 > - Steno guarantees: the same answer to the same question, complete or says what's missing, every claim cited, current, and works at any organization.
 > - **Steno is the breadth; agents are the depth.** Steno maps the whole organization and points to the exact code; Claude Code or Copilot reasons over it, and clones only the few repositories a task needs.
 
 ---
 
-## 1. One piece of a larger picture
+## 1. From the architecture to the context layer
 
 ```mermaid
 flowchart LR
-    ST["<b>Steno</b><br/>architecture: what is"]
-    CX["Contextualized<br/>projects: what changed, why"]
-    OT["Standards, constraints"]
-    WF["Workflows and tools<br/>planning · review · testing · …"]
-    WF -- "MCP" --> ST
-    WF --> CX & OT
-    CX -. "links by Steno ID" .-> ST
-    OT -. "attach to Steno scopes" .-> ST
+    WF["Workflows and tools<br/>planning · review · testing · …<br/>(other repositories)"] -- "one MCP" --> ST
+    subgraph ST["Steno"]
+      direction TB
+      A["<b>Architecture</b><br/>what is (POC)"]
+      P["Projects<br/>what's changing, why, who (v1)"]
+      C["Constraints<br/>what must be respected (v1)"]
+      P -. "Steno IDs" .-> A
+      C -. "attach to scopes" .-> A
+    end
 ```
 
-Steno answers **what is**: what exists, how it communicates, what each flow does, and what a change affects. Other systems answer other questions and connect to Steno through its stable IDs and scopes (the organization, a space, an application). What Steno offers them is in [Integration](./integration.md).
+In the POC, Steno answers **what is**: what exists, how it communicates, what each flow does, and what a change affects. After the POC it becomes the organization's **context layer** (D141, revising D98): Projects and Constraints join as pillars, modules linked only through Steno IDs and scopes, served by the same MCP. The vision, and how the pillars connect, is in [the context layer](./context-layer.md). What Steno offers systems built on it is in [Integration](./integration.md).
 
-How those pieces combine into an agent-first SDLC (planning, implementation, testing, release, monitoring, each pulling context and writing back) is designed in a separate project (D98). Steno stays useful on its own: an organization can adopt it without adopting anything else.
+The POC builds and proves the Architecture pillar alone, through a trial at our organization; the other pillars attach to its IDs, so their quality is capped by its accuracy.
 
 ## 2. Boundaries (Decided)
 
-- **Only witnesses write to Steno:** code, files about the system, other systems' data, and admins. Workflows that use Steno record their own work elsewhere and link by ID. After a merge, Steno works the architecture out again from the code (D11, D75).
+- **Read-only to consumers.** Only witnesses write to Steno: code, files about the system, other systems' data (later: issue trackers and merged PRs for Projects), and admins and onboarding. Agents and workflows read; they never write context. After a merge, Steno works the architecture out again from the code (D11, D75, D141).
 - **Steno is not a system of record.** It isn't a CMDB or a service catalog. It reads those where an organization has them and checks them against the code (D96).
 - **Steno never asks an organization to change its repositories.** It reads what's already there.
-- **Not Steno's job:** standards, constraints, SLAs, test conventions, ADRs, project plans, and the tools and workflows built on top (review bots, test generators, planning workflows, incident copilots).
+- **Not Steno's job:** the tools and workflows built on top (review bots, test generators, planning workflows, incident copilots), and the harness that clones and manages workspaces for agents. Constraints, standards, and projects become Steno pillars in `v1` (D141); until then they're out of scope.
 
 ## 3. Guarantees
 
@@ -63,10 +64,24 @@ Plus three costs regardless of question type: answers differ between sessions, e
 
 Steno doesn't replace what agents are good at. It does what they can't do cheaply: know the whole organization.
 
+**Where the line is (D136): compute deep, store the surface, point to the body.** The line is an *application's* edge, not a repository's: anything that crosses the process boundary is Steno's (a table only one application uses still counts, because the database is outside the process). Ingestion may analyze as deeply as it needs; what Steno stores and serves stops at five layers:
+
+| Layer | What Steno keeps | Why the agent can't get it alone |
+|---|---|---|
+| **Placement** | Organization → space → application → repository and module; deployed names; aliases | It can't find the right space or application without it |
+| **Surface** | Every way in (endpoints, consumed topics, schedules) and out (calls, publishes, table reads and writes, files, external systems), named, with a pointer to the payload class | Joins, blast radius, and "who touches X" depend on it |
+| **Reach** | For each flow: trigger, effects reached, functions reached with lines | Picking the right flow; function → flow; stack trace → flow |
+| **Search text** | The names of all of the above, and flow purposes | Routing a vague question to the right place |
+| **Pointers** | File, lines, commit; the `sources` block | Handing off to the agent |
+
+The order of internal calls, branching, validation rules, what a function computes, and how an interceptor works are **the agent's**: it reads them from the code Steno points to.
+
+**When Steno matters:** when a change touches an application's surface, or when an agent needs to invoke a flow (an end-to-end test needs its trigger, payload, and downstream effects). Most developers work in one or two repositories; their agent already sees those deeply. Steno gives it the other end of every edge: who consumes the event, what service a URL is, which route a request came through, what else writes the table. A purely internal refactor gets little from Steno, and it should cost nothing to skip.
+
 | | Steno (breadth) | The agent (depth) |
 |---|---|---|
 | Does | Finds what's involved across the organization: applications, flows, consumers, contracts, interceptors; says what it couldn't see | Reads the code Steno points to, reasons about it, plans, edits, runs tests |
 | Code | Serves it from the git host at the ingested commit, with exact pointers | Clones only the repositories a task needs, when it needs a working copy |
 | Never | Runs an agent to answer a question; manages workspaces | Has to search every repository to find which few matter |
 
-Cloning was never the problem; not knowing *which* repositories to clone was. Every Steno answer lists its `sources` (repository, commit, paths, why), so the consumer, or the harness it runs in, fetches exactly those. That harness belongs to the SDLC layer (D98). Details: [Retrieval §4](../how-it-works/retrieval-and-mcp.md#breadth-and-depth-decided-d119).
+Cloning was never the problem; not knowing *which* repositories to clone was. Every Steno answer lists its `sources` (repository, commit, paths, why), so the consumer, or the harness it runs in, fetches exactly those. That harness belongs to the SDLC tools built on top, not to Steno; for a developer working locally, Steno's investigation plugin does the sparse clone (D133). Details: [Retrieval §4](../how-it-works/retrieval-and-mcp.md#breadth-and-depth-decided-d119).

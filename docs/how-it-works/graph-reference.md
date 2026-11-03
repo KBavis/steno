@@ -6,7 +6,7 @@ How Steno represents an organization's architecture in Neo4j: every label, prope
 > - Every node has three independent aspects: **labels** (what it is), **one `BELONGS_TO`** (where it lives), and **interaction edges** (what it does).
 > - Node types (§3), relationship types (§4), and the properties every fact carries are defined here; nothing else may be emitted.
 > - Flows store a **trace** (every function, in order) instead of Function nodes; significant functions become `Step` nodes.
-> - **Contracts** are stored per class (`Entity`) and per usage (`USES_ENTITY`), so one class can be used differently by different endpoints; **interceptors** are nodes that applications activate (planned, D115, D116).
+> - **Contracts** are field lists and pointers: an `Entity` holds a class's fields, and `USES_ENTITY` says which class an interface takes or returns; validation rules are read by the agent from the code (planned, D115, D137). **Interceptors** are nodes that applications activate (planned, D116, D138).
 > - Applications are keyed by a permanent **Steno ID** ([Identity](../concepts/identity.md)); where another witness checked a topic, an application's use of it carries **agreement and sources** ([claims and reconcile](./ingestion/claims-and-reconcile.md)). Planned: **kind labels** on applications.
 
 ---
@@ -122,14 +122,14 @@ Other points:
 | `Schema` | DataStore | `name` | Not built: a property of the table today; a node in Data V2 (`v2`) |
 | `Table` | Schema, or DataStore when there's no schema | `name`, `kind` (table / collection / index), `stub` | Today: stubs, under the application's database when its config names exactly one (`spring.datasource.url`), otherwise under a placeholder data store per repository ("{repo} relational store (not identified yet)") until the store is identified. Data V2 (`v2`) fills them in. See [Data stores](#7-data-stores). |
 | `Column` | Table | `name`, `type`, `nullable`, `purpose` | Data V2 (`v2`) |
-| `Entity` | Application (or the library module that defines it) | `name`, `symbol`, `fields` (JSON; see [Contracts](#contracts-decided-d115)) | Domain models and payloads in any language: JPA classes, SQLAlchemy / Pydantic models, protobuf / Avro messages, DTOs. One node per class; whether it's a persistence model or a payload is read from its edges (`MAPS_TO`, `USES_ENTITY`). Today `fields` is `[{name, type}]`. |
-| `Interceptor` | Application, or the library `Module` that defines it | `kind` (filter / request / validation / aspect / response / error), `phase` (before / after / on_error), `scope`, `requires`, `adds`, `activation`, `symbol`, `file`, `lines` | Code a framework runs around entry points without their code calling it (D103, D116). Searchable. See [Interceptors](#interceptors-decided-d116). Not built: interceptors are steps today. |
+| `Entity` | Application (or the library module that defines it) | `name`, `symbol`, `fields` (JSON; see [Contracts](#contracts-decided-d115-narrowed-by-d137)) | Domain models and payloads in any language: JPA classes, SQLAlchemy / Pydantic models, protobuf / Avro messages, DTOs. One node per class; whether it's a persistence model or a payload is read from its edges (`MAPS_TO`, `USES_ENTITY`). Today `fields` is `[{name, type}]`. |
+| `Interceptor` | Application, or the library `Module` that defines it | `kind` (filter / request / validation / aspect / response / error), `phase` (before / after / on_error), `scope`, `activation`, `symbol`, `file`, `lines` | Code a framework runs around entry points without their code calling it (D103, D116, D138). Searchable. See [Interceptors](#interceptors-decided-d116-narrowed-by-d138). Not built: interceptors are steps today. |
 | `Route` | its gateway | `path` (pattern), `methods`, `strip_prefix`, `rewrite`, `prefix`, `target` (as written), `router`, `route_id`, `sources` | One route rule of a gateway (D132): requests on `path` go to an application after the rewrite. Written by reconcile from `route` claims. Searchable. |
 | `Gateway` | Organization | `name`, `router` | A router that is infrastructure (nginx, a Kubernetes Ingress), not an application (D132). A gateway that *is* an application is an `Application` with the kind `:Gateway`. |
 | `ExternalSystem` | Organization | `host`, `name`, `called_from` (when the host is unknown) | Vendor and third-party APIs. Keyed by host, or by service name when an [HTTP signature](./ingestion/rules-and-packs.md#http-signatures-decided-d64) recognizes the host. |
 | `KafkaCluster` (and other brokers) | Organization | `name` | Infrastructure, attached with `HOSTED_ON`. Not built: topics are keyed by name alone today. |
 
-Later (`v2`): `Team` (the Ownership facet), `Environment` (the Environments facet), `Project` (the [Contextualized integration](../purpose/integration.md)). A node type is added only together with the facet that feeds it ([Witnesses and facets](../concepts/witnesses-and-facets.md)).
+Later: `Team` (the Ownership facet, `v2`), `Environment` (the Environments facet, `v2`), `Project` (the Projects pillar of [the context layer](../purpose/context-layer.md), `v1`, D141). A node type is added only together with the facet that feeds it ([Witnesses and facets](../concepts/witnesses-and-facets.md)).
 
 ### Trace entries
 
@@ -263,27 +263,27 @@ Kafka, HTTP, and gRPC are special cases of one pattern (D61). Any communication 
 
 An organization's own messaging framework, whether or not it wraps Kafka, gets an **org-defined `Interface` label** (`:PxChannel`) and **two rules** in the org pack, one for the sender and one for the receiver. Applications connect automatically when their keys match, exactly as with Kafka topics. Communication through shared state (one app writes a table, another polls it) needs nothing extra: both point at the same `Table` node.
 
-### Contracts (Decided, D115)
+### Contracts (Decided, D115; narrowed by D137)
 
-A contract is what another application must send or can expect back. It's stored in two places, so one class can be used differently by different interfaces:
+A contract is what another application must send or can expect back. Steno stores **which class it is and what fields it has**, with a pointer to its code; the rules that make a request valid are read by the agent from that code (D136):
 
 | Where | Holds |
 |---|---|
-| `Entity.fields` (the class, once) | Per field: `name`, `json_name` (`@JsonProperty`, or the naming strategy from config), `type`, `enum` values, `required` (`@NotNull`, `@NotBlank`, a non-`Optional` Kotlin type), `constraints` (`@Size`, `@Min`, `@Pattern`, `@Email`, custom annotations with a pointer to their validator), each tagged with its validation `groups` and JSON `views`; `hidden` / `read_only` (`@JsonIgnore`, `access = READ_ONLY`). A superclass's fields are merged in. |
-| `Entity -HAS_FIELD-> Entity` | Nesting: field name, `many` (a list or set), `cascade` (`@Valid` on the field, so the nested class's constraints apply). A class that refers to itself stops expanding. |
-| `Interface -USES_ENTITY-> Entity` (the usage) | `role` (request / response / message), `validated` (`@Valid` / `@Validated` present; without it no annotation constraint is enforced), active `groups`, active `view`, and the response `wrapper` (`ResponseEntity`, `Mono`, `Optional`, a generic envelope such as `ApiResponse<T>`, whose type argument is substituted) |
+| `Entity.fields` (the class, once) | Per field: `name`, `json_name` (`@JsonProperty`, or the naming strategy from config), and `type`. A superclass's fields are merged in. The class's `symbol`, `file`, and `lines` point to its code. |
+| `Entity -HAS_FIELD-> Entity` | Nesting: field name and `many` (a list or set). A class that refers to itself stops expanding. |
+| `Interface -USES_ENTITY-> Entity` (the usage) | `role` (request / response / message) and the response `wrapper` (`ResponseEntity`, `Mono`, `Optional`, a generic envelope such as `ApiResponse<T>`, whose type argument is substituted) |
 
-**The effective contract** of an interface is computed when read (`get_interface`, [Retrieval §5](./retrieval-and-mcp.md#dependencies-and-impact)): start at the `USES_ENTITY` target, follow `HAS_FIELD`, keep the constraints in the edge's active groups and the fields in its view, and add what interceptors require or add (below). Two endpoints sharing `OrderRequest` can disagree, one requiring `id` and the other forbidding it, and both answers are right.
+**Not stored (D137):** `required`, constraints (`@Size`, `@Pattern`, custom annotations), validation groups, JSON views, and the effective contract computed from them. `get_interface` points to the class, to custom validators, and to the flow's `validates` entries, and the agent reads what they check. For a breaking-change check, Steno's part is knowing which class is the payload and who uses it; the agent diffs the class itself.
 
 **When the request decides what runs:** routing conditions (`@PostMapping(params = "type=express")`, `headers=`, `consumes=`) make **separate interfaces**, each with its condition; a polymorphic payload (`@JsonTypeInfo` + `@JsonSubTypes`, or one `@KafkaHandler` per message type) is a `oneOf` with its **discriminator**, each subtype its own `Entity`; a branch inside one flow is already on its steps (`conditional`, `branch_raw`); runtime dispatch lists every implementation as a `candidate` (D58).
 
-### Interceptors (Decided, D116)
+### Interceptors (Decided, D116; narrowed by D138)
 
 An interceptor is defined once and runs around many entry points, possibly in many applications. Three things are kept apart:
 
 | Concern | In the graph |
 |---|---|
-| **What it is** | An `Interceptor` node belonging to the application or library module that defines it: `kind`, `phase`, `scope` (path patterns, every HTTP entry point, or `validates`), `requires` (headers, auth) and `adds` (a response envelope, an error shape) where a rule states them, `activation` (the conditions that turn it on), and its code's `symbol`, `file`, `lines` |
+| **What it is** | An `Interceptor` node belonging to the application or library module that defines it: `kind`, `phase`, `scope` (path patterns, every HTTP entry point, or `validates`), `activation` (the conditions that turn it on), and its code's `symbol`, `file`, `lines`. What it requires (headers, auth) or adds (an envelope, an error shape) is read by the agent from that code (D138). |
 | **Who turns it on** | `Application -ACTIVATES {how, evidence}-> Interceptor`. `local` when the application defines it (a `JwtAuthenticationFilter` in its own code); otherwise the library's conditions are checked against each application that depends on it (Artifacts A1): on by dependency alone (auto-configuration), by annotation (`@EnableAcmeAuth`), or by config (`acme.auth.enabled: true`); off by config or an exclusion |
 | **Where it runs** | `Interface -INTERCEPTED_BY {phase, order}-> Interceptor`, derived from activation and scope. Flows keep listing interceptors as their first steps (D103); each interceptor step links to its node. |
 
@@ -311,8 +311,8 @@ Every relationship is either **extracted** (read directly from code or config by
 | `SUBSTEP` | Step → Step | | **L2**: the first step nested inside this one (step 1 → step 1.1) | Derived |
 | `WRITES_TO` / `READS_FROM` / `CALLS` / `PRODUCES` (on a Flow) | Flow → Table / ExternalSystem / Interface / Topic | `conditional` | **L1 rollups**: everything the flow's steps touch, lifted onto the flow | Derived |
 | `LEADS_TO` | Flow → Flow | `mode: sync\|async`, `via` | **This flow leads to that one.** Exists exactly when a step in Flow A `CALLS` or `PRODUCES` to an interface that `STARTS` Flow B. | **Derived** |
-| `USES_ENTITY` | Interface → Entity | `role` (request / response / message), `validated`, `groups`, `view`, `wrapper` | **How this interface uses the class** (D115): the top-level payload only; nesting is `HAS_FIELD` | Extracted |
-| `HAS_FIELD` | Entity → Entity | `field`, `many`, `cascade` | A field whose type is another entity: `CreateOrderRequest.items` → `LineItem` (`many: true`; `cascade: true` when `@Valid`, so `LineItem`'s constraints apply) | Extracted |
+| `USES_ENTITY` | Interface → Entity | `role` (request / response / message), `wrapper` | **Which class this interface takes or returns** (D115, D137): the top-level payload only; nesting is `HAS_FIELD` | Extracted |
+| `HAS_FIELD` | Entity → Entity | `field`, `many` | A field whose type is another entity: `CreateOrderRequest.items` → `LineItem` (`many: true`) | Extracted |
 | `ACTIVATES` | Application → Interceptor | `how` (local / dependency / annotation / config), `evidence` | The application turns this interceptor on (D116) | Extracted |
 | `INTERCEPTED_BY` | Interface → Interceptor | `phase`, `order` | The interceptor runs around this endpoint or consumer | Derived (from `ACTIVATES` and the interceptor's scope) |
 | `MAPS_TO` | Entity → Table | | **ORM mapping**: the `User` class maps to the `users` table (`@Table(name="users")`) | Extracted |
@@ -507,6 +507,8 @@ SOURCE   run_data_source_job  apps/backend/app/api/routers/job.py:43 @ ac93a3b
 - **Flows no Project has touched** keep their code-derived purpose (`purpose_source: llm`).
 
 ### Depth and storage (Decided: traces, not Function nodes)
+
+**The ordered trace is under measurement (D140).** Stage A answers the question set with full traces and Step nodes, and with each flow's reach only (trigger, effects, the set of functions with lines). If reach scores as well, traces are stored as reach (D136). Function-to-flow lookup stays either way.
 
 The graph stores **architecture nodes plus a trace per flow**. Functions are not nodes (D60):
 

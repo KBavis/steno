@@ -1,6 +1,6 @@
 # Integration
 
-What Steno provides to other systems that build on it: project history tools like [Contextualized](https://github.com/KBavis/contextualized), standards and constraints stores, and workflows. This page is Steno's side of the contract; how those systems combine is designed elsewhere (D98). Part of [Purpose](./README.md).
+What Steno provides to the systems and pillars that build on it: workflows and SDLC tools, and, from `v1`, its own Projects and Constraints pillars ([the context layer](./context-layer.md), D141), which use the same IDs, scopes, and history. Part of [Purpose](./README.md).
 
 > **In one minute**
 > - **Stable IDs** that survive renames and moves, so anything linked to an application, flow, or interface stays linked.
@@ -8,7 +8,7 @@ What Steno provides to other systems that build on it: project history tools lik
 > - **Change history** per nightly run (`fact_change`), with commits mapped to PRs (later), so other systems can attribute changes.
 > - **Scopes** (organization, space, application) that other systems attach to.
 > - **MCP tools** with citations, as the read interface, and the **sources** behind every answer, so a harness can fetch exactly the code a task needs.
-> - **Steno must work without any of them.** Contextualized supplies the *why*; Steno supplies the *what*.
+> - **The architecture must work without any of them.** The Projects pillar (`v1`) supplies the *why* and the *who*; the architecture supplies the *what*.
 
 ---
 
@@ -23,17 +23,19 @@ What Steno provides to other systems that build on it: project history tools lik
 | **Commits → PRs** | Each run's commit range mapped to PRs (`job_commit`), so a change can be attributed | `v1` |
 | **Attribution hook** | `(:Project)-[:CHANGED {kind, pr, commit}]->(element)` edges on the facts a project changed, supplied by a project system as a witness | Designed; with the integration |
 | **Read interface** | MCP tools with citations and completeness | Built (5 tools); more planned |
-| **Sources to fetch** | Every answer that cites code lists its `sources`: repository, clone URL, branch, ingested commit, whether the branch has moved since (`head_moved`), cited folders, and why. A harness that clones for agents (built in the SDLC layer, not in Steno) uses it to fetch exactly what a task needs (D119). | Built |
+| **Sources to fetch** | Every answer that cites code lists its `sources`: repository, clone URL, branch, ingested commit, whether the branch has moved since (`head_moved`), cited folders, and why. A harness that clones for agents (an SDLC tool built on Steno, not part of it) uses it to fetch exactly what a task needs (D119). | Built |
 
-## 2. Division of work with Contextualized (Decided, D11)
+## 2. Division of work between the architecture and Projects (Decided, D11; Projects becomes a Steno pillar by D141)
 
-| | Steno | Contextualized |
+Contextualized's ideas, not its code, carry forward as the Projects pillar ([the context layer §3](./context-layer.md#3-projects-v1)).
+
+| | Architecture | Projects |
 |---|---|---|
 | Knows | The architecture as it is: applications, interfaces, flows, tables, dependencies | What each project changed and why: PRs, diffs, tickets, summaries |
 | Built from | Code (and the systems around it), re-derived nightly | Projects an organization registers |
 | Answers | "What does this flow do? What depends on it? What does this change touch?" | "Which project introduced this? Why?" |
 
-Steno owns *what* changed (deterministic facts and deltas) and owns re-ingestion. Contextualized owns *why*. It never supplies structural facts.
+The architecture owns *what* changed (deterministic facts and deltas) and owns re-ingestion. Projects owns *why* and *who*. It never supplies structural facts.
 
 ## 3. Attribution, when it's connected
 
@@ -58,6 +60,6 @@ Projects attach **at the granularity of what they changed**, never assumed to ex
 
 The graph side is described in the [graph reference](../how-it-works/graph-reference.md#business-context-from-contextualized-later).
 
-## 4. What stays out of Steno
+## 4. Planning across projects
 
-Planning across projects (spotting conflicts between in-flight projects, protecting planned work, ordering bodies of work, comparing planned and actual changes) uses Steno's IDs, history, and impact analysis, but lives in the systems built on top. Those ideas moved to the separate context-layer project (D97 → D98).
+Spotting conflicts between in-flight projects, protecting planned work, ordering bodies of work, and comparing planned and actual changes use Steno's IDs, history, and impact analysis. Moved out of Steno by D98, these come back with the Projects pillar in `v1` (D97, D141). The workflows that act on them stay on top, in other repositories.

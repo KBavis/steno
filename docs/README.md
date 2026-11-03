@@ -6,7 +6,8 @@
 > - Agents are strong inside one repository and blind beyond it. Most of what matters for a change (who consumes this topic, which flows cross this service, what breaks downstream) lives outside it.
 > - Steno answers **what is**, for the people and agents who plan, implement, review, test, and operate software. Five lead use cases set the bar: PR review with context, breaking-change checks, "grill me" planning, delta-driven testing, and stack trace to flow.
 > - It builds a **knowledge graph** bottom-up: applications first, then spaces, then the organization. Rules read the code deterministically; nothing is guessed silently. Steno drafts new rules itself as the code changes, and a person approves each one.
-> - **Steno is the breadth, agents are the depth:** Steno maps the whole organization and points to the exact code; agents reason over it without cloning everything.
+> - **Steno is the breadth, agents are the depth:** Steno maps the whole organization and points to the exact code; agents reason over it without cloning everything. **Compute deep, store the surface, point to the body:** Steno keeps each application's placement, surface (ways in and out), what each flow reaches, search text, and pointers; the agent reads the rest from the code (D136).
+> - **Where it's going:** after the POC, Steno becomes the organization's **context layer**, adding Projects (what's changing, why, and who) and Constraints beside the architecture, behind one MCP (D141).
 > - **Accuracy is the bar.** An answer is either correct, or it says exactly what it couldn't see.
 > - **Status:** proof of concept. Python and Java ingest end to end; MCP tools are live. See [Plan](./plan/README.md).
 
@@ -35,12 +36,16 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    WF["Workflows and agents<br/>planning · review · testing · on call"] -- MCP --> ST["<b>Steno</b><br/>what is"]
-    CX["Project history<br/>(Contextualized)"] -. "links by Steno ID" .-> ST
-    OT["Standards, constraints"] -. "attach to Steno scopes" .-> ST
+    WF["Workflows and agents<br/>planning · review · testing · on call"] -- "one MCP" --> ST
+    subgraph ST["Steno"]
+      direction TB
+      A["<b>Architecture</b><br/>what is (POC)"]
+      P["Projects<br/>what's changing, why, who (v1)"]
+      C["Constraints<br/>what must be respected (v1)"]
+    end
 ```
 
-Steno answers **what is**: the architecture as it runs today, derived from code. Project history (*what changed and why*), standards and constraints (*what should be*), and the workflows built on top are separate systems that link to Steno by stable IDs. How they combine into an agent-first SDLC is designed in a separate project. See [Where Steno fits](./purpose/where-steno-fits.md).
+In the POC, Steno answers **what is**: the architecture as it runs today, derived from code. After the POC it becomes the organization's **context layer** (D141): Projects and Constraints join as pillars, linked to the architecture by Steno IDs and scopes, behind the same MCP. The workflows built on top (the agent-first SDLC) live in other repositories. See [Where Steno fits](./purpose/where-steno-fits.md) and [the context layer](./purpose/context-layer.md).
 
 ## Read on
 

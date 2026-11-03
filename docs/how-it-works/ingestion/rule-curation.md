@@ -88,7 +88,7 @@ Excluding paths by hand doesn't scale, and a file type that's noise in one organ
 
 **Universal noise ships with Steno.** Core packs carry a `noise` list (images, Markdown, lock files, IDE and CI files), so organizations handle only their own unusual cases. **Every entry is checked against the facets first:** SQL migrations, for example, are not noise, because the Data facet reads them for table ownership.
 
-**Triage names the facet.** A pattern is worth a rule only if the triage step can name the facet or use case it serves ([witnesses and facets](../../concepts/witnesses-and-facets.md)); otherwise it's proposed as `ignore`. This is the same test as for features: a rule belongs in Steno only if a use case needs it.
+**Triage names the facet and the question (D139).** A pattern is worth a rule only if the triage step can name the facet it serves ([witnesses and facets](../../concepts/witnesses-and-facets.md)) *and* the use-case question it helps answer ([use cases](../../purpose/use-cases.md)), and the rule's emits stay within what Steno stores (D136): recognizing an entry point or an effect, its name, and a pointer to its payload. Otherwise it's proposed as `ignore`, with the reason recorded. A rule that would only add depth (validation semantics, what an interceptor requires, how a function computes something) is declined: the agent reads that from the code. This is the same test as for features: a rule belongs in Steno only if a use case needs it.
 
 ## 4. Frameworks: rules that belong together (Decided, D123)
 
@@ -244,4 +244,4 @@ The same, from the command line:
 
 The drafter is the Claude Agent SDK (D130). First live runs on budgeting-app: `AuthenticationManager#authenticate` → `ignore` ($0.07: an in-process call whose data access the app's own repositories already show), `nginx/*.conf` → `vocabulary` ($0.21: proxy routes are a Routing fact the vocabulary can't express yet), `psycopg2.connect` → a rule with three passing cases, one negative ($0.41). Tables: `curation_run`, `rule_proposal`. Kit tools built: `vocabulary()`, `rules_index` / `find_rules`, `match_existing`, `test_rule`, `read_file`.
 
-**Not built:** owners from build coordinates (with Artifacts A1), reopening an ignored pattern on evidence, `near_misses`, `read_source` by symbol, the shadow run (proof is the rule's own cases for now), runs started by the nightly schedule, proposals, the review UI, commits, and rule health. The build order is in the [roadmap](../../plan/roadmap.md#5-build-order-for-d115d127).
+**Not built:** owners from build coordinates (with Artifacts A1), reopening an ignored pattern on evidence, `near_misses`, `read_source` by symbol, the shadow run (proof is the rule's own cases for now), runs started by the nightly schedule, proposals, the review UI, commits, and rule health. The build order is in the [roadmap](../../plan/roadmap.md#5-build-order-for-d115d141).
