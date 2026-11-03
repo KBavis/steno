@@ -8,7 +8,8 @@ Where Steno is going and where each piece stops: the **proof of concept** (stage
 > - **Breadth, not depth** (D136): Steno stores each application's surface and what its flows reach, and points to the code for the rest. Stage A measures whether flows need their ordered traces (D140).
 > - **Rules keep up by curation** (D120): Steno drafts rules for what its coverage report can't explain, and a person approves them. Built and measured in the POC, on Java first.
 > - **v1** adds what a client deployment needs (connectors to systems reached through an API, catalogs as witnesses, a guided onboarding UI, MCP authentication) and turns Steno into **the context layer**: the Projects and Constraints pillars (D141).
-> - **v2** holds Jev, runtime evidence, frontends, data store schemas, ownership, and environments.
+> - **Jev routes questions in the POC** (D142): every `search` answer says which spaces, applications, and flows it chose and how confident it is. Routing and scale are tested at our organization (D144).
+> - **v2** holds Jev's ingestion decisions, runtime evidence, frontends, data store schemas, ownership, and environments.
 
 ```mermaid
 flowchart LR
@@ -85,7 +86,7 @@ For our organization's application and its neighbors:
 
 ## 5. Build order for D115–D141
 
-Decided on 2026-10-20; extended on 2026-11-03 (D133, D136–D140). In order; each step is usable on its own:
+Decided on 2026-10-20; extended on 2026-11-03 (D133, D136–D140, D142–D143). In order; each step is usable on its own:
 
 | # | Work | Decisions | Stage |
 |---|---|---|---|
@@ -94,10 +95,11 @@ Decided on 2026-10-20; extended on 2026-11-03 (D133, D136–D140). In order; eac
 | 3 | **Patterns:** fingerprints and occurrence keys; org-wide patterns and their states; the unread-files and unread-config signals; scoring; clustering into frameworks. Deterministic, no LLM. **Built:** fingerprints, occurrence keys, patterns and states, reach-based scores, clustering by owner, `GET /api/patterns`. Unread files and config, the packs' `noise` block, three kinds of evidence, triage on patterns. **Built.** | D121–D123 | A |
 | 4 | **Rule curation** (built: searches as queued work drafted in parallel across workers, proposals, the Claude Agent SDK drafter (D130) with a model per search, the cost check and pilot, approve and reject (one at a time or by framework), publishing as a pull request (D131), the Rule Composer page; not yet: the shadow run, framework cards, rule health, nightly runs)**:** the authoring kit (`vocabulary()` from the code's schema, `match_existing`, the rules index, samples, `test_rule`, `shadow_run`); both drafter backends; proposals and their store; the review UI; commits authored by Steno; the budget gate and pilot; rule health | D120, D123–D126 | A → B |
 | 5 | **The investigation plugin:** the Claude Code plugin with Steno's connection settings and the investigation skill (read `sources`, sparse-clone the cited folders, investigate, clean up); the same workflow in the MCP server's instructions and MCP prompts for other clients. An early goal: clients need to know how to use Steno well, and the eval runs with it. | D133 | A |
-| 6 | **The stage A eval:** the question set scored for routing accuracy first, then the answer; the trace ablation (full traces and Step nodes against reach only); then traces stored as reach if the ablation says so. **Built:** the reach view (`STENO_FLOW_VIEW=reach`: `get_flow` and the server's instructions serve each flow's trigger, effects, and the functions it reaches by file, with no order or nesting), so the same questions can be scored both ways; D139 enforced in curation, the review UI, and the `rule-pack-author` skill | D140, D136, D139 | A |
-| 7 | **Measure curation** on Java: the hidden pack, then frameworks with no pack (§4) | D120 | B |
-| 8 | **Contracts:** entity fields with JSON names and types (Jackson pack), `HAS_FIELD`, `USES_ENTITY` with its role and wrapper, the `validates` tag, `get_interface` with pointers to validation | D115, D117, D137 | B |
-| 9 | **Interceptors as nodes:** the node, kinds, phase, scope, activation, `ACTIVATES`, `INTERCEPTED_BY`; library activation once Artifacts A1 is built | D116, D138 | B |
+| 6 | **Routing with Jev:** space, application, and organization summaries written by an LLM from the graph (rewritten when their inputs change); deterministic flow digests; the `routing` block in `search` with confidence bands and alternatives, and the server instructions for each band; the stand-in backend first, Jev when credits arrive | D142, D143 | A |
+| 7 | **The stage A eval:** the question set scored for routing accuracy first, then the answer; the trace ablation (full traces and Step nodes against reach only); then traces stored as reach if the ablation says so. **Built:** the reach view (`STENO_FLOW_VIEW=reach`: `get_flow` and the server's instructions serve each flow's trigger, effects, and the functions it reaches by file, with no order or nesting), so the same questions can be scored both ways; D139 enforced in curation, the review UI, and the `rule-pack-author` skill | D140, D136, D139 | A |
+| 8 | **Measure curation** on Java: the hidden pack, then frameworks with no pack (§4) | D120 | B |
+| 9 | **Contracts:** entity fields with JSON names and types (Jackson pack), `HAS_FIELD`, `USES_ENTITY` with its role and wrapper, the `validates` tag, `get_interface` with pointers to validation | D115, D117, D137 | B |
+| 10 | **Interceptors as nodes:** the node, kinds, phase, scope, activation, `ACTIVATES`, `INTERCEPTED_BY`; library activation once Artifacts A1 is built | D116, D138 | B |
 
 ## 6. v1: first delivery to a client
 
