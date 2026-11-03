@@ -47,7 +47,17 @@ Never write a rule from imagination. In the folder from step 0:
 
 ### 3. Map it to Steno's vocabulary
 
-Decide what to emit, using only types that exist in the docs:
+**First, which witness is this?** Ask what consumes the information (`docs/concepts/witnesses-and-facets.md` §2):
+
+| What consumes it | Witness type | The pack emits |
+|---|---|---|
+| The running application: its source, its own `application.yml`, its build | `CODE` | **Facts** (nodes, edges, clues, entry points), written straight to the graph |
+| Infrastructure applies it: XLD definitions, Strimzi topics and ACLs, Helm, CronJobs, gateway config in a deploy repository | `PLATFORM` | **Claims** (`claim:`), compared with the code by reconcile |
+| Nothing; it only describes: a manifest, `catalog-info.yaml`, CODEOWNERS | `DECLARED` | **Claims** |
+
+The witness type is set **once per pack** (`witness_type:` in `pack.yaml`), never per rule; one pack, one witness type. A repository holding both kinds of file gets two packs. Claims use only the fixed claim types (`channel`, `may_produce`, `may_consume`, `deployable`, `name`, `schedule`, `route`; fields in `docs/how-it-works/ingestion/claims-and-reconcile.md` §3). Platform files are usually lists of records, so claim rules are config rules with `each` and `when` (§4 there). Turn the pack on only for its files: `enabled_when.files`, with a `content` regex when the extension alone would match unrelated files. Names in claims (an application, a topic) must be the names that system uses; identity links them to Steno's applications at reconcile time, and one that matches nothing becomes a visible stub, never a guess. A `${placeholder}` a claim can't resolve drops the claim with a reason; say so if the platform's own placeholder syntax (XLD `{{…}}`, Helm templates) carries the real value.
+
+Then decide what to emit, using only types that exist in the docs:
 
 | Question | Emit |
 |---|---|
@@ -93,7 +103,7 @@ It prints every match with its captures (code rules through ast-grep, config rul
 
 Under `tests/<rule-id>/<case-name>/`:
 - `input/`: the **smallest** real snippet that shows the case, trimmed. Include every file the case needs; a rule that relies on clues needs the files that emit them (the router's `__init__.py` for an endpoint's prefix).
-- `expected.yaml`: the facts it must produce (format in rules-and-packs.md §7).
+- `expected.yaml`: the facts it must produce (format in rules-and-packs.md §7), or for a claim pack the `claims:` (with `line` and `witness_type` where it matters).
 - At least one **negative case** (`expected.yaml` with nothing in it) when the pattern could over-match.
 - **Never copy secrets**, tokens, internal hostnames, or personal data into test inputs. Replace them with placeholders.
 
@@ -110,7 +120,7 @@ It runs every case through the full engine (symbol resolver, assemblers, `where:
 Give the person a short summary:
 - **What it recognizes**, in one sentence, and which files you added or changed.
 - **What it's for:** the facet and the use-case question it helps answer.
-- **What it emits** (node / edge / clue / entry point).
+- **What it emits** (node / edge / clue / entry point, or the claims and the pack's witness type).
 - **Measured:** matches across N files, versus the independent estimate. Misses or false positives you found and how you handled them.
 - **Proposed, not done:** any new type or plugin the request needs.
 - **Tests:** the `steno rules test` result for the pack.

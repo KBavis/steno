@@ -139,4 +139,4 @@ uv run steno extract ~/projects/contextualized --json out.json   # parse, extrac
 
 ## 6. Commands
 
-Run from the repository root (see `Makefile`): `make up`, `make migrate`, `make graph-init`, `make dev`, `make api`, `make worker`, `make web`, `make dry-run REPO=<name>`, `make test` (includes every rule pack's test cases), `make lint`, `make resolver` (build the JVM helper). Rules: `cd backend && uv run steno rules test [pack]`.
+Run from the repository root (see `Makefile`): `make up`, `make migrate`, `make graph-init`, `make dev`, `make api`, `make worker`, `make web`, `make dry-run REPO=<name>`, `make test` (includes every rule pack's test cases), `make lint`, `make resolver` (build the JVM helper), `make graph-stats` (what the graph holds; `ARGS="--json before.json"` saves a snapshot, `--compare before.json` shows what changed), `make reset-graph` (**destructive**: deletes the whole Neo4j graph after you type its name, keeps Postgres, and marks every repository not ingested; `ARGS=--queue` re-ingests them). Rules: `cd backend && uv run steno rules test [pack]`.
