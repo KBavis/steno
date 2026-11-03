@@ -148,19 +148,46 @@ class _Driver:
         return _Rows(self.rows)
 
 
-def _tools(rows):
+class _Jobs:
+    """Postgres's ingestion_job, as `session.get` reads it."""
+
+    def __init__(self, statuses):
+        self.statuses = statuses
+
+    def get(self, model, job_id):
+        from types import SimpleNamespace
+
+        status = self.statuses.get(job_id)
+        return SimpleNamespace(status=status) if status else None
+
+
+def _tools(rows, jobs=None):
     from steno.mcp.tools import Tools
 
-    return Tools(driver=_Driver(rows), database="neo4j", session=None)  # type: ignore[arg-type]
+    return Tools(driver=_Driver(rows), database="neo4j", session=jobs)  # type: ignore[arg-type]
 
 
 def test_an_answer_says_when_its_repository_is_mid_update():
+    from steno.db.models import JobStatus
+
     assert _tools([{"state": "complete"}])._graph_update("thingsboard") == {}
     assert _tools([])._graph_update("thingsboard") == {}  # never written with a marker
     assert _tools([{"state": "writing"}])._graph_update(None) == {}
     note = _tools([{"state": "incomplete"}])._graph_update("thingsboard")["graph_update"]
     assert "thingsboard's graph is only partly updated" in note and "previous commit" in note
-    assert "being updated now" in _tools([{"state": "writing"}])._graph_update("x")["graph_update"]
+    running = _tools([{"state": "writing", "job": 7}], _Jobs({7: JobStatus.RUNNING}))
+    assert "being updated now" in running._graph_update("x")["graph_update"]
+
+
+def test_a_write_whose_job_stopped_is_not_reported_as_still_running():
+    from steno.db.models import JobStatus
+
+    # the worker was killed mid-write: recovery marked the job failed, the marker still says writing
+    for jobs in (_Jobs({7: JobStatus.FAILED}), _Jobs({})):
+        note = _tools([{"state": "writing", "job": 7}], jobs)._graph_update("x")["graph_update"]
+        assert "only partly updated" in note
+    no_job = _tools([{"state": "writing"}], _Jobs({}))._graph_update("x")["graph_update"]
+    assert "only partly updated" in no_job  # a marker without its job can't be confirmed running
 
 
 def test_a_failing_marker_lookup_never_fails_an_answer():

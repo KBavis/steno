@@ -201,8 +201,9 @@ A bigger repository needs a bigger Neo4j, with no bound, and without a transacti
 
 - **Shared nodes keep their first writer, decided in the database.** The owner is set only when the node is created (or taken over from a reconcile stub), because with a long write another job may have written it since this one looked.
 - **Orphan cleanup is scoped.** It used to delete every unreferenced shared node in the whole graph; between a node chunk and its edge chunk, a table another job had just created would have looked unreferenced. It now considers only shared nodes this write stopped referencing.
-- **Edges whose end isn't in the graph** wrote nothing, silently. They are now counted (`edges_missing`, with samples, in the stage's metrics and the marker) and written by the next run once the end exists.
-- **MCP answers say when a repository is mid-update.** If the marker isn't *complete*, an application's or flow's completeness block carries `graph_update`: some facts may be from the previous commit, or missing.
+- **Edges whose end isn't in the graph** wrote nothing, silently. They are now counted (`edges_missing`, with samples, in the stage's metrics and the marker), left out of the change history (so the next run, which writes them once the end exists, doesn't record them as added twice), and written by the next run.
+- **MCP answers say when a repository is mid-update.** If the marker isn't *complete*, an application's or flow's completeness block carries `graph_update`: some facts may be from the previous commit, or missing. A marker still saying *writing* whose job is no longer running (a killed worker, a machine that went down) reads as *partly updated*, not "being updated now".
+- **Any error mid-write marks the repository incomplete**, not only Neo4j's: the history's database failing, a bug, the worker being stopped. The error itself still fails the job.
 
 **Measured** (2026-11-03, a ThingsBoard-sized synthetic graph, valid traces from the real codec, written to a throwaway Neo4j with a **1 GiB heap**; the graph that crashed a 3.1 GB heap):
 

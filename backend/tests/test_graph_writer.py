@@ -48,8 +48,8 @@ def _error(code: str) -> Neo4jError:
 
 
 class _Result:
-    def __init__(self, count: int):
-        self.count = count
+    def __init__(self, count: int, rows=None):
+        self.count, self.rows = count, rows or []
 
     def single(self):
         return {"c": self.count}
@@ -58,15 +58,16 @@ class _Result:
         return None
 
     def data(self):
-        return [{"src": "a", "dst": "b"}]
+        return self.rows
 
 
 class _Session:
     """Answers like Neo4j: each batch writes all its rows, unless told to run out of memory
     (`oom_over` rows), fail (`fail`), or write fewer edges than sent (`drop_edges`)."""
 
-    def __init__(self, oom_over=None, fail=None, drop_edges=0):
+    def __init__(self, oom_over=None, fail=None, drop_edges=0, lookup_fails=False):
         self.oom_over, self.fail, self.drop_edges = oom_over, fail, drop_edges
+        self.lookup_fails = lookup_fails
         self.sent: list[tuple[str, list]] = []  # the statements that committed
         self.markers: list[dict] = []
         self.attempts = 0
@@ -77,6 +78,10 @@ class _Session:
             self.markers.append(params["props"])
             return _Result(0)
         self.attempts += 1
+        if "OPTIONAL MATCH" in query:  # which edges wrote nothing: the first `drop_edges` of them
+            if self.lookup_fails:
+                raise _error("Neo.TransientError.General.DatabaseUnavailable")
+            return _Result(0, [{"src": r["src"], "dst": r["dst"]} for r in rows[: self.drop_edges]])
         if self.oom_over and rows and len(rows) > self.oom_over and "MERGE (n:" in query:
             raise _error(writer.OUT_OF_MEMORY)
         if self.fail:
@@ -326,3 +331,62 @@ def test_an_abort_is_never_reported_as_a_finished_write():
         _Run.go = original
     assert [m["state"] for m in session.markers if "state" in m][-1] == "incomplete"
     assert "delete" not in _kinds(session)
+
+
+def test_edges_that_wrote_nothing_are_left_out_of_the_history():
+    plan = _plan(flows=2, steps=3)
+    delta, existing = _delta(plan)
+    done: list[Delta] = []
+    report = apply_delta(_Session(drop_edges=1), plan, delta, existing, "r", on_written=done.append)
+    recorded = {e for d in done for e, _, _ in d.edges}
+    missing = delta.edges_to_write() - recorded
+    assert report.edges_missing == len(missing) > 0  # one per edge batch, none recorded as added
+    assert report.missing_unidentified == 0
+
+
+def test_a_failed_lookup_of_missing_edges_doesnt_fail_a_batch_that_committed():
+    plan = _plan(flows=1, steps=2)
+    delta, existing = _delta(plan)
+    done: list[Delta] = []
+    session = _Session(drop_edges=1, lookup_fails=True)
+    report = apply_delta(session, plan, delta, existing, "r", on_written=done.append)
+    assert not report.failed and report.missing_unidentified == report.edges_missing > 0
+    assert {e for d in done for e, _, _ in d.edges} == delta.edges_to_write()  # history kept
+
+
+def test_any_error_mid_write_marks_the_repository_incomplete_and_still_surfaces():
+    plan = _plan(flows=3, steps=2)
+    delta, existing = _delta(plan)
+    session = _Session()
+    calls = {"n": 0}
+
+    def history_database_down(_):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("postgres went away")
+
+    with pytest.raises(RuntimeError, match="postgres went away"):
+        apply_delta(session, plan, delta, existing, "r", on_written=history_database_down)
+    last = [m for m in session.markers if "state" in m][-1]
+    assert last["state"] == "incomplete" and "postgres went away" in last["failed"][0]
+    assert "delete" not in _kinds(session)
+
+
+def test_a_marker_that_cant_be_written_never_hides_the_real_error():
+    plan = _plan(flows=1, steps=1)
+    delta, existing = _delta(plan)
+    session = _Session()
+    original = session.run
+
+    def run(query, **params):
+        if "GraphWrite" in query and params["props"].get("state") == "incomplete":
+            raise _error("Neo.TransientError.General.DatabaseUnavailable")
+        return original(query, **params)
+
+    session.run = run
+
+    def boom(_):
+        raise ValueError("the real error")
+
+    with pytest.raises(ValueError, match="the real error"):
+        apply_delta(session, plan, delta, existing, "r", on_written=boom)

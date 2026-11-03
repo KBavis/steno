@@ -25,7 +25,7 @@ from steno.claims.store import active
 from steno.connectors.git import CloneError, remote_head
 from steno.connectors.source import SourceError, read_file, slice_lines
 from steno.coverage.runs import unexplained
-from steno.db.models import Connector, Repository
+from steno.db.models import Connector, IngestionJob, JobStatus, Repository
 from steno.extraction.facts import split_url
 from steno.graph import routing
 from steno.graph import trace as trace_codec
@@ -89,13 +89,17 @@ class Tools:
             return {}
         try:
             rows = self._read(
-                "MATCH (w:GraphWrite {id: $id}) RETURN w.state AS state", id=marker_id(repo)
+                "MATCH (w:GraphWrite {id: $id}) RETURN w.state AS state, w.job AS job",
+                id=marker_id(repo),
             )
         except Exception:  # a note must never fail an answer
             return {}
         state = rows[0]["state"] if rows else None
         if state in (None, "complete"):
             return {}
+        if state == "writing" and not self._job_running(rows[0].get("job")):
+            # The job stopped mid-write: the worker was killed, or the machine went down
+            state = "incomplete"
         return {
             "graph_update": (
                 f"{repo}'s graph is "
@@ -104,6 +108,17 @@ class Tools:
                 "next ingestion finishes the update"
             )
         }
+
+    def _job_running(self, job_id: Any) -> bool:
+        """Whether the job that marked a write as in progress is still running. True when that
+        can't be told (no Postgres here): better to say "being updated" than to guess."""
+        if not isinstance(job_id, int):
+            return False
+        try:
+            job = self.session.get(IngestionJob, job_id)
+        except Exception:
+            return True
+        return job is not None and job.status == JobStatus.RUNNING
 
     def _repo(self, name: str | None) -> Repository | None:
         if not name:

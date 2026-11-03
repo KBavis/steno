@@ -81,6 +81,7 @@ class WriteReport:
     retries: int = 0
     max_batch_mb: float = 0.0  # the heaviest batch's properties
     edges_missing: int = 0  # edges whose end wasn't in the graph (a gap, not a failure)
+    missing_unidentified: int = 0  # of those, how many couldn't be named (their lookup failed)
     missing_samples: list[dict[str, str]] = field(default_factory=list)
     failed: list[dict[str, Any]] = field(default_factory=list)
     removals_skipped: bool = False
@@ -347,6 +348,18 @@ def apply_delta(
             run.report.failed.append(
                 {"label": "write", "kind": "abort", "rows": 0, "error": "the write was aborted"}
             )
+    except BaseException as exc:
+        # Anything else: the history's database, a bug, the worker being stopped. The graph may
+        # already hold part of this write, so the marker must not go on saying "writing"
+        _mark_quietly(
+            session,
+            repo,
+            state=INCOMPLETE,
+            finished=_now(),
+            failed=[f"write stopped: {type(exc).__name__}: {exc}"[:300]],
+            edges_missing=run.report.edges_missing,
+        )
+        raise
     report = run.report
     report.seconds = round(time.monotonic() - started, 1)
     if report.failed:
@@ -404,6 +417,7 @@ class _Run:
         self.edge_item = {key: (b, a) for key, b, a in delta.edges}
         self.report = WriteReport()
         self.failed_ids: set[str] = set()  # nodes that couldn't be written
+        self.missing_keys: set[EdgeKey] = set()  # edges that wrote nothing: not in the history
         self.consecutive = 0
 
     # -- one batch: send it, halve it if Neo4j runs out of memory, say what happened ----------
@@ -476,7 +490,9 @@ class _Run:
             sub.nodes = [(nid, *self.node_item[nid]) for nid in batch.ids]
             sub.labels = {nid: self.delta.labels.get(nid, []) for nid in batch.ids}
         else:
-            sub.edges = [(key, *self.edge_item[key]) for key in batch.ids]
+            sub.edges = [
+                (key, *self.edge_item[key]) for key in batch.ids if key not in self.missing_keys
+            ]
         self.on_written(sub)
 
     # -- the queries ---------------------------------------------------------------------------
@@ -577,20 +593,28 @@ class _Run:
 
     def _missing(self, batch: _Batch, rows: list[Any], count: int) -> None:
         """Edges that wrote nothing because an end isn't in the graph: a gap to report, not a
-        failure (the next run writes them once the end exists)."""
+        failure (the next run writes them once the end exists). Named, so the history doesn't
+        record them as added. The batch did commit, so a lookup that fails here doesn't fail it:
+        the history then keeps all of them, and the count says how many couldn't be named."""
         etype, src, dst = batch.shape
         self.report.edges_missing += count
-        if len(self.report.missing_samples) < 10:
-            found = self.session.run(
-                f"UNWIND $rows AS row OPTIONAL MATCH (a:{_safe(src)} {{id: row.src}}) "
-                f"OPTIONAL MATCH (b:{_safe(dst)} {{id: row.dst}}) WITH row, a, b "
-                "WHERE a IS NULL OR b IS NULL RETURN row.src AS src, row.dst AS dst LIMIT 5",
-                rows=rows,
-            ).data()
-            self.report.missing_samples += [{"type": etype, **f} for f in found]
         log.warning(
             "graph write: %s %s edges weren't written: an end isn't in the graph", count, etype
         )
+        try:
+            found = self.session.run(
+                f"UNWIND $rows AS row OPTIONAL MATCH (a:{_safe(src)} {{id: row.src}}) "
+                f"OPTIONAL MATCH (b:{_safe(dst)} {{id: row.dst}}) WITH row, a, b "
+                "WHERE a IS NULL OR b IS NULL RETURN row.src AS src, row.dst AS dst",
+                rows=rows,
+            ).data()
+        except (Neo4jError, DriverError):
+            log.warning("graph write: couldn't name the %s missing %s edges", count, etype)
+            self.report.missing_unidentified += count
+            return
+        self.missing_keys.update((etype, f["src"], f["dst"]) for f in found)
+        room = 10 - len(self.report.missing_samples)
+        self.report.missing_samples += [{"type": etype, **f} for f in found[: max(room, 0)]]
 
 
 def _mb(batch: _Batch, rows: list[Any]) -> float:
@@ -629,6 +653,14 @@ def _mark(session: Session, repo: str, **props: Any) -> None:
         repo=repo,
         props={k: v for k, v in props.items() if v is not None},
     ).consume()
+
+
+def _mark_quietly(session: Session, repo: str, **props: Any) -> None:
+    """`_mark`, while another error is already on its way out: never hide that one."""
+    try:
+        _mark(session, repo, **props)
+    except Exception:
+        log.exception("graph write: couldn't mark %s's write %s", repo, props.get("state"))
 
 
 def _now() -> str:
