@@ -8,7 +8,7 @@ STENO   := cd backend && uv run steno
 NEO4J_HEAP_MB ?= $(shell awk '/MemTotal/ {m = int($$2 / 1024 * 0.25); if (m < 1024) m = 1024; if (m > 4096) m = 4096; print m}' /proc/meminfo 2>/dev/null)
 export NEO4J_HEAP_MB
 
-.PHONY: dev up down setup migrate graph-init api worker web dry-run test lint resolver
+.PHONY: dev up down setup migrate graph-init graph-stats reset-graph api worker web dry-run test lint resolver
 
 dev:           ## Install missing prerequisites, then start everything in one terminal (Ctrl+C to stop)
 	./scripts/bootstrap.sh
@@ -28,6 +28,12 @@ migrate:       ## Apply Postgres migrations
 
 graph-init:    ## Create Neo4j constraints and indexes
 	$(STENO) graph init
+
+graph-stats:   ## What the graph holds: make graph-stats [ARGS="--json before.json"]
+	$(STENO) graph stats $(ARGS)
+
+reset-graph:   ## DESTRUCTIVE: delete the whole Neo4j graph (asks you to type its name first)
+	$(STENO) graph reset $(ARGS)
 
 api:           ## Admin API on :8000/api and MCP on :8000/mcp
 	$(STENO) api --reload

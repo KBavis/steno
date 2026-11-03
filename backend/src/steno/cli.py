@@ -1,6 +1,7 @@
 """`steno` command line: run the processes and manage local state."""
 
 import logging
+from pathlib import Path
 
 import typer
 
@@ -81,6 +82,101 @@ def graph_init() -> None:
     with session_scope() as session:
         spaces = sync_declared(session, get_driver(), database())
     typer.echo(f"applied {len(stmts)} constraints/indexes; synced {spaces} spaces")
+
+
+@graph_app.command("stats")
+def graph_stats(
+    out: Path = typer.Option(None, "--json", help="Also save the snapshot to this file"),
+    compare: Path = typer.Option(None, help="A snapshot saved earlier, to show what changed"),
+) -> None:
+    """What the graph holds: nodes by label, edges by type, agreement states. Save one before a
+    reset or a rule change and compare after."""
+    import json
+
+    from steno.graph.driver import database, get_driver
+    from steno.graph.maintenance import diff, stats
+
+    now = stats(get_driver(), database())
+    if out:
+        out.write_text(json.dumps(now, indent=2))
+    if compare:
+        changes = diff(json.loads(compare.read_text()), now)
+        typer.echo("\n".join(changes) if changes else "no change")
+        return
+    typer.echo(f"nodes: {now['nodes']}   edges: {now['edges']}")
+    for group in ("by_label", "by_type", "agreement"):
+        typer.echo(f"\n{group}:")
+        for name, n in now[group].items():
+            typer.echo(f"  {name:<28} {n}")
+
+
+@graph_app.command("reset")
+def graph_reset(
+    queue: bool = typer.Option(False, "--queue", help="Queue a full run of every repository"),
+    yes: bool = typer.Option(False, "--yes", help="Skip the typed confirmation (scripts only)"),
+) -> None:
+    """DESTRUCTIVE: delete every node and edge in Neo4j, then mark every repository not
+    ingested so the next run rebuilds the graph from git. Postgres is kept: connectors,
+    repositories, the identity registry (Steno IDs survive), claims, coverage, proposals."""
+    from sqlalchemy import select, update
+
+    from steno.db.models import IngestionJob, JobStatus, Repository, RepositorySelection
+    from steno.db.session import session_scope
+    from steno.graph.driver import database, get_driver
+    from steno.graph.maintenance import confirmed, stats, wipe
+    from steno.graph.projection import sync_declared
+    from steno.graph.schema import apply_schema
+
+    driver, db = get_driver(), database()
+    with session_scope() as session:
+        active = session.scalars(
+            select(IngestionJob.id).where(
+                IngestionJob.status.in_([JobStatus.QUEUED, JobStatus.RUNNING])
+            )
+        ).all()
+        repos = session.scalars(
+            select(Repository.name).where(Repository.selection == RepositorySelection.INCLUDED)
+        ).all()
+    if active:
+        typer.echo(f"refusing: {len(active)} job(s) queued or running; wait or stop the workers")
+        raise typer.Exit(1)
+
+    before = stats(driver, db)
+    s = get_settings()
+    typer.secho("This deletes the whole Steno graph. It can't be undone.", fg="red", bold=True)
+    typer.echo(f"  Neo4j: {s.neo4j_uri}, database {db!r}")
+    typer.echo(f"  deletes {before['nodes']} nodes and {before['edges']} edges")
+    typer.echo(f"  then marks {len(repos)} repositories not ingested"
+               + (" and queues a full run of each" if queue else ""))  # fmt: skip
+    typer.echo("  keeps Postgres: connectors, repositories, identity, claims, coverage, proposals")
+    typer.echo("Tip: `steno graph stats --json before.json` first, to compare after re-ingesting.")
+    if not yes:
+        typed = typer.prompt(f"Type the database name ({db}) to delete it", default="")
+        if not confirmed(typed, db):
+            typer.echo("not confirmed; nothing was deleted")
+            raise typer.Exit(1)
+
+    # Marked first: if the wipe fails partway, the next nightly run still re-ingests everything
+    with session_scope() as session:
+        session.execute(update(Repository).values(last_ingested_sha=None))
+    deleted = wipe(driver, db)
+    apply_schema(driver, db)
+    with session_scope() as session:
+        sync_declared(session, driver, db)  # the organization and spaces come from Postgres
+    typer.echo(f"deleted {deleted} nodes; repositories marked not ingested")
+    if queue:
+        from steno.db.models import JobTrigger
+        from steno.ingestion.queue import RepositoryBusy, enqueue
+
+        with session_scope() as session:
+            for repo in session.scalars(
+                select(Repository).where(Repository.selection == RepositorySelection.INCLUDED)
+            ):
+                try:
+                    enqueue(session, repo.id, JobMode.FULL, JobTrigger.MANUAL)
+                    typer.echo(f"queued {repo.name}")
+                except RepositoryBusy:
+                    typer.echo(f"{repo.name}: already queued")
 
 
 @job_app.command("enqueue")
