@@ -115,5 +115,5 @@ PEO: "Professional Employer Organization"; entity/PeoClient
 
 - A declared term that points at a node is used by search to expand questions into graph nodes.
 - Code-derived suggestions (repository, module, and package names without a declared term) can be shown to admins as prompts, never added automatically.
-- Deriving terms from documentation comes with the Contextualized integration.
+- Deriving terms from documentation comes with the Projects pillar of [the context layer](../../purpose/context-layer.md) (`v1`, D141).
 - **Open:** the declaration format (`glossary.yaml` per space, or the UI).

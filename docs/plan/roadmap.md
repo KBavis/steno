@@ -4,9 +4,10 @@ Where Steno is going and where each piece stops: the **proof of concept** (stage
 
 > **In one minute**
 > - **POC:** prove Steno answers accurately, first on one application, then on a stub organization we wrote (so the correct graph is known), then on real multi-service code, then on our own organization's application.
-> - **Accuracy is the bar.** Every stage is measured with a question set and against an agent working without Steno.
+> - **Accuracy is the bar.** Every stage is measured with a question set and against an agent working without Steno. The headline score is **routing accuracy**: did Steno lead to the right spaces, applications, and flows (D140)?
+> - **Breadth, not depth** (D136): Steno stores each application's surface and what its flows reach, and points to the code for the rest. Stage A measures whether flows need their ordered traces (D140).
 > - **Rules keep up by curation** (D120): Steno drafts rules for what its coverage report can't explain, and a person approves them. Built and measured in the POC, on Java first.
-> - **v1** adds what a client deployment needs: connectors to systems reached through an API, catalogs as witnesses, a guided onboarding UI, MCP authentication.
+> - **v1** adds what a client deployment needs (connectors to systems reached through an API, catalogs as witnesses, a guided onboarding UI, MCP authentication) and turns Steno into **the context layer**: the Projects and Constraints pillars (D141).
 > - **v2** holds Jev, runtime evidence, frontends, data store schemas, ownership, and environments.
 
 ```mermaid
@@ -41,8 +42,8 @@ Contextualized (Python) and budgeting-app (Java) ingest end to end, and a three-
 | Stage | Scope | Done when |
 |---|---|---|
 | **0 · Docs** | Restructure the documentation (this site) | The owner signs off on the structure |
-| **A · Foundations + one app** | Identity registry and identify step (Steno ID, name ladder, aliases, lifecycle, manual renames); application kinds; witness type and sources on every fact; completeness block in MCP answers; **reconcile technical design**; question set with scoring for budgeting-app (and Contextualized), plus the comparison without Steno | Question set scored. Re-ingesting the same commit changes nothing. Application IDs stable across renames and moves. |
-| **B · Stub organization (the test bed)** | A fixture in this repository: a few small services across two spaces, written so every facet, agreement state, and identity case appears at least once: <ul><li>two services sharing an internal library (**Artifacts A1**) that brings a header-requiring filter and a response wrapper the services turn on by dependency, annotation, and config (**interceptors**, D116)</li><li>a DTO shared by two endpoints with different validation groups, a nested `@Valid` field, and a polymorphic message (**contracts**, D115)</li><li>a gateway route (**Routing**)</li><li>a Kubernetes CronJob (**Schedules**)</li><li>a table one app owns (migrations) and another writes (**Data**)</li><li>an ACL file with a deliberate mismatch (**Messaging agreement**)</li><li>a manifest (**Components**)</li><li>HTTP and Kafka between services, a vendor API</li><li>scripted rename, move, rename-and-move, split, removal, and two repositories claiming one name</li></ul> | The graph matches the known correct graph. After each scripted change, re-ingestion leaves no duplicates and no dead flows. Join rate and agreement are computed. |
+| **A · Foundations + one app** | Identity registry and identify step (Steno ID, name ladder, aliases, lifecycle, manual renames); application kinds; witness type and sources on every fact; completeness block in MCP answers; **reconcile technical design**; question set with scoring for budgeting-app (and Contextualized), **routing accuracy** as its headline, plus the comparison without Steno, run with the **investigation plugin** (D133); the **trace ablation** (D140) | Question set scored, routing accuracy first. The ablation decides how flows are stored. Re-ingesting the same commit changes nothing. Application IDs stable across renames and moves. |
+| **B · Stub organization (the test bed)** | A fixture in this repository: a few small services across two spaces, written so every facet, agreement state, and identity case appears at least once: <ul><li>two services sharing an internal library (**Artifacts A1**) that brings a header-requiring filter and a response wrapper the services turn on by dependency, annotation, and config (**interceptors**, D116)</li><li>a DTO shared by two endpoints, a nested payload class, and a polymorphic message (**contracts**, D137)</li><li>a gateway route (**Routing**)</li><li>a Kubernetes CronJob (**Schedules**)</li><li>a table one app owns (migrations) and another writes (**Data**)</li><li>an ACL file with a deliberate mismatch (**Messaging agreement**)</li><li>a manifest (**Components**)</li><li>HTTP and Kafka between services, a vendor API</li><li>scripted rename, move, rename-and-move, split, removal, and two repositories claiming one name</li></ul> | The graph matches the known correct graph. After each scripted change, re-ingestion leaves no duplicates and no dead flows. Join rate and agreement are computed. |
 | **C · Real multi-service code** | [spring-petclinic-microservices](https://github.com/spring-petclinic/spring-petclinic-microservices): **Routing** through Spring Cloud Gateway and Eureka `lb://` names; **Components** names from `spring.application.name`. Stretch: the [OpenTelemetry Demo](https://github.com/open-telemetry/opentelemetry-demo) (many languages, Kafka, gRPC). | Cross-service flows match a hand check. Question set scored. |
 | **D · Our organization's application** | `component_manifest.yaml` (DECLARED Components); the XLD repository (PLATFORM Messaging and deploy names); internal libraries (Artifacts A1, then the **A2** design); onboarding steps 1–8 run on our own organization as a dry run; LLM cards and the **cost dry run** | The POC exit criteria (§3) |
 
@@ -72,17 +73,19 @@ For our organization's application and its neighbors:
 |---|---|
 | **Rule curation** | A pack we wrote, hidden, re-derived by curation and compared with the original (precision and recall); frameworks with no pack on public Java code (FTGO, Axon samples, Spring Cloud Stream samples, PiggyMetrics, ThingsBoard: to check before use), each with a small answer key; LLM cost per pattern and framework, review time per rule, revision rounds; both drafter backends ([rule curation §10](../how-it-works/ingestion/rule-curation.md#10-measuring-it)) |
 | **Large repositories** | The two-pass Java resolver gives the same results as the single pass on repositories the single pass can handle; then peak heap, peak memory, and time on very large public Java repositories (Elasticsearch or OpenSearch, Kafka, Keycloak, ThingsBoard; sizes to check) |
+| **Routing accuracy** (D140) | The headline score: for each question, whether Steno's answer led to the right spaces, applications, and flows, scored before the answer itself. A wrong route makes every later step wrong. |
+| **Trace ablation** (D140) | The question set answered with full ordered traces and Step nodes, and with each flow's reach only (trigger, effects, the set of functions with lines). If reach scores as well, traces are stored as reach. |
 | **Question set** | Kept locally, not in the repository: 10 questions each for budgeting-app and spring-petclinic-microservices so far, asked with Steno's MCP tools only and with the repositories checked out and file tools only, and scored by hand. 10–15 questions per target, **drawn from the [lead use cases](../purpose/use-cases.md#lead-use-cases-in-detail)**, expected answers written first: find a flow ("what happens when a budget is created?"), dependents ("what reads or writes `transactions`?"), triggers ("how do I start flow X?"), scheduled work, where logic lives. Scored on correctness, tool calls (from `tool_call`), and whether gaps were stated. |
-| **Comparison without Steno** | The same questions to Claude Code with the repositories checked out and no Steno. Expect a small gap on one application and a large one across services. |
+| **Comparison without Steno** | The same questions to Claude Code with the repositories checked out and no Steno; the Steno side runs with the investigation plugin (D133). Expect a small gap on one application and a large one across services. |
 | **Gold set** | Hand-labeled endpoints, topics, outbound calls, data access, and 10–20 key flows for one application. Precision and recall per fact type; flow step accuracy. |
 | **Known graph** | The stub organization's correct graph, written by us |
 | **Consistency** | Re-ingesting the same commit produces zero `fact_change` rows; a fresh ingest equals a nightly run at the same commit |
 | **Agnostic check** | A public multi-language system (the OpenTelemetry Demo) so the design doesn't overfit our organization |
 | **Calibration** (`v2`) | Predicted confidence vs. actual accuracy for decisions |
 
-## 5. Build order for D115–D127
+## 5. Build order for D115–D141
 
-Decided on 2026-10-20. In order; each step is usable on its own:
+Decided on 2026-10-20; extended on 2026-11-03 (D133, D136–D140). In order; each step is usable on its own:
 
 | # | Work | Decisions | Stage |
 |---|---|---|---|
@@ -90,9 +93,11 @@ Decided on 2026-10-20. In order; each step is usable on its own:
 | 2 | **Java at scale:** peak memory recorded per stage first (so the rest is measured); streamed output into an on-disk index; module isolation; the two-pass resolver behind the differential test; the large-repository benchmark. **Built:** memory per stage, the two-pass resolver and its differential check, work sized to the machine (D128). Then traces stored compact (ThingsBoard's worker peak: 4.6 → 1.5 GB) and the helper's output streamed. Then, for monorepos the size of Elasticsearch (21,229 Java files): the helper releases tokens after parsing (live heap about 3.5 times smaller), its output is indexed on disk instead of loaded whole, extraction holds one syntax tree at a time, a repository that still fails is resolved module by module (a failed module is a gap), and the helper's time limit grows with the repository. The graph is written to Neo4j in many small transactions (D135), so Neo4j's memory no longer grows with the repository. **Next:** flows per application | D127, D128 | A |
 | 3 | **Patterns:** fingerprints and occurrence keys; org-wide patterns and their states; the unread-files and unread-config signals; scoring; clustering into frameworks. Deterministic, no LLM. **Built:** fingerprints, occurrence keys, patterns and states, reach-based scores, clustering by owner, `GET /api/patterns`. Unread files and config, the packs' `noise` block, three kinds of evidence, triage on patterns. **Built.** | D121–D123 | A |
 | 4 | **Rule curation** (built: searches as queued work drafted in parallel across workers, proposals, the Claude Agent SDK drafter (D130) with a model per search, the cost check and pilot, approve and reject (one at a time or by framework), publishing as a pull request (D131), the Rule Composer page; not yet: the shadow run, framework cards, rule health, nightly runs)**:** the authoring kit (`vocabulary()` from the code's schema, `match_existing`, the rules index, samples, `test_rule`, `shadow_run`); both drafter backends; proposals and their store; the review UI; commits authored by Steno; the budget gate and pilot; rule health | D120, D123–D126 | A → B |
-| 5 | **Measure curation** on Java: the hidden pack, then frameworks with no pack (§4) | D120 | B |
-| 6 | **Contracts:** entity fields and constraints (Bean Validation, Jackson packs), `HAS_FIELD`, `USES_ENTITY` with its usage, the `validates` tag, `get_interface` | D115, D117 | B |
-| 7 | **Interceptors as nodes:** the node, kinds, phase, `requires` / `adds`, `ACTIVATES`, `INTERCEPTED_BY`; library activation once Artifacts A1 is built | D116 | B |
+| 5 | **The investigation plugin:** the Claude Code plugin with Steno's connection settings and the investigation skill (read `sources`, sparse-clone the cited folders, investigate, clean up); the same workflow in the MCP server's instructions and MCP prompts for other clients. An early goal: clients need to know how to use Steno well, and the eval runs with it. | D133 | A |
+| 6 | **The stage A eval:** the question set scored for routing accuracy first, then the answer; the trace ablation (full traces and Step nodes against reach only); then traces stored as reach if the ablation says so | D140, D136 | A |
+| 7 | **Measure curation** on Java: the hidden pack, then frameworks with no pack (§4) | D120 | B |
+| 8 | **Contracts:** entity fields with JSON names and types (Jackson pack), `HAS_FIELD`, `USES_ENTITY` with its role and wrapper, the `validates` tag, `get_interface` with pointers to validation | D115, D117, D137 | B |
+| 9 | **Interceptors as nodes:** the node, kinds, phase, scope, activation, `ACTIVATES`, `INTERCEPTED_BY`; library activation once Artifacts A1 is built | D116, D138 | B |
 
 ## 6. v1: first delivery to a client
 
@@ -105,10 +110,11 @@ Decided on 2026-10-20. In order; each step is usable on its own:
 - **Commits mapped to PRs** (`job_commit`); `get_changes`, `analyze_change`
 - **Artifacts A2**, if not finished in the POC
 - Org-scale rollups and confirmation by space owners (the original space and organization goals)
+- **The context layer** (D141): the Projects pillar (a project linked to its issue tracker's top-level ticket; epics, teams, and merged PRs ingested and mapped to Steno IDs), the Constraints pillar (attached to the organization, spaces, and applications), the onboarding question set, and one MCP across the pillars. See [the context layer](../purpose/context-layer.md).
 
 ## 7. v2 and later
 
-See [Later](./later/README.md): Jev, runtime evidence (OBSERVED), frontends, data store schemas (Data V2), Ownership and Environments facets, the Contextualized integration (attribution), entity-anchor retrieval, visualization enhancements.
+See [Later](./later/README.md): Jev, runtime evidence (OBSERVED), frontends, data store schemas (Data V2), Ownership and Environments facets, entity-anchor retrieval, visualization enhancements.
 
 ## 8. Not planned
 
@@ -130,6 +136,7 @@ See [Later](./later/README.md): Jev, runtime evidence (OBSERVED), frontends, dat
 | Rules overfit to our organization | Not agnostic | Fixed facets, shared packs, a public second target |
 | Too many witnesses of uneven quality; credentials for many systems | Maintenance and security cost | Witnesses read by packs with tests; read-only connectors with narrow scopes; `v1` only |
 | Steno drifts into being a catalog or CMDB | Wasted effort | Facets only for what the graph models (D79); catalogs are witnesses (D96) |
+| Steno drifts into depth agents could read themselves | Rules multiply, storage and memory grow with repository size, effort leaves the map | The breadth line (D136): store the surface and reach, point to the body; rules must name a use-case question (D139); the trace ablation (D140) |
 | A catalog vendor adds code analysis | Competition | Effort goes into what's hard: flows, joins across services, completeness |
 | Enterprise scale | Slow ingestion and queries | Traces instead of function nodes, nightly runs only for changed repositories, per-file caches, materialized rollups, measured early |
 | Data egress policy | Blocks LLM cards or a decision model | Confirm early; deterministic first means Steno is useful with LLM cards off |

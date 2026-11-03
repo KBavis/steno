@@ -8,7 +8,7 @@ How agents get context out of Steno quickly and accurately: the MCP tools, searc
 > - **Every result carries citations** and lists the scopes searched, and a **completeness block** says what Steno couldn't see.
 > - **How the tools work together** ([§5](#how-the-tools-work-together-built)): top-down, `search` → `where` → `scope` → `get_node` → `get_flow` → `view_flow_code`, reading `completeness` and `agreement` before claiming anything is complete. The server sends this to agents as its MCP instructions when they connect.
 > - **No file contents are stored:** code is read from the git host at the ingested commit; code search goes through the git host's search API.
-> - **Breadth, not depth** ([§4](#breadth-and-depth-decided-d119)): Steno answers *what and where* and serves the code; the consuming agent reasons, and clones only when a task needs it. Every answer that cites code says which `sources` to fetch.
+> - **Breadth, not depth** ([§4](#breadth-and-depth-decided-d119)): Steno answers *what and where* and serves the code; the consuming agent reasons, and clones only when a task needs it. Every answer that cites code says which `sources` to fetch. What Steno stores stops at five layers: placement, surface, reach, search text, pointers (D136).
 > - **Later:** LLM-written flow cards and vector search (after the cost dry run), and Jev as a navigator for routing and verification (`v2`). The routing design below describes that end state.
 
 ```mermaid
@@ -28,7 +28,7 @@ flowchart LR
 | MCP tools listed as built in §5 | `POC` (built) |
 | Completeness block on impact answers (D89), with `checked` / `not_checked` and unexplained counts (D118) | Built |
 | `sources` block; the depth rule in the server instructions (D119) | Built |
-| `get_interface` with effective contracts (D115, D117) | `POC` stage B |
+| `get_interface` with field lists and pointers (D117, D137) | `POC` stage B |
 | `find_paths`, `analyze_change`, `get_changes`, `find_symbols`, `glossary`, `view_file`, `list_directory`, `search_code` | `POC` stages B–D / `v1`, as needed |
 | LLM cards, embeddings, vector search | After the cost dry run (stage D) |
 | Jev routing, verification, navigation (Q0–Q4, N1–N5) | `v2`; stand-ins (global search, ranking by score) until then |
@@ -188,7 +188,7 @@ Steno is the **map**: it answers *what and where* across the organization. The c
 |---|---|---|
 | 1. Facts | Flows, dependents, contracts (`get_interface`), completeness | Steno |
 | 2. Code | `view_flow_code`, `view_file`, `list_directory`, `search_code` in one repository, read from the git host | Steno serves, the agent reads |
-| 3. Clone | Only the sources an answer cited, at the cited commit, sparse when possible | The consumer: locally, Steno's investigation plugin (D133, Proposed); remotely, the harness it runs in (SDLC layer) |
+| 3. Clone | Only the sources an answer cited, at the cited commit, sparse when possible | The consumer: locally, Steno's investigation plugin (D133, stage A); remotely, the harness it runs in (an SDLC tool built on Steno) |
 
 **Clone when** the task edits code, builds, or runs tests; needs a toolchain (compiling, type checking, git history); needs more than a handful of files or wide exploration with no pointer; or concerns code newer than the ingested commit (`head_moved: true` and the change matters). **Don't clone** to find consumers or impact, to understand a flow, or to build a request when the contract has no gaps.
 
@@ -207,7 +207,7 @@ Steno is the **map**: it answers *what and where* across the organization. The c
 }]
 ```
 
-Steno computes `sources` from the answer's citations (built: `Tools.sources`, attached to every answer that cites code): one entry per repository, its cited folders with nested ones dropped (at most 8), and up to three of the claims citing it. `head_moved` compares the ingested commit with the branch's head, read with `git ls-remote` and trusted for five minutes; it's left out when the host can't be reached. How many commits behind isn't shown: that needs the git host's compare API. Steno decides nothing here. The harness that clones and manages workspaces belongs to the SDLC layer, not to Steno (D98). The server instructions carry the rule: Steno answers *what and where*; for *exactly how*, read the cited code before concluding; clone the cited sources when a task needs it.
+Steno computes `sources` from the answer's citations (built: `Tools.sources`, attached to every answer that cites code): one entry per repository, its cited folders with nested ones dropped (at most 8), and up to three of the claims citing it. `head_moved` compares the ingested commit with the branch's head, read with `git ls-remote` and trusted for five minutes; it's left out when the host can't be reached. How many commits behind isn't shown: that needs the git host's compare API. Steno decides nothing here. The harness that clones and manages workspaces for remote agents belongs to the SDLC tools built on Steno, not to Steno. The server instructions carry the rule: Steno answers *what and where*; for *exactly how*, read the cited code before concluding; clone the cited sources when a task needs it.
 
 ## 5. MCP tools (Decided)
 
@@ -344,18 +344,18 @@ Built: `find_dependents` (`via`: `http`, `messaging`, `data`; `depth`; upstream 
 | `find_dependents(id, direction: upstream\|downstream, depth?, via?)` | "Who consumes X?" and blast radius. `via` filters by transport. | Dependents grouped by app and space; each lists every way it touches the target (`how`: a flow that reads and writes a table is a reader and a writer), with a citation per call site. For a topic, `agreement` for every application; a declared-only use (granted, no code found) makes the answer incomplete |
 | `find_paths(from, to, max_hops?)` | How two things are connected: every chain of flows and interfaces from one node to another | Ordered paths, each hop labeled sync or async |
 | `analyze_change(prs[] \| branch \| diff)` | **PR review and CI.** What a change affects, **including related PRs** (see below) | Affected flows, contract changes, consumers, which of them are covered by related PRs, and the order to deploy |
-| `get_interface(id)` | **Integration guide and test input** (D117). Everything needed to call an interface, in order (below) | Trigger, interceptor requirements, effective contracts, validation, a skeleton example, callers, completeness |
+| `get_interface(id)` | **Integration guide and test input** (D117, D137). Everything needed to call an interface, in order (below) | Trigger, interceptors, request and response fields, validation pointers, a skeleton example, callers, completeness |
 
-### `get_interface`: what it takes to call an interface (Decided, D117)
+### `get_interface`: what it takes to call an interface (Decided, D117; revised by D137)
 
-Built from facts stored at ingestion ([graph reference: contracts and interceptors](./graph-reference.md#contracts-decided-d115)); one call, in the order an agent needs to build a request:
+Built from facts stored at ingestion ([graph reference: contracts and interceptors](./graph-reference.md#contracts-decided-d115-narrowed-by-d137)); one call, in the order an agent needs to build a request:
 
 ```
 get_interface("POST /orders")
   trigger:      POST /orders   (a topic: its name and consumer group)
-  requires:     what interceptors require: X-Tenant-Id header, bearer token
-  request:      effective contract as JSON Schema: structure, nesting, required, constraints, enums, discriminators
-  response:     effective contract, after interceptors that wrap it ({data, meta}); error shape from error handlers
+  interceptors: the interceptors that run around it, each with a pointer to its code (what it requires is read there)
+  request:      the request class: fields with JSON names and types, nesting, subtypes and their discriminator; a pointer
+  response:     the response class, unwrapped; a pointer
   validators:   custom constraint annotations → pointers to their code
   validation:   pointers to `validates` trace entries in the flow (checks in code)
   example:      a deterministic skeleton: valid shape, placeholder values
@@ -364,7 +364,7 @@ get_interface("POST /orders")
   sources:      where to read more
 ```
 
-**Steno finds validation; the agent reads it.** A check written in code (`if (amount > limit) throw …`) is listed as a pointer, and the agent reads what it checks with `view_flow_code`. The agent also turns the skeleton and the callers into realistic values. If a contract can't be resolved (a `Map<String, Object>` body, a type from a library Steno can't read), the answer says so in completeness instead of leaving it out.
+**Steno finds validation; the agent reads it.** Constraint annotations, validation groups, and checks written in code (`if (amount > limit) throw …`) are all pointers (D137), and the agent reads what they check with `view_flow_code`. The agent also turns the skeleton and the callers into realistic values. If a contract can't be resolved (a `Map<String, Object>` body, a type from a library Steno can't read), the answer says so in completeness instead of leaving it out.
 
 **`find_paths` examples.** `from` and `to` are any two nodes:
 

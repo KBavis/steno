@@ -348,7 +348,7 @@ emit:
       # applies_to: { validates: "@class" }   the resolver decides (Bean Validation groups, @Valid cascades)
 ```
 
-**Extended by D116 (not built).** The emit becomes an `Interceptor` node ([graph reference](../graph-reference.md#interceptors-decided-d116)) and gains:
+**Extended by D116, narrowed by D138 (not built).** The emit becomes an `Interceptor` node ([graph reference](../graph-reference.md#interceptors-decided-d116-narrowed-by-d138)) and gains:
 
 ```yaml
 emit:
@@ -357,8 +357,6 @@ emit:
       kind: response                   # filter | request | validation | aspect | response | error
       phase: after                     # before (default) | after | on_error
       applies_to: { paths: ["/api/**"] }
-      requires: { headers: [X-Tenant-Id] }        # optional: what a caller must send
-      adds: { envelope: com.acme.web.ApiResponse }  # optional: what it wraps around responses
       activation:                      # optional: for a library's interceptor; any one turns it on
         dependency: com.acme:acme-web-security     # on the classpath (auto-configuration)
         annotation: com.acme.web.EnableAcmeAuth
@@ -366,16 +364,16 @@ emit:
         off_when: { config: { key: acme.auth.enabled, equals: "false" } }
 ```
 
-A library's interceptor is defined in the library's own repository; Steno checks `activation` against every application that depends on the library and records `ACTIVATES` with the evidence. Without `activation`, the interceptor applies to the application that defines it.
+What an interceptor requires or adds (headers, an envelope) isn't read by rules: the agent reads it from the interceptor's code (D138). A library's interceptor is defined in the library's own repository; Steno checks `activation` against every application that depends on the library and records `ACTIVATES` with the evidence. Without `activation`, the interceptor applies to the application that defines it.
 
 Each flow lists the interceptors that apply to it as its first steps. Two clues complete the picture: `access` (`matchers`, `rule`, `value`, or `function` for a handler's own annotation) gives endpoints an `access` property (`public`, `authenticated`, `role:ADMIN`), and `provides` (`function`) lets a `@Bean` whose body is the implementation stand in for the interface it returns. Packs: `steno-pack-spring-security` (filters, request matchers, `@PreAuthorize`), `steno-pack-bean-validation` (`ConstraintValidator`s), `steno-pack-spring-boot` (`@Bean` providers).
 
-### Contracts (Decided, D115; syntax settled when built)
+### Contracts (Decided, D115, narrowed by D137; syntax settled when built)
 
-Payloads are described in two parts, matching the graph ([contracts](../graph-reference.md#contracts-decided-d115)):
+Payloads are described in two parts, matching the graph ([contracts](../graph-reference.md#contracts-decided-d115-narrowed-by-d137)):
 
-- **The class** (`Entity` with its `fields`): an entity rule marks a class as a payload or model; the symbol resolver reads its fields and types, and constraint and naming annotations (Bean Validation, Jackson) are read by rules in their own packs, as clues on the field, so a new validation library is a new pack, not new core code.
-- **The usage** (`USES_ENTITY`): the rule that recognizes an endpoint or a listener also emits the edge to the type of its body or message parameter, with `role`, `validated` (`@Valid` / `@Validated` on the parameter), `groups`, and `view`. Response types come from the handler's return type, unwrapped.
+- **The class** (`Entity` with its `fields`): an entity rule marks a class as a payload or model; the symbol resolver reads its fields and types, and naming annotations (Jackson's `@JsonProperty`, a naming strategy) are read by rules in their own packs, as clues on the field. Constraint annotations (Bean Validation) aren't read into the graph: the agent reads them from the class (D137).
+- **The usage** (`USES_ENTITY`): the rule that recognizes an endpoint or a listener also emits the edge to the type of its body or message parameter, with `role`. Response types come from the handler's return type, unwrapped.
 
 ### The ledger: I/O and harmless libraries (Decided, D101)
 

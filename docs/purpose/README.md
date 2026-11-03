@@ -6,7 +6,8 @@ What Steno is for, who uses it, and the questions it has to answer well. The use
 > - Agents are strong inside one repository and blind beyond it. Most of what matters for a change (who consumes this topic, which flows cross this service, what breaks downstream, how to trigger and test a flow) lives outside it.
 > - Steno answers **"what is"**: the organization's architecture as it runs today, derived from code, current, and cited.
 > - Five **lead use cases** set the bar: PR review with context, breaking-change checks, "grill me" planning, delta-driven testing, and stack trace to flow. Each is a set of questions with answers we can check, and the POC's question sets are drawn from them.
-> - Steno supplies the context. The tools and workflows that use it (review bots, planning workflows, test generators, and eventually an agent-first SDLC) are built on top, elsewhere.
+> - **Steno matters when a change touches an application's surface,** or when an agent needs to invoke a flow: it gives the agent the other end of every edge, even when the developer works in only one or two repositories (D136).
+> - Steno supplies the context. After the POC it becomes the organization's whole **context layer**: Projects and Constraints join the architecture behind one MCP (D141). The tools and workflows that use it (review bots, planning workflows, test generators, and eventually an agent-first SDLC) are built on top, in other repositories.
 
 ```mermaid
 flowchart LR
@@ -20,7 +21,8 @@ flowchart LR
 | Page | What it covers |
 |---|---|
 | [Use cases](./use-cases.md) | The lead use cases in detail (questions, tools, what a correct answer contains), then the full catalog |
-| [Where Steno fits](./where-steno-fits.md) | What Steno owns and doesn't, why an agent with every repository isn't enough, and the guarantees Steno makes |
+| [Where Steno fits](./where-steno-fits.md) | What Steno owns and doesn't, why an agent with every repository isn't enough, where the line between breadth and depth is, and the guarantees Steno makes |
+| [The context layer](./context-layer.md) | Where Steno goes after the POC: the Projects and Constraints pillars, how they connect through Steno IDs, and the principles (`v1`, D141) |
 | [Integration](./integration.md) | What Steno provides to other systems that build on it: stable IDs, planned IDs, change history, attribution hooks, MCP |
 
 ## Why it's worth it

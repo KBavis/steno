@@ -86,9 +86,9 @@ flowchart LR
 
 Two applications are connected exactly when their keys match. An organization's own messaging framework needs one sender rule and one receiver rule. The same pattern later joins a library to the services that depend on it (the artifact coordinate is the key) and a gateway route to the service behind it.
 
-**Contracts.** What an interface takes and returns is an `Entity` (the class, stored once) plus how this interface uses it (validated or not, which validation groups, wrapped how), so one class shared by two endpoints can carry two different contracts (D115).
+**Contracts.** What an interface takes and returns is an `Entity` (the class, stored once, with its fields) plus how this interface uses it (request, response, or message; wrapped how). What makes a request valid is read by the agent from the class's code, which Steno points to (D115, D137).
 
-**Interceptors.** Code a framework runs around entry points (a JWT filter, a response wrapper, an error handler) is an `Interceptor` node. Applications activate it, by defining it or by turning on a shared library's, and it runs around the endpoints its scope covers (D116).
+**Interceptors.** Code a framework runs around entry points (a JWT filter, a response wrapper, an error handler) is an `Interceptor` node. Applications activate it, by defining it or by turning on a shared library's, and it runs around the endpoints its scope covers (D116). What it requires of a caller is read from its code (D138).
 
 **Stubs.** When a target isn't ingested yet, the sender points at a stub keyed by its natural key. When the owning application is ingested, the real node merges into the stub. An HTTP call whose host is runtime data is never merged with others: it goes to a stub per calling class, with its URL template (D64).
 
@@ -138,4 +138,24 @@ An in-code `@Scheduled` method is a trigger, not an application kind. An applica
 | `Team` (ownership), `Environment` (what's deployed where, on what) | `v2` |
 | Columns, constraints, and purpose for tables (data store schemas) | `v2` |
 | Frontend applications and UI routes | `v2` |
-| `Project` nodes linked by `CHANGED` edges | With the [Contextualized integration](../purpose/integration.md) |
+| `Project` nodes linked by `CHANGED` edges | `v1`: the Projects pillar of [the context layer](../purpose/context-layer.md) (D141) |
+
+## 7. How deep the graph goes (Decided, D136)
+
+**Compute deep, store the surface, point to the body.** Ingestion may analyze code as deeply as it needs (it builds the whole call graph in memory) to work out what each flow reaches and to write its purpose. What the graph stores, and what Steno serves, stops at five layers:
+
+```mermaid
+flowchart TB
+    PL["<b>Placement</b><br/>organization · space · application ·<br/>repository · module · deployed names"]
+    SU["<b>Surface</b><br/>ways in: endpoints, topics, schedules<br/>ways out: calls, publishes, tables, files, external systems"]
+    RE["<b>Reach</b><br/>per flow: trigger, effects reached,<br/>functions reached with lines"]
+    ST["<b>Search text</b><br/>names of all of the above, flow purposes"]
+    PO["<b>Pointers</b><br/>file · lines · commit · sources"]
+    PL --> SU --> RE --> ST --> PO
+    PO -. "the agent reads the code" .-> AG["<b>Not stored</b><br/>order of internal calls, branching,<br/>validation rules, what a function computes,<br/>how an interceptor works"]
+```
+
+- **The line is an application's edge, not a repository's.** Anything that crosses the process boundary is surface: an endpoint, a topic, another service, a table, a file. A table only one application uses is still surface, because the database is outside the process, and "what writes `orders`?" needs it.
+- **Routing needs no more than this.** Leading a vague question ("how do refunds work when a payment fails?") to the right space, application, and flow uses names, flow purposes, interfaces, tables, and function names. Purposes are written at ingestion, while the full analysis is still in memory.
+- **Below the line is the agent's.** Steno points to the exact code (`view_flow_code`, `sources`); the agent reads it, and clones only when a task needs a working copy (D119).
+- **Whether flows keep their ordered trace** is measured in stage A (D140): full traces and Step nodes against reach only.
