@@ -25,6 +25,11 @@ from steno.curation import kit
 log = logging.getLogger(__name__)
 
 RULE_FORMAT = Path(__file__).resolve().parents[4] / "docs/how-it-works/ingestion/rules-and-packs.md"
+# The fixed questions Steno answers (docs/concepts/witnesses-and-facets.md); a rule serves one
+FACETS = (
+    "Behavior", "Structure", "Components", "Artifacts", "Interfaces", "Messaging", "Routing",
+    "Data", "Schedules",
+)  # fmt: skip
 
 
 @dataclass
@@ -57,6 +62,8 @@ class DraftResult:
     kind: str  # rule | ignore | vocabulary | needs_person
     summary: str = ""
     facet: str | None = None
+    # The use-case question the rule helps answer (D139): "who consumes this channel?"
+    question: str | None = None
     rule: str | None = None  # the rule's YAML
     cases: dict[str, Any] = field(default_factory=dict)  # name → {files, expected}
     pack: dict[str, Any] = field(default_factory=dict)  # suggested pack.yaml fields (D129)
@@ -66,6 +73,24 @@ class DraftResult:
     turns: int = 0
     error: str | None = None
     title: str = ""  # its name for the reviewer, title case
+
+
+def serves_problems(result: DraftResult) -> list[str]:
+    """What a drafted rule must say about what it's for (D139): the facet it serves and the
+    use-case question it helps answer. Empty when it says both, or when it isn't a rule."""
+    if result.kind != "rule":
+        return []
+    out = []
+    if result.facet not in FACETS:
+        named = f" ({result.facet!r} isn't one)" if result.facet else ""
+        out.append(f"serves: name the facet this rule serves, one of {', '.join(FACETS)}{named}")
+    if not (result.question or "").strip():
+        out.append(
+            'serves: name the use-case question this rule helps answer, e.g. "who consumes '
+            'this channel?" or "what writes this table?"; a rule that only adds detail an '
+            "agent can read from the code isn't worth one (D136)"
+        )
+    return out
 
 
 class DrafterUnavailable(RuntimeError):
@@ -129,10 +154,19 @@ with the `submit` tool:
   over-match). It's accepted only if its own cases pass, so run `test_rule` first and fix what
   fails.
 - kind "ignore": the pattern serves no facet (logging, formatting, test helpers, plain
-  utilities): say which and why.
+  utilities), or recording it would only add depth: say which and why.
 - kind "vocabulary": representing it needs a node, edge, or property type `vocabulary` doesn't
   have. Describe what's needed and which use case it serves. Never invent types in a rule.
 - kind "needs_person": you can't tell what it means from the code available.
+
+Steno is the map, not the code: it records how an application is placed, every way into it
+(endpoints, consumed topics, schedules) and out of it (calls, publishes, table reads and writes,
+files, external systems) with their names and a pointer to the payload class, and what each
+flow reaches. Agents read everything else from the code Steno points to: validation rules,
+what an interceptor requires, the order of internal calls, what a function computes. A rule
+records an entry point, an effect, a name, or a pointer, never that detail. A rule names the
+facet it serves and the use-case question it helps answer ("who consumes this channel?", "what
+writes this table?"); if you can't name one, the pattern isn't worth a rule.
 
 Use only the emits, node types, relationships, clue and claim types that `vocabulary` lists;
 the rule format is in `rule_format`. Check `find_rules` first: extend the idea of an existing
@@ -301,8 +335,10 @@ class ClaudeAgentSdkDrafter:
             "title": {"type": "string", "description": "title case, at most 6 words"},
             "summary": {"type": "string", "description": "one or two sentences for the reviewer: "
                         "what it recognizes and what facts it produces (or why not)"},
-            "facet": {"type": "string", "description": "the facet it serves: Behavior, Interfaces, "
-                      "Messaging, Data, Schedules, Routing, Components, Artifacts, Structure"},
+            "facet": {"type": "string", "enum": list(FACETS),
+                      "description": "the facet it serves (required for a rule)"},
+            "question": {"type": "string", "description": "the use-case question it helps "
+                         "answer, e.g. who consumes this channel? (required for a rule)"},
             "rule": {"type": "string"}, "cases": {"type": "string"}, "pack": {"type": "string"},
             "notes": {"type": "string"},
         }, "required": ["kind", "title", "summary"]}  # fmt: skip
@@ -311,8 +347,11 @@ class ClaudeAgentSdkDrafter:
               "pass; otherwise the failures come back to fix.", submit_schema)  # fmt: skip
         async def submit(args: dict[str, Any]) -> dict[str, Any]:
             result = DraftResult(kind=args["kind"], summary=args.get("summary", ""),
-                                 facet=args.get("facet"), notes=args.get("notes", ""),
+                                 facet=args.get("facet"), question=args.get("question"),
+                                 notes=args.get("notes", ""),
                                  title=args.get("title", ""))  # fmt: skip
+            if problems := serves_problems(result):
+                return text("not accepted: " + "; ".join(problems), error=True)
             if result.kind == "rule":
                 try:
                     proof = _run_cases(args)

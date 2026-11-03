@@ -163,11 +163,14 @@ Both receive the same input (the pattern or framework, its samples and signals, 
 
 A draft that fails is sent back to the drafter (up to its revision cap), then marked `needs_person`.
 
+**What it's for (D139; built).** A drafted rule names the facet it serves and the use-case question it helps answer. The Claude Agent SDK drafter's `submit` refuses a rule without both, and the curation run checks every drafter's result the same way: a rule that still doesn't say goes back once with what's missing (with the other checks' findings), then reaches the reviewer flagged `serves:` as `needs_person`. The question is stored on the proposal (`rule_proposal.question`) and shown in the review as **What it answers**, next to the facet.
+
 **Review, in Steno's UI**, sorted by impact. A framework is reviewed as one unit ("Acme Messaging: 6 rules, 2 interceptors, 14 harmless entries; +400 facts across 60 repositories"), with each rule's card inside it:
 
 | Card section | Example | Source |
 |---|---|---|
 | What it recognizes | "Methods annotated `@AcmeHandler(topic = …)` consume that Kafka topic." | LLM-written |
+| What it answers | "Who consumes this channel?" · Messaging (D139) | LLM-written, required |
 | Impact | "+140 consumer facts in 22 applications; explains 140 coverage items; 131 confirmed by ACLs; 0 conflicts" | **Deterministic** (shadow run) |
 | Evidence | 3–5 matches, each with the fact it became; 1–2 **near misses**: similar code it deliberately doesn't match | **Deterministic** |
 | Flags | Very broad match, low confirmation rate, untested library version, generic candidate | **Deterministic** |

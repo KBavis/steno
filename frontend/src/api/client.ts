@@ -336,6 +336,7 @@ export interface ProposalSummary {
   fingerprints: string[]
   owner: string | null
   facet: string | null
+  question: string | null // the use-case question a rule helps answer (D139)
   target_pack: string | null
   cases: number
   cases_passed: number

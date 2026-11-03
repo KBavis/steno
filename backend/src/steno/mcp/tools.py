@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from steno.api.links import source_url
 from steno.claims.store import active
+from steno.config import get_settings
 from steno.connectors.git import CloneError, remote_head
 from steno.connectors.source import SourceError, read_file, slice_lines
 from steno.coverage.runs import unexplained
@@ -724,7 +725,9 @@ class Tools:
         as many as fit in about OUTLINE steps): a deeper branch is folded into the step above
         it, which says how many steps are inside and what they touch. `under`: a step's
         path, to show only that branch."""
-        if detail not in ("significant", "all") or expand not in ("none", "sync", "all"):
+        reach = get_settings().flow_view == "reach"
+        known = detail in ("significant", "all") and expand in ("none", "sync", "all")
+        if not reach and not known:
             raise ToolError("detail is significant|all; expand is none|sync|all")
         fl = self._resolve(ref)
         if "Flow" not in fl.labels:
@@ -767,6 +770,8 @@ class Tools:
                     "leads_to": [f for f in row["leads"] if f],
                 }
             )
+        if reach:
+            return self._flow_reach(fl, trace, effects, summary)
 
         steps = []
         citations = [
@@ -856,21 +861,7 @@ class Tools:
             for e in es:
                 totals[VERB[e["type"]]].add(e["target"])
         out: dict[str, Any] = {
-            "id": flow_id,
-            "kind": "flow",
-            "trigger": fl.get("trigger"),
-            **({"access": fl.get("access")} if fl.get("access") else {}),
-            **(
-                {
-                    "inferred": "nothing in the code starts this function; Steno treats it as an "
-                    "entry point because it does real work (a worker loop, a command, a callback "
-                    "a framework registers)"
-                }
-                if fl.get("inferred")
-                else {}
-            ),
-            **self._where(flow_id),
-            **({"purpose": fl.get("purpose")} if fl.get("purpose") else {}),
+            **self._flow_head(fl),
             "touches": {verb: sorted(names) for verb, names in totals.items()},
             "functions": fl.get("functions"),
             "shown": f"{len(steps)} of {all_steps} steps"
@@ -901,6 +892,81 @@ class Tools:
             ]
         return out
 
+    def _flow_head(self, fl: Any) -> dict[str, Any]:
+        """What every view of a flow starts with: what it is, where, and what starts it."""
+        return {
+            "id": fl["id"],
+            "kind": "flow",
+            "trigger": fl.get("trigger"),
+            **({"access": fl.get("access")} if fl.get("access") else {}),
+            **(
+                {
+                    "inferred": "nothing in the code starts this function; Steno treats it as an "
+                    "entry point because it does real work (a worker loop, a command, a callback "
+                    "a framework registers)"
+                }
+                if fl.get("inferred")
+                else {}
+            ),
+            **self._where(fl["id"]),
+            **({"purpose": fl.get("purpose")} if fl.get("purpose") else {}),
+        }
+
+    def _flow_reach(
+        self,
+        fl: Any,
+        trace: list[dict[str, Any]],
+        effects: dict[str, list[dict[str, Any]]],
+        summary: bool = False,
+    ) -> dict[str, Any]:
+        """A flow as its reach only (D140): its trigger, every effect it reaches with each call
+        site cited, and the functions it reaches with their lines, by file. No order, nesting,
+        or call flags: the ablation measures whether answers need them."""
+        flow_id, repo, commit = fl["id"], fl.get("repo"), fl.get("commit")
+        citations = [
+            self._cite(f"entry: {fl.get('entry_symbol')}", repo, commit, fl.get("entry_file"),
+                       fl.get("entry_start_line"), fl.get("entry_end_line"))
+        ]  # fmt: skip
+        touches: dict[str, set[str]] = defaultdict(set)
+        leads: list[dict[str, Any]] = []
+        hints: dict[str, list[Any]] = defaultdict(list)
+        for es in effects.values():
+            for e in es:
+                verb = VERB[e["type"]]
+                touches[verb].add(e["target"])
+                for line, op in e["sites"]:
+                    claim = f"{verb} {e['target']}" + (f" ({op})" if op else "")
+                    citations.append(self._cite(claim, repo, commit, e["file"], line))
+                for nxt in e["leads_to"]:
+                    mode = "sync" if e["type"] == "CALLS" else "async"
+                    if {"flow": nxt, "mode": mode} not in leads:
+                        leads.append({"flow": nxt, "mode": mode})
+                if e["unknown_host"]:
+                    if e["host_note"] and e["host_note"] not in hints["host_unknown"]:
+                        hints["host_unknown"].append(e["host_note"])
+                    for hint in self._path_matches(e["method"], e["url"], flow_id):
+                        if hint not in hints["possible_targets"]:
+                            hints["possible_targets"].append(hint)
+        out: dict[str, Any] = {
+            **self._flow_head(fl),
+            "view": "reach",
+            "touches": {verb: sorted(names) for verb, names in touches.items()},
+            "reaches": reach_of(trace),
+            **hints,
+            "completeness": self._flow_completeness(
+                fl,
+                sorted({e["target"] for es in effects.values() for e in es if e["unknown_host"]}),
+            ),  # fmt: skip
+            **({"leads_to": leads} if leads else {}),
+            "citations": citations,
+        }
+        if not summary:
+            out["next"] = [
+                "view_flow_code(id, [functions]) for the code of the functions you care about",
+                *(["get_flow(<leads_to flow>) for a flow this one leads to"] if leads else []),
+            ]
+        return out
+
     # ----------------------------------------------------------- view_flow_code
 
     def view_flow_code(self, ref: str, paths: list[str] | None = None) -> dict[str, Any]:
@@ -911,14 +977,19 @@ class Tools:
             raise ToolError(f"{ref!r} isn't a flow")
         trace = trace_codec.decode(fl.get("trace"))
         wanted = set(paths or [])
+        # A step's path (from the steps view) or a function's symbol (from the reach view)
         picked = [
             t
             for t in trace
-            if (t["path"] in wanted if wanted else ("step" in t and not t.get("repeat")))
+            if (
+                (t["path"] in wanted or t["symbol"] in wanted)
+                if wanted
+                else ("step" in t and not t.get("repeat"))
+            )
         ]
         if wanted and not picked:
-            raise ToolError(f"no trace entries at {sorted(wanted)}; get_flow lists the paths")
-        missing = sorted(wanted - {t["path"] for t in picked})
+            raise ToolError(f"no trace entries at {sorted(wanted)}; get_flow lists them")
+        missing = sorted(wanted - {t["path"] for t in picked} - {t["symbol"] for t in picked})
         repo = self._repo(fl.get("repo"))
         if repo is None:
             raise ToolError(f"repository {fl.get('repo')!r} isn't registered")
@@ -1515,6 +1586,23 @@ def _unique(citations: list[dict[str, Any]]) -> list[dict[str, Any]]:
             seen.add(key)
             out.append(c)
     return out
+
+
+def reach_of(trace: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Every function a flow reaches, once each, grouped by file in line order (D140)."""
+    by_file: dict[str, dict[str, tuple[int, int]]] = defaultdict(dict)
+    for t in trace:
+        by_file[t["file"]].setdefault(t["symbol"], (t["start_line"], t["end_line"]))
+    return [
+        {
+            "file": file,
+            "functions": [
+                {"function": symbol, "lines": f"{start}-{end}"}
+                for symbol, (start, end) in sorted(fns.items(), key=lambda kv: kv[1])
+            ],
+        }
+        for file, fns in sorted(by_file.items())
+    ]
 
 
 def _fold(steps: list[dict[str, Any]], levels: int, under: str | None) -> list[dict[str, Any]]:

@@ -1,7 +1,7 @@
 """The MCP tools' pure parts: folding a flow into an outline, and fitting a token budget."""
 
 from steno.coverage.runs import count_by_application
-from steno.mcp.tools import _completeness, _fold, _source_groups, _stops, fit
+from steno.mcp.tools import _completeness, _fold, _source_groups, _stops, fit, reach_of
 
 
 def _step(path: str, does: list[str] | None = None) -> dict:
@@ -198,3 +198,24 @@ def test_a_failing_marker_lookup_never_fails_an_answer():
     from steno.mcp.tools import Tools
 
     assert Tools(driver=Broken(), database="neo4j", session=None)._graph_update("x") == {}  # type: ignore[arg-type]
+
+
+def test_reach_lists_each_function_once_by_file_without_order():
+    """D140: the reach view keeps which functions a flow reaches and where, not their order,
+    nesting, or how often they're called."""
+
+    def entry(path, symbol, file, start, end):
+        return {"path": path, "symbol": symbol, "file": file, "start_line": start, "end_line": end}
+
+    trace = [
+        entry("1", "a.Api#create()", "a/Api.java", 10, 20),
+        entry("1.1", "b.Repo#save()", "b/Repo.java", 5, 9),
+        entry("1.2", "a.Api#check()", "a/Api.java", 2, 6),
+        entry("1.3", "b.Repo#save()", "b/Repo.java", 5, 9),
+    ]
+    assert reach_of(trace) == [
+        {"file": "a/Api.java", "functions": [
+            {"function": "a.Api#check()", "lines": "2-6"},
+            {"function": "a.Api#create()", "lines": "10-20"}]},
+        {"file": "b/Repo.java", "functions": [{"function": "b.Repo#save()", "lines": "5-9"}]},
+    ]  # fmt: skip
