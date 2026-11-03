@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     graph_write_chunk_mb: int = 32
     graph_write_node_rows: int = 2000
     graph_write_edge_rows: int = 5000
+
+    # How MCP serves a flow (D140): `trace` (its steps in order, from the stored trace) or
+    # `reach` (its trigger, effects, and the functions it reaches, without order or nesting),
+    # for the stage A ablation that decides whether flows keep their ordered trace
+    flow_view: Literal["trace", "reach"] = "trace"
 
     @property
     def index_dir(self) -> Path:

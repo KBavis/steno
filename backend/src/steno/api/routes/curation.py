@@ -261,6 +261,7 @@ def _summary(p: RuleProposal) -> dict[str, Any]:
         "fingerprints": p.fingerprints,
         "owner": p.owner,
         "facet": p.facet,
+        "question": p.question,
         "target_pack": p.target_pack,
         "cases": len(p.tests or {}),
         "cases_passed": sum(1 for c in cases if c.get("passed")),

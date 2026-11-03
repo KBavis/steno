@@ -36,8 +36,10 @@ from steno.curation.drafters import (
     Drafter,
     DrafterUnavailable,
     DraftRequest,
+    DraftResult,
     Sample,
     get_drafter,
+    serves_problems,
 )
 from steno.db.models import (
     Connector,
@@ -744,23 +746,25 @@ def _draft(
         language=_language(samples),
         drafted=drafted or [],
     )
+
+    def checks_of(result: DraftResult) -> RuleCheck | None:
+        if check and result.kind == "rule" and result.rule:
+            return check(result.rule, result.pack)
+        return None
+
     checked: RuleCheck | None = None
     try:
         result = drafter.draft(request, read)
-        if check and result.kind == "rule" and result.rule:
-            checked = check(result.rule, result.pack)
-            if checked.problems() and get_settings().rule_drafter_revisions > 0:
-                # One revision round: the drafter sees what the checks found
-                request.feedback = checked.problems()
-                revised = drafter.draft(request, read)
-                revised.cost_usd += result.cost_usd
-                revised.turns += result.turns
-                result = revised
-                checked = (
-                    check(result.rule, result.pack)
-                    if result.kind == "rule" and result.rule
-                    else None
-                )
+        checked = checks_of(result)
+        problems = (checked.problems() if checked else []) + serves_problems(result)
+        if problems and get_settings().rule_drafter_revisions > 0:
+            # One revision round: the drafter sees what the checks found
+            request.feedback = problems
+            revised = drafter.draft(request, read)
+            revised.cost_usd += result.cost_usd
+            revised.turns += result.turns
+            result = revised
+            checked = checks_of(result)
     except (NotImplementedError, DrafterUnavailable):
         raise
     except Exception as exc:  # noqa: BLE001 - recorded, and the run goes on
@@ -785,6 +789,11 @@ def _draft(
         proof["checks"] = checked.to_json()
         if checked.blocking() and status == ProposalStatus.READY:
             status = ProposalStatus.NEEDS_PERSON  # a rule that would muddle identity
+    if serves := serves_problems(result):
+        # A rule that can't say what it's for (D139): a person decides whether it's worth one
+        flags = serves + flags
+        if status == ProposalStatus.READY:
+            status = ProposalStatus.NEEDS_PERSON
     return RuleProposal(
         kind=kind,
         status=status,
@@ -794,6 +803,7 @@ def _draft(
         name=result.title or None,
         summary=result.summary,
         facet=result.facet,
+        question=result.question,
         rule=result.rule,
         tests=result.cases,
         target_pack=(result.pack or {}).get("name"),

@@ -16,12 +16,31 @@ from typing import Any
 from mcp.server.mcpserver import Context, MCPServer
 
 import steno
+from steno.config import get_settings
 from steno.db.models import ToolCall
 from steno.db.session import session_scope
 from steno.graph.driver import database, get_driver
 from steno.mcp.tools import ToolError, Tools, fit
 
 log = logging.getLogger(__name__)
+
+# The trace ablation (D140): serve each flow's reach only, and tell agents so
+REACH = get_settings().flow_view == "reach"
+FLOW_HELP = (
+    "3. `get_flow` for what a flow touches and the functions it reaches, by file; "
+    "`leads_to` names the flows it leads to in other applications.\n"
+    "4. `view_flow_code` only for the functions the question is about.\n"
+    if REACH
+    else "3. `get_flow` for a flow's steps; open a folded step with `under=<path>`; "
+    "`expand='sync'` follows calls into other applications.\n"
+    "4. `view_flow_code` only for the steps the question is about.\n"
+)
+GET_FLOW_REACH = (
+    "What a flow touches and what it reaches: its trigger, every table, topic, and service it "
+    "reads, writes, or calls (each call site cited), and the functions it reaches with their "
+    "lines, grouped by file (not in the order they run). `leads_to`: flows in other "
+    "applications it calls or sends to. Function names feed `view_flow_code`."
+)
 
 mcp = MCPServer(
     name="steno",
@@ -42,10 +61,8 @@ mcp = MCPServer(
         "applications match, `search` again with `scope=<application>` for each.\n"
         "2. `get_node` on an application (its flows, data, calls, names, topic agreement), "
         "a space, or `organization` (the spaces and how they communicate).\n"
-        "3. `get_flow` for a flow's steps; open a folded step with `under=<path>`; "
-        "`expand='sync'` follows calls into other applications.\n"
-        "4. `view_flow_code` only for the steps the question is about.\n"
-        "5. `find_dependents` for who uses something, or `direction='downstream'` for what "
+        + FLOW_HELP
+        + "5. `find_dependents` for who uses something, or `direction='downstream'` for what "
         "a change affects.\n"
         "6. `route_request` when you have a URL from outside (`GET /api/vet/vets`): which "
         "gateway route takes it, and which application, endpoint, and flow serve it.\n\n"
@@ -57,8 +74,12 @@ mcp = MCPServer(
         "Where another witness checked a fact, `agreement` is `confirmed`, `code_only` (no "
         "grant or declaration), or `declared_only` (stated, no code found): report the last "
         "two as findings. Every answer cites file, lines, and commit; pass the citations on.\n\n"
-        "Steno answers *what* and *where* across the organization; you do the reasoning. For "
-        "*exactly how*, read the cited code (`view_flow_code`) before concluding. `sources` "
+        "Steno answers *what* and *where* across the organization; you do the reasoning. It "
+        "records each application's placement, every way into it (endpoints, consumed topics, "
+        "schedules) and out of it (calls, publishes, table reads and writes, external systems), "
+        "and what each flow reaches; it doesn't record validation rules, what an interceptor "
+        "requires, or what a function computes. For those, and for *exactly how*, read the "
+        "cited code (`view_flow_code`) before concluding. `sources` "
         "lists the repositories an answer cites, at the commit Steno read (`head_moved`: the "
         "code has changed since), with the folders that matter: clone those, and only those, "
         "when the task needs a working copy (editing, building, running tests) or code newer "
@@ -103,7 +124,7 @@ def get_node(
     return _run(ctx, "get_node", locals(), max_tokens, lambda t: t.get_node(ref, claims=claims))
 
 
-@mcp.tool()
+@mcp.tool(description=GET_FLOW_REACH if REACH else None)
 def get_flow(
     ref: str,
     ctx: Context,
@@ -135,7 +156,8 @@ def view_flow_code(
     ref: str, ctx: Context, paths: list[str] | None = None, max_tokens: int = 8000
 ) -> dict[str, Any]:
     """The source code of a flow's steps, in one call, read from the git host at the commit
-    Steno ingested. `paths`: the step paths from `get_flow` to read (default: all its steps)."""
+    Steno ingested. `paths`: the step paths or function names from `get_flow` to read
+    (default: all its steps)."""
     return _run(ctx, "view_flow_code", locals(), max_tokens, lambda t: t.view_flow_code(ref, paths))
 
 

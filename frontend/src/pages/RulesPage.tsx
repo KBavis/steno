@@ -692,6 +692,16 @@ function Review({ id, onClose, onDone }: { id: number; onClose: () => void; onDo
           <p className="rules-summary">{p.summary}</p>
           <Meta p={p} />
 
+          {p.kind === 'rule' && (
+            <section className="rules-serves">
+              <h3>What it answers</h3>
+              <p>
+                {p.question ?? 'No use-case question named'}
+                {p.facet && <span className="rules-kind">{p.facet}</span>}
+              </p>
+            </section>
+          )}
+
           <section className="rules-effect">
             <h3>{open ? 'If you approve' : p.status === 'approved' ? 'Approved' : p.status === 'failed' ? 'Not drafted' : p.status === 'superseded' ? 'Covered by a pack' : 'Rejected'}</h3>
             {p.status === 'rejected' || p.status === 'superseded' ? (

@@ -489,6 +489,8 @@ class RuleProposal(Base):
     name: Mapped[str | None] = mapped_column(Text)
     summary: Mapped[str] = mapped_column(Text, default="")  # what it recognizes, in English
     facet: Mapped[str | None] = mapped_column(String(64))
+    # The use-case question the rule helps answer (D139)
+    question: Mapped[str | None] = mapped_column(Text)
     # The draft: rule YAML text, its test cases, and the pack it belongs in (D129)
     rule: Mapped[str | None] = mapped_column(Text)
     tests: Mapped[dict[str, Any]] = mapped_column(default=dict)

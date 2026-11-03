@@ -12,6 +12,7 @@ from steno.curation.drafters import (
     NotImplementedDrafter,
     _run_cases,
     get_drafter,
+    serves_problems,
 )
 from steno.db.models import (
     CoveragePattern,
@@ -39,11 +40,35 @@ emit:
 CODE = 'package com.x;\nclass H {\n    @AcmeHandler("orders")\n    void on() {}\n}\n'
 CASES = {"one": {"files": {"com/x/H.java": CODE}, "expected": {"entry_points": [
     {"trigger": {"AcmeChannel": {"name": "orders"}}, "function": "com.x.H#on()"}]}}}  # fmt: skip
+# What a drafted rule must say it's for (D139)
+SERVES = {"facet": "Messaging", "question": "who consumes the orders channel?"}
 
 
 def test_the_proof_runs_a_drafted_rule_against_its_cases():
     results = _run_cases({"rule": RULE, "cases": json.dumps(CASES)})
     assert [r["passed"] for r in results] == [True]
+
+
+def test_a_drafted_rule_must_name_its_facet_and_question():
+    """D139: a rule that can't say which facet it serves and which use-case question it helps
+    answer isn't accepted as ready; ignore and other kinds don't need one."""
+    assert serves_problems(DraftResult(kind="rule", **SERVES)) == []
+    bare = serves_problems(DraftResult(kind="rule"))
+    assert len(bare) == 2 and all(p.startswith("serves:") for p in bare)
+    wrong = serves_problems(DraftResult(kind="rule", facet="Validation", question="x?"))
+    assert len(wrong) == 1 and "'Validation' isn't one" in wrong[0]
+    assert serves_problems(DraftResult(kind="rule", facet="Data", question="  ")) != []
+    assert serves_problems(DraftResult(kind="ignore")) == []
+
+
+def test_a_rule_that_cant_say_what_its_for_needs_a_person(session):
+    p = _pattern(session, "unknown_hook:com.acme.test.Serves")
+    fake = Fake(DraftResult(kind="rule", summary="s", rule=RULE, cases=CASES, cost_usd=0.2))
+    proposal = curation._draft(fake, p, [], [], lambda r, f: "")
+    assert len(fake.seen) == 2  # the draft, then one revision with what it must name
+    assert fake.seen[1].feedback[0].startswith("serves:")
+    assert proposal.status == ProposalStatus.NEEDS_PERSON
+    assert proposal.flags[0].startswith("serves:")
 
 
 def test_providers_are_chosen_by_name():
@@ -98,7 +123,7 @@ def no_git(monkeypatch):
 def test_a_proven_rule_becomes_a_ready_proposal(session, no_git):
     p = _pattern(session)
     result = DraftResult(kind="rule", summary="AcmeHandler methods consume channels",
-                         facet="Messaging", rule=RULE, cases=CASES,
+                         **SERVES, rule=RULE, cases=CASES,
                          pack={"name": "acme-messaging"}, cost_usd=0.4, turns=6)  # fmt: skip
     fake = Fake(result)
     run = curation.curate(session, fingerprints=[p.fingerprint], drafter=fake, budget_usd=5)
@@ -405,7 +430,9 @@ def test_a_rule_the_checks_flag_goes_back_to_the_drafter_once(session):
     from steno.curation.checks import RuleCheck
 
     p = _pattern(session, "unknown_hook:com.acme.test.Revise")
-    fake = Fake(DraftResult(kind="rule", summary="s", rule=RULE, cases=CASES, cost_usd=0.3))
+    fake = Fake(
+        DraftResult(kind="rule", summary="s", rule=RULE, cases=CASES, **SERVES, cost_usd=0.3)
+    )
     generic = RuleCheck(files=1, explained=["r/a"], names=["backend"], generic=["backend"])
     proposal = curation._draft(fake, p, [], [], lambda r, f: "", lambda rule, pack: generic)
     assert len(fake.seen) == 2  # the draft, then one revision
@@ -435,7 +462,9 @@ def test_a_framework_is_drafted_by_one_worker_and_drafts_arent_repeated(
         fps[2]: ([Sample("r", "H.java", 40, "", "")], code),
     }
     monkeypatch.setattr(curation, "gather", lambda session, p, read: near[p.fingerprint])
-    fake = Fake(DraftResult(kind="rule", summary="s", rule=RULE, cases=CASES, cost_usd=0.5))
+    fake = Fake(
+        DraftResult(kind="rule", summary="s", rule=RULE, cases=CASES, **SERVES, cost_usd=0.5)
+    )
     curation.draft_one(session, work, fake)
 
     assert len(fake.seen) == 2  # the second pattern cost nothing
@@ -456,7 +485,7 @@ def test_a_rule_waiting_from_an_earlier_search_is_not_drafted_again(session, no_
     session.flush()
     monkeypatch.setattr(curation, "gather", lambda session, p, read: (
         [Sample("r", "H.java", 3, "", "")], {"r/H.java": CODE}))  # fmt: skip
-    fake = Fake(DraftResult(kind="rule", summary="s", rule=RULE, cases=CASES))
+    fake = Fake(DraftResult(kind="rule", summary="s", rule=RULE, cases=CASES, **SERVES))
     curation.draft_one(session, curation.claim(session, run.id), fake)
     assert fake.seen == [] and run.stats["joined_draft"] == 1
 

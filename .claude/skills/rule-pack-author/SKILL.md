@@ -14,6 +14,7 @@ A rule is an ast-grep `match` (where the pattern is) plus a Steno `emit` (what i
 1. `docs/how-it-works/ingestion/rules-and-packs.md`: the rule format, emits, anchors, identity properties, clue types, config rules, pack layout, tests. **This is the source of truth for syntax.**
 2. `docs/how-it-works/graph-reference.md` §3 (node types) and §4 (relationship types, with what each connects): the vocabulary you may emit.
 3. The existing packs under `rule-packs/`, so you extend instead of duplicating.
+4. **What Steno stores** (D136, `docs/concepts/graph.md` §7): an application's placement, its **surface** (every way in: endpoints, consumed topics, schedules; every way out: calls, publishes, table reads and writes, files, external systems), and what each flow reaches. Agents read everything else from the code Steno points to.
 
 ## Workflow
 
@@ -32,6 +33,10 @@ A request often implies **more than one fact**. Work out the full set and say wh
 - **who uses it**: the function that consumes it (`@KafkaListener(topics = "${app.kafka.topics.orders}")`) or produces to it (`kafkaTemplate.send(...)`). Those need **code rules**. The `${...}` placeholder is resolved automatically from config (`property` clues), so the code rule doesn't read the YAML itself.
 
 If the request is ambiguous in a way that changes the rule, such as which config keys or which annotation, ask. Otherwise decide, and say what you assumed.
+
+**Then name what it's for (D139):** the **facet** it serves (Behavior, Structure, Components, Artifacts, Interfaces, Messaging, Routing, Data, or Schedules) and the **use-case question** it helps answer ("who consumes this channel?", "what writes this table?", "how do I trigger this flow?"; see `docs/purpose/use-cases.md`). If you can't name both, say so and don't write the rule.
+
+**Stay on the surface.** A rule records an entry point, an effect, a name, or a pointer to a payload class. It doesn't record depth an agent can read from the code: validation rules and constraints, what an interceptor requires or adds, the order of internal calls, what a function computes. If a request asks for that, explain the line and offer the surface fact instead (for example, the endpoint and its request class, not the class's `@Size` limits).
 
 ### 2. Find real examples
 
@@ -104,6 +109,7 @@ It runs every case through the full engine (symbol resolver, assemblers, `where:
 
 Give the person a short summary:
 - **What it recognizes**, in one sentence, and which files you added or changed.
+- **What it's for:** the facet and the use-case question it helps answer.
 - **What it emits** (node / edge / clue / entry point).
 - **Measured:** matches across N files, versus the independent estimate. Misses or false positives you found and how you handled them.
 - **Proposed, not done:** any new type or plugin the request needs.
@@ -112,6 +118,7 @@ Give the person a short summary:
 ## Guardrails
 
 - Never invent node, edge, property, or clue types. Propose them.
+- Never write a rule that only adds depth (D136, D139): it must name its facet and use-case question, and emit only surface facts.
 - Never edit another pack's rules without saying so.
 - Rules describe what code **says**, not runtime behavior. Values that are only known at runtime stay unresolved; don't guess them.
 - Keep test inputs minimal and free of secrets.
