@@ -21,6 +21,15 @@ services:
     image: neo4j:2026.09-community
     environment:
       NEO4J_AUTH: neo4j/steno-dev-password
+      # A repository's graph is written in many small transactions (D135), so Neo4j's memory
+      # doesn't grow with the repository: a ThingsBoard-sized graph writes into a 1 GB heap.
+      # `make up` sets the heap from this machine's memory (NEO4J_HEAP_MB, 25% of it, 1-4 GB); it
+      # starts small and grows only as needed. Keep Neo4j's default transaction limit (70% of
+      # the heap): Steno halves a batch the limit refuses, whereas without a limit an oversized
+      # transaction crashes the database. See docs/how-it-works/ingestion/large-repositories.md §8a.
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: ${NEO4J_HEAP_MB:-1024}m
+      NEO4J_server_memory_pagecache_size: 512m
     ports:
       - "7474:7474"   # browser: http://localhost:7474
       - "7687:7687"   # bolt

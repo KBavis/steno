@@ -25,12 +25,13 @@ from steno.claims.store import active
 from steno.connectors.git import CloneError, remote_head
 from steno.connectors.source import SourceError, read_file, slice_lines
 from steno.coverage.runs import unexplained
-from steno.db.models import Connector, Repository
+from steno.db.models import Connector, IngestionJob, JobStatus, Repository
 from steno.extraction.facts import split_url
 from steno.graph import routing
 from steno.graph import trace as trace_codec
 from steno.graph.build import step_of
 from steno.graph.views import GraphViews, kind_of, search_words
+from steno.graph.writer import marker_id
 
 EFFECTS = ["READS_FROM", "WRITES_TO", "CALLS", "PRODUCES", "CONSUMES"]
 VERB = {
@@ -80,6 +81,44 @@ class Tools:
     @property
     def views(self) -> GraphViews:
         return GraphViews(self.driver, self.database)
+
+    def _graph_update(self, repo: str | None) -> dict[str, str]:
+        """A `not_checked` entry when the repository's last graph write didn't finish (D135):
+        what is here may be from the commit before, or missing, until the next run completes it."""
+        if not repo:
+            return {}
+        try:
+            rows = self._read(
+                "MATCH (w:GraphWrite {id: $id}) RETURN w.state AS state, w.job AS job",
+                id=marker_id(repo),
+            )
+        except Exception:  # a note must never fail an answer
+            return {}
+        state = rows[0]["state"] if rows else None
+        if state in (None, "complete"):
+            return {}
+        if state == "writing" and not self._job_running(rows[0].get("job")):
+            # The job stopped mid-write: the worker was killed, or the machine went down
+            state = "incomplete"
+        return {
+            "graph_update": (
+                f"{repo}'s graph is "
+                + ("being updated now" if state == "writing" else "only partly updated")
+                + ": some facts below may be from its previous commit, or missing, until its "
+                "next ingestion finishes the update"
+            )
+        }
+
+    def _job_running(self, job_id: Any) -> bool:
+        """Whether the job that marked a write as in progress is still running. True when that
+        can't be told (no Postgres here): better to say "being updated" than to guess."""
+        if not isinstance(job_id, int):
+            return False
+        try:
+            job = self.session.get(IngestionJob, job_id)
+        except Exception:
+            return True
+        return job is not None and job.status == JobStatus.RUNNING
 
     def _repo(self, name: str | None) -> Repository | None:
         if not name:
@@ -573,6 +612,7 @@ class Tools:
                 "starts it"
             )
         not_checked.update(_hooks_note(app.get("unknown_hooks") or []))
+        not_checked.update(self._graph_update(app.get("repo")))
         checked = (
             []
             if app.get("stub")
@@ -1176,6 +1216,7 @@ class Tools:
                    else "something outside the code runs it")
             )  # fmt: skip
         out.update(_hooks_note(hooks))
+        out.update(self._graph_update(fl.get("repo")))
         functions = fl.get("functions") or len(trace_codec.decode(fl.get("trace")))
         checked = [
             f"the {functions} functions this flow runs"

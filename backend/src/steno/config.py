@@ -23,6 +23,20 @@ class Settings(BaseSettings):
     # Where ingestion workers clone repositories; deleted after each run
     workspace_dir: Path = Path("/tmp/steno-workspaces")
 
+    # How a repository's graph is written to Neo4j (D135): in many small transactions, so Neo4j's
+    # memory depends on the size of one, not of the repository. A transaction holds at most this
+    # many MB of properties and this many rows; one that still runs out of Neo4j's memory is
+    # halved and tried again.
+    graph_write_chunk_mb: int = 32
+    graph_write_node_rows: int = 2000
+    graph_write_edge_rows: int = 5000
+
+    @property
+    def index_dir(self) -> Path:
+        """Each Java resolver's on-disk index (D127), removed when it's done; one a stopped
+        worker left is removed by `steno job recover`."""
+        return self.workspace_dir / "indexes"
+
     # Rule packs (docs/how-it-works/ingestion/rules-and-packs.md): the core packs here, plus
     # any folders in `rule_pack_dirs` (an organization's packs, kept in its own repository).
     # STENO_RULE_PACK_DIRS: folders separated by commas
@@ -59,7 +73,10 @@ class Settings(BaseSettings):
     java_bin: str = "java"
     # The JVM helper's heap ceiling per job: what a Java repository can cost in memory
     resolver_jvm_max_heap: str = "2g"
-    resolver_jvm_timeout: int = 1800  # seconds per repository
+    # Seconds the helper may take: at least this, plus `resolver_jvm_timeout_per_file` for each
+    # Java file, so a very large monorepo isn't cut off for being large
+    resolver_jvm_timeout: int = 1800
+    resolver_jvm_timeout_per_file: float = 0.25
     # Resolve method bodies this many files at a time against a declaration index of the whole
     # repository, so memory stays bounded (D127); 0 resolves everything in one pass
     resolver_jvm_batch_files: int = 0
@@ -113,6 +130,12 @@ class Settings(BaseSettings):
     worker_memory_fraction: float = 0.8
     # What a job reserves for a repository never measured before (MB): its first run
     job_memory_default_mb: int = 3072
+    # Memory (MB) kept free beyond what a job takes: other things on the machine grow while it
+    # runs (Neo4j, Postgres, the system). A job starts only if it fits the free memory minus
+    # this, even when it's the only one (D134)
+    memory_headroom_mb: int = 768
+    # How long (minutes) a job's Java step waits for free memory before failing (D134)
+    memory_wait_minutes: int = 30
     # This machine's name for counting its jobs (default: the host name)
     worker_host: str = ""
 

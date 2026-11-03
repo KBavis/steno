@@ -207,6 +207,7 @@ class Resolvers:
         for r in resolvers:
             r.properties = self.properties
         self._functions: dict[str, Function] | None = None
+        self._rels: dict[Path, str] = {}
 
     def __bool__(self) -> bool:
         return bool(self.by_language)
@@ -260,10 +261,15 @@ class Resolvers:
         return pick(symbol) if pick else symbol
 
     def rel(self, path: Path) -> str:
-        try:
-            return path.relative_to(self.root).as_posix()
-        except ValueError:
-            return str(path)
+        """`path` from the repository root. Asked once per trace entry, so remembered."""
+        rel = self._rels.get(path)
+        if rel is None:
+            try:
+                rel = path.relative_to(self.root).as_posix()
+            except ValueError:
+                rel = str(path)
+            self._rels[path] = rel
+        return rel
 
     def stats(self) -> dict[str, Any]:
         return {r.language: r.stats() for r in self}

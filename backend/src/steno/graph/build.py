@@ -675,6 +675,8 @@ class _Builder:
             return
         self.calls: dict[Key, list[Invocation]] = {}
         self._bind_memo: dict[Key, bool] = {}
+        self._effect_reachers: set[str] | None = None
+        self._gaps_of: dict[str, list[dict[str, Any]]] = {}
         # Calls a rule found that the resolver can't see (a function handed to a background
         # task, or to a worker thread): (callee, line, async), merged into the caller's calls
         rule_calls: dict[str, list[tuple[str, int, bool]]] = defaultdict(list)
@@ -828,17 +830,24 @@ class _Builder:
         ]  # fmt: skip
 
     def _reaches_effect(self, symbol: str) -> bool:
-        seen, todo = set(), [symbol]
-        while todo:
-            current = todo.pop()
-            if current in seen or current not in self.functions:
-                continue
-            seen.add(current)
-            if self.effects.get(current):
-                return True
-            for inv in self._calls_of((current, None)):
-                todo.extend(t[0] for t, _ in self._targets(inv))
-        return False
+        """Does `symbol`, or anything it calls, have an effect?"""
+        if self._effect_reachers is None:
+            # Once for every function, walking back from the ones with effects: a search per
+            # function would repeat itself, and on a large repository it's quadratic
+            callers: dict[str, set[str]] = defaultdict(set)
+            for caller in self.functions:
+                for inv in self._calls_of((caller, None)):
+                    for target, _ in self._targets(inv):
+                        callers[target[0]].add(caller)
+            todo = [s for s in self.functions if self.effects.get(s)]
+            found = set(todo)
+            while todo:
+                for caller in callers.get(todo.pop(), ()):
+                    if caller not in found:
+                        found.add(caller)
+                        todo.append(caller)
+            self._effect_reachers = found
+        return symbol in self._effect_reachers
 
     def _calls_from(self, key: Key, rule_calls: list[tuple[str, int, bool]]) -> list[Call]:
         """A function's calls in source order. A rule's call to a function the code already
@@ -1126,6 +1135,13 @@ class _Builder:
         first-party function (a step that may be missing) or like I/O (an effect that may be).
         A chain of builder calls through a library type isn't listed call by call; the coverage
         report counts every one, per library."""
+        cached = self._gaps_of.get(symbol)
+        if cached is None:
+            cached = self._gaps_of[symbol] = self._find_gaps(symbol)
+        # The same function's gaps in every flow that runs it: each trace gets its own copy
+        return [dict(g) for g in cached]
+
+    def _find_gaps(self, symbol: str) -> list[dict[str, Any]]:
         assert self.r
         fn = self.functions[symbol]
         followed = [

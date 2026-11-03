@@ -29,7 +29,7 @@ How Steno turns repositories into graph facts: deterministically, idempotently, 
 ```mermaid
 flowchart LR
     C["clone<br/><i>temporary workspace</i>"] --> DP["deps<br/><i>JARs, later</i>"]
-    DP --> P["parse<br/><i>files, symbol tables,<br/>syntax trees</i>"]
+    DP --> P["parse<br/><i>files,<br/>symbol tables</i>"]
     P --> X["extract<br/><i>rule packs → facts,<br/>facts with blanks, clues</i>"]
     X --> A["assemble<br/><i>clues → complete facts</i>"]
     A --> ID["identify<br/><i>structure, Steno IDs,<br/>names</i>"]
@@ -45,7 +45,7 @@ flowchart LR
 |---|---|---|---|
 | **clone** | What's the code, at which commit? | A folder on disk; the commit SHA | Built |
 | **deps** | Which library types does the code use? (Java) | Dependency JARs | Skipped (D69: source and JDK first) |
-| **parse** | Which rule packs apply, and what's in the code? | File list, symbol tables, syntax trees | Built |
+| **parse** | Which rule packs apply, and what's in the code? | File list, symbol tables | Built |
 | **extract** | What does each code shape mean? | Facts, facts with blanks, clues | Built |
 | **assemble** | What goes in each blank? | Completed facts; the facts JSON | Built |
 | **identify** | Which deployables exist, is each the same application as last time, and what's it called? | Structure (modules, applications); Steno IDs, canonical names, aliases, lifecycle | Built |
@@ -88,7 +88,7 @@ sequenceDiagram
       W->>W: run the stage
       W->>PG: stage → succeeded / skipped / failed, seconds, metrics
     end
-    W->>N: write (one transaction)
+    W->>N: write (many small transactions)
     W->>PG: job → succeeded (or failed with the error)
     UI->>API: GET /api/jobs/{id} every 2 s (live progress)
 ```
@@ -138,7 +138,7 @@ sequenceDiagram
 - Every node and edge has a **stable ID derived from natural keys**, so re-ingesting finds the same nodes. (Applications move to a Steno ID from the identity registry; see [Identity](../../concepts/identity.md).)
 - Re-ingesting a repository compares the new facts with what the graph holds for it, by stable ID: new and changed facts are written, facts gone from the code are removed. **Shared nodes** (topics, tables, data stores, external systems) are removed only when nothing references them.
 - **The delta** (added, removed, changed) is logged in `fact_change`. Re-ingesting the same commit must produce **zero rows**: an automated idempotency test.
-- **The whole write is one Neo4j transaction.** A failed write changes nothing.
+- **The write is many small Neo4j transactions (D135), not one.** Neo4j's memory then depends on the size of a chunk, not of the repository. Every write merges on the stable ID, so doing one twice is harmless; nothing is removed until everything has been written; and the repository is marked *writing*, *complete*, or *incomplete*. A write that stopped partway is finished by the next run, whose comparison with the graph finds only what is left. See [stages §7](./stages.md#7-write) and [Large repositories §8a](./large-repositories.md#8a-writing-the-graph-to-neo4j-in-chunks-d135).
 
 **Steno owns re-ingestion (Decided, D11).** Only Steno's rules produce facts in Steno's model. Contextualized later adds *which project* and *why*; it never supplies structural facts.
 
