@@ -33,5 +33,5 @@ Built: identity (registry, identify step, Steno IDs, renames), witness types and
 
 1. **Application kinds** from triggers ([Graph](../concepts/graph.md#5-application-kinds)).
 2. **Java at scale** (D127) ([Resolvers §5.3](../how-it-works/ingestion/resolvers.md#53-large-repositories-decided-d127-partly-built)).
-3. **Patterns and rule curation** (D120–D126) ([Rule curation](../how-it-works/ingestion/rule-curation.md)), continuing into stage B.
+3. **Patterns and rule curation** (D121–D126, D146, D147) ([Rule curation](../how-it-works/ingestion/rule-curation.md)): the coverage report on the surface, worked locally by the `rule-pack-author` skill, continuing into stage B.
 4. **Question set** drawn from the [lead use cases](../purpose/use-cases.md#lead-use-cases-in-detail), for budgeting-app and Contextualized, scored, with the comparison without Steno ([Roadmap §4](./roadmap.md#4-evaluation)).

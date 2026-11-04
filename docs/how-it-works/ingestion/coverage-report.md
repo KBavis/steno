@@ -1,13 +1,15 @@
 # Coverage report
 
-After every ingestion, Steno reports **what no rule explained**, so gaps are measured instead of discovered by accident. It's the main tool for onboarding an organization and for deciding which rule to write next. Part of [Ingestion](./README.md).
+After every ingestion, Steno reports **what no rule explained**, so gaps are measured instead of discovered by accident. It exists because Steno's bar is not "never misses" but "never misses silently" ([what Steno must see](./what-steno-must-see.md#why-this-page-exists-never-miss-silently)). It's the main tool for onboarding an organization and for deciding which rule to write next. Part of [Ingestion](./README.md).
 
 > **In one minute**
-> - Eight signals, each a place a fact could hide: unknown hosts, unexplained external calls, libraries with no pack, unknown triggers, unreachable code, matches Steno couldn't check, unparsed files, unresolved library types.
+> - Fourteen signals reported as items, each a place a fact could hide (§1): unknown hosts, disagreements, unmatched names, unknown hooks, unexplained external calls, config set outside the repository, libraries with no pack, and more. Unresolved library types are a metric; cross-application inconsistencies are planned.
 > - Items are **aggregated across the organization** (one fix helps every repository that has the gap) and **ranked by reach**: applications, then spaces, then occurrences.
 > - Every item has a **triage state** (unexplained / ignored / explained) that persists, so the report converges instead of staying noisy. Planned (D121): items become org-wide **patterns** with occurrence keys and states that [rule curation](./rule-curation.md) works from.
 > - Disagreements between witnesses (code only, declared only) and unmatched names are items like any other; a dedicated **agreement view** next to the report is planned.
-> - **The report feeds rule curation** (D120): Steno drafts rules for its top patterns, and a person approves them.
+> - **The report is the rule author's worklist** (D147): the `rule-pack-author` skill works its open items locally, learns what each needs, writes and checks the rule, and opens a pull request a person approves ([rule curation](./rule-curation.md)).
+> - **What it must catch** is specified in [what Steno must see](./what-steno-must-see.md): every way into and out of an application, and the signal when one is missed. The report is how Steno keeps its promise to **never miss silently**.
+> - **Decided (D146, §6):** the report is focused on the surface: new items for internal and external library gaps, silent repositories and witnesses, and one-sided joins; other signals become numbers, hidden input for rule authors, or rule health.
 
 ```mermaid
 flowchart LR
@@ -52,7 +54,7 @@ UNEXPLAINED (org-wide, top 3)
 | **Couldn't check** | Matches a rule found but couldn't complete because Steno couldn't tell (a condition it couldn't check, a name it couldn't resolve). Drops that are a rule working as designed (`table_of` on something that isn't an entity) aren't listed. | Yes |
 | **Unparsed files** | Files Steno couldn't read at all: nothing in them is in the graph | Yes |
 | **Unresolved library types** | A number in the metrics, not items (D101): calls that ran through a library type Steno can't see. The library call each chain starts from is what's accounted for; the count informs the dependency-JAR decision (D69). | Yes (metric) |
-| **Cross-app inconsistencies** | A topic or channel produced but never consumed, or consumed but never produced; a call to an endpoint the target app doesn't expose. Each means one side was missed. | Later: needs several applications (POC stage B) |
+| **Cross-app inconsistencies** | A topic or channel produced but never consumed, or consumed but never produced; a call to an endpoint the target app doesn't expose. Each means one side was missed. | Planned with the rebuild (§6.3); needs several applications ingested |
 | **Config no rule read** (D122) | Config keys set in the repository that nothing read: no rule stated a fact from them, and no `${placeholder}` or settings lookup used them (the shared property map records every key read). Grouped by prefix (`acme.messaging.*`); the packs' noise prefixes (`logging`, `management`, `spring.jpa`, …) aren't listed. | Yes |
 | **Unread files** (D122) | Files no rule looked at, grouped by extension and location convention across the organization (`*.xyz under resources/flows/`); source code in a language no pack reads is one item per language (`*.js`). Noise (the packs' `noise.files` globs: images, Markdown, lock files, CSS, editor and CI settings), build files, and test code aren't listed; SQL is, because the Data facet reads migrations. Ranked low until evidence says it matters. | Yes |
 
@@ -85,19 +87,19 @@ Once a facet has a second witness, every disagreement is an item, triaged the sa
 
 It's read by scope like the coverage report. Many disagreements in one direction for one framework point at a rule; scattered ones point at stale declarations. See [Trust](../../concepts/trust.md#3-agreement-between-witnesses).
 
-## 4. Turning a coverage item into a rule (Decided, D120–D122)
+## 4. Turning a coverage item into a rule (Decided, D121, D122, D147)
 
-Rules for coverage items are drafted by Steno's **[rule curation](./rule-curation.md)** job and approved by a person. In short:
+Rules for coverage items are written by the **`rule-pack-author` skill**, run by a developer, and approved by a person on a pull request ([rule curation](./rule-curation.md)). In short:
 
 - Items become **patterns** across the organization, named by what's unexplained (an annotation, a type, a library call, a file convention), with **occurrence keys** so reach reflects today's code and new code is exactly what changed since the last run (D121). Pattern states replace per-item triage.
 - Patterns are **scored, not excluded**: signals such as "the code refers to this file" or "this file names topics already in the graph" rank them, noise is decided once per pattern, and low scorers stay visible at no cost (D122).
-- Patterns are **clustered into frameworks**, investigated once per framework, drafted per pattern, **proven deterministically**, and reviewed as plain-English outcomes sorted by impact (D120, D123).
+- Patterns are **clustered into frameworks**, so the skill learns a framework once and writes its rules together; every rule is **proven deterministically** (`steno rules test`, then `steno rules check` over every file the pattern occurs in) before its pull request opens (D123, D147).
 
-A person can still write any rule by hand, or with the `rule-pack-author` skill ([Rules §8](./rules-and-packs.md#8-writing-rules-by-hand-with-the-skill-or-by-curation-decided)); a hand-written rule closes any proposal it covers.
+A person can still write any rule by hand ([Rules §8](./rules-and-packs.md#8-writing-rules-by-hand-with-the-skill-or-by-curation-decided)); once it runs, the patterns it explains become `covered`.
 
 ## 5. Patterns, as built (D121, D122; built 2026-10-21)
 
-Every coverage stage folds its items into the organization's **patterns**: what's unexplained across every repository, kept from run to run. This is what rule curation works from, and it's all deterministic.
+Every coverage stage folds its items into the organization's **patterns**: what's unexplained across every repository, kept from run to run. This is what the rule author works from, and it's all deterministic.
 
 ```mermaid
 flowchart LR
@@ -120,7 +122,7 @@ flowchart LR
 
 **Reach is the current state, never a running total.** Re-reading old code inserts nothing; deleted code deletes rows. "New code since a date" is the occurrences whose `first_seen_job` is newer.
 
-**States.** A pattern starts `open`. With no occurrences left, an `open`, `queued`, `drafting`, `proposed`, or `needs_person` pattern becomes `covered` (a rule explains it now, or the code is gone); a `covered` or `approved` pattern that occurs again goes back to `open`, with a note saying so. Ignoring an item in the coverage report ignores its pattern. The other states belong to rule curation ([rule curation §2](./rule-curation.md#2-patterns-decided-d121)).
+**States.** A pattern starts `open`. With no occurrences left, an `open` or `proposed` pattern becomes `covered` (a rule explains it now, or the code is gone); a `covered` pattern that occurs again goes back to `open`, with a note saying so. Ignoring an item in the coverage report ignores its pattern. `expected` is for a gap that's legitimately outside the organization, and `proposed` means a rule's pull request is open ([rule curation §2](./rule-curation.md#2-patterns-decided-d121)).
 
 **Score.** `weight(signal) × (100 × repositories + 10 × applications + ln(1 + occurrences)) × (1 + 4 × pieces of evidence)`. Repositories count most, since one rule fixes every repository with the pattern; the weight favors what can change the map (framework hooks and I/O calls 3, disagreements 2.5, inferred triggers and libraries 2, … unread files 0.5).
 
@@ -156,9 +158,65 @@ flowchart LR
 |---|---|---|
 | Lines shift (code added above, reformatting) | None: the key has no line numbers | — |
 | A function's implementation changes but it keeps its name and file | None: same key | — |
-| **A function is renamed, its file is renamed or moved, or the code is extracted into a new helper** | The place counts as one occurrence removed and one new: its `first_seen_job` becomes this run's, so old code looks new | Low today: reach stays correct, and a known pattern never goes back to the LLM. It matters once anything reads "new since" (the curation job's nightly comparison) |
+| **A function is renamed, its file is renamed or moved, or the code is extracted into a new helper** | The place counts as one occurrence removed and one new: its `first_seen_job` becomes this run's, so old code looks new | Low today: reach stays correct, and a known pattern never goes back to the LLM. It matters once anything reads "new since" (the report's new-since-last-run view, D146) |
 | Two uses of a pattern inside one function | One occurrence: the unit is the enclosing function, not the call site | Low: fine for ranking, not call-site precise |
 | **A rule's target is renamed** (a framework renames `AcmeHandler` to `MessageHandler`) | A new fingerprint: a new pattern, while the old one becomes `covered` | Medium: the new pattern is proposed again, though a person may have decided on the old one. Rule health (D126) should catch the old rule's drop in matches |
 | A repository's first run | Every occurrence is new | Intended: that's the first run |
 
 **To investigate (Open):** carrying an occurrence's history across renames and moves, the way identity carries an application's Steno ID (D83). Within one run and one pattern, pair each removed occurrence with an added one when the enclosing function's body is unchanged (its `body_hash`, already computed for traces) or its symbol differs only by name or path, and keep the original `first_seen_job`. Ambiguous pairs stay unpaired, so a mistake can only make old code look new, never hide new code. A renamed fingerprint is harder: it could be linked to the old one when the old rule's matches drop as the new pattern appears in the same places.
+
+## 6. Focusing the report on the surface (Decided, D146)
+
+Today's signals were added one at a time, so the report also lists things that can't change the map (unparsed files, version warnings). D146 makes **every item point at something on an application's surface Steno might be missing**, with connections between applications first; everything else becomes a number, hidden input for rule authors, or rule health. What the report must catch is the [catalog](./what-steno-must-see.md); this section is how the report catches it.
+
+### 6.1 Library gaps: internal and external
+
+When code calls into a library, the resolver knows **which** method it calls from the imports (in Java, even without the library's JAR; [resolvers](./resolvers.md)). It doesn't know **what that method does**. Library gaps are split by who owns the code, because each kind is fixed a different way:
+
+| | **Internal** (the organization's code, by prefix. Java: packages `com.acme.*` and coordinates `com.acme:*`. Python: packages such as `acme_*`) | **External** (public and vendor libraries) |
+|---|---|---|
+| What the gap means | Steno hasn't read the library | No rule pack knows the library |
+| The item | One per internal library: "`com.acme:orders-client`: 140 calls in 12 apps, not followed" | One per external library with calls not explained, apart from harmless ones (`HARMLESS`, or triaged as harmless) |
+| Where the source is | The repository that publishes the coordinate (Artifacts A1), or "no repository publishes this" | Its public source repository or package |
+| How it's fixed | Ingest and link the library's repository (A1, then A2), or a rule in the organization pack | A rule in a core pack (D129) |
+| Rank | **Above external.** Internal frameworks first: an internal hook or sender can connect any two applications | By calls, then applications |
+
+**Which code is internal.** `STENO_INTERNAL_PREFIXES` lists the organization's prefixes, any number and of any kind (`com.acme, io.kbavis, com.acme:*, acme_`). The repository's own package roots count too, so a solo developer with no consistent prefix needs no setting. Onboarding takes the list over in `v1`. Everything else is external.
+
+**Coverage flags the miss; the skill does the learning (D147).** The item says where the library's source is when Steno knows. The `rule-pack-author` skill reads it there, clones it, or reads the public library's source, on the developer's machine. Steno's worker never downloads libraries.
+
+**How Steno finds the publishing repository.** The library's build file says what it publishes (Java: `groupId:artifactId` in Maven, `group` and the project name in Gradle; Python: the name in `pyproject.toml`). The consumer's build file says what it depends on (`build.gradle`, `pom.xml`, `pyproject.toml`, `requirements.txt`). The coordinate joins them like a topic ([joins §5](./joins.md#5-planned-joins)). Gradle coordinates computed in scripts are a known weak spot (an open question).
+
+Versions are left to the Constraints pillar (which versions are available in which environment).
+
+### 6.2 Silent repositories
+
+**A silent repository** has no applications, no claims, and no linked library modules. Usually it is one of three things:
+
+1. A witness no pack reads (a config, deploy, ACL, or mesh repository). This is the most important case: a whole source of statements is missing.
+2. A library that isn't linked yet (§6.1).
+3. A repository with nothing to say (docs, tooling, an archived project).
+
+The item lists what the repository contains (`*.xml under deploy/`, `*.yaml under k8s/`), so the cause is easy to see. An admin can mark it **expected silent**, and that state persists. The item ranks higher when something else points at the repository (a dependency on its coordinate, or a name that matches it). A variant is the **silent witness**: a pack that matched files but stated nothing, which means the witness is broken, not missing.
+
+### 6.3 The plan
+
+| Change | Signals |
+|---|---|
+| **Keep as items** | `unknown_host`, `disagreement`, `unmatched_name`, `inferred_entry`, `no_trigger_application`; `config_unset` only for keys a surface fact needs (topics, hosts, URLs, datasources) |
+| **Narrow, then keep** | `external_call`: calls that cross the application's edge (network, messaging, databases, object stores); local file I/O ranked low. `library`: I/O libraries only. `unknown_hook`: ranked by whether the hook can start work (listeners, handlers, schedulers, entry filters). `unreachable_effect`: only effects on the surface (usually a missed entry-point rule). `unread_config`: only under a known communication prefix (`spring.cloud.stream.*`, `*.url`, `*.host`, `*.topic`). `dropped_match`: only when it dropped a surface fact (a table, a topic, a route) |
+| **New items** | Internal and external library gaps (§6.1); silent repositories and silent witnesses (§6.2); **one-sided joins**, computed from the graph when the report is read, built now rather than in stage B (a topic produced but never consumed, or the reverse; a call to an endpoint no application exposes) |
+| **Numbers on the application, not items** | Unreachable code in general; other `dropped_match`; `unparsed`; unresolved chains through a library's types |
+| **Hidden, for rule authors** | `unread_file`, other `unread_config`: kept as patterns, left out of the report, listed for the skill on request |
+| **Rule health** | `version_untested`, `version_unknown` |
+
+**One-sided joins are built with the rebuild.** They're the only check that catches a miss without knowing the mechanism: an internal framework's sender that no rule understands still leaves its receiver with no producer. It's a query over the graph, run when the report is read, so it needs no new rules and is never stale. Topics and HTTP endpoints first. An end that's legitimately outside the organization (an endpoint only external clients call, a topic a vendor consumes) is triaged **expected**, and that state persists.
+
+**Grouped by what was missed.** The report follows the [catalog's](./what-steno-must-see.md#2-the-catalog) groups: ways in, calls and messages out, data stores and files, external systems, libraries and internal frameworks, routing, witnesses, repositories. Items are ranked: connections between applications first, then internal before external, then by applications and calls. Pattern scoring (`coverage/patterns.py`) ranks the same way, so the skill works items in the report's order.
+
+**Staying on top of it.**
+- **Every run** produces items. A developer runs the `rule-pack-author` skill on the top ones; it opens pull requests, and a person approves them (D147). The next run shows them as explained.
+- **New since the last run** is shown first, so a new library or a new repository is noticed the day it appears.
+- **Per application:** the count of open items, and a short list of what Steno couldn't see, served in each answer's `completeness` block (D118).
+- **Organization-wide:** the join rate, unjoined sends, and orphan receivers ([joins §6](./joins.md#6-measuring-joins)).
+- **The catalog grows:** a miss found any other way (the trial, a user's report, a wrong answer) gets a row in [the catalog](./what-steno-must-see.md#3-when-a-miss-is-found) and a signal before it gets a fix. A row with no signal is listed as a blind spot.

@@ -18,7 +18,7 @@ What "accurate" means for Steno, and how it's achieved and measured. When agents
 | Extracting facts | Deterministic rules in rule packs | Ingestion |
 | Decisions rules can't make (which implementation DI injects, whether a host is internal) | A decision model: stand-ins in the POC, [Jev](../plan/later/jev.md) later (`v2`) | Ingestion and query |
 | Writing text: flow purposes and narratives, cards | An LLM | Ingestion only |
-| Drafting rules for what no rule explains | An LLM, then deterministic proof (tests, a shadow run), then a person's approval ([rule curation](../how-it-works/ingestion/rule-curation.md)) | The curation job, after ingestion |
+| Drafting rules for what no rule explains | An LLM, then deterministic proof (`steno rules test`, `steno rules check`), then a person's approval on a pull request ([rule curation](../how-it-works/ingestion/rule-curation.md)) | The `rule-pack-author` skill, on a developer's machine (D147) |
 | Reasoning and the final answer | The client's own LLM (Claude Code, Copilot) | Query |
 
 Steno runs no LLM at query time. A decision a model makes carries its confidence, and every decision can be switched off.

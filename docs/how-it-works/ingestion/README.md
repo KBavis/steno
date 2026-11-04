@@ -7,7 +7,7 @@ How Steno turns repositories into graph facts: deterministically, idempotently, 
 > - **Parse** reads the code once. **Extract** runs every rule of every enabled rule pack over every file. **Assemble** fills in facts whose pieces were in different files. **Flows** builds the call graph in memory and derives every flow. **Write** compares with the graph by stable ID and writes only differences. **Coverage** reports what no rule explained.
 > - Each night, every repository whose main branch moved is re-analyzed in full; only changes are written. Re-ingesting the same commit writes nothing.
 > - **Identify** gives every application a permanent Steno ID and its real name; **reconcile** compares the code with other witnesses (deploy and ACL files, manifests). See [identify and reconcile](./identify-and-reconcile.md) and [claims and reconcile](./claims-and-reconcile.md).
-> - **Rule curation**, a separate job after the nightly runs, drafts rules for what coverage couldn't explain; a person approves them ([rule curation](./rule-curation.md)).
+> - **Rule curation:** the `rule-pack-author` skill, run by a developer, works the coverage report's open items, writes and checks rules, and opens a pull request a person approves ([rule curation](./rule-curation.md), D147).
 
 ---
 
@@ -162,8 +162,9 @@ Measured runs, for scale:
 | [Rules and rule packs](./rules-and-packs.md) | The rule format and the pack catalog |
 | [Symbol resolvers](./resolvers.md) | Python and Java resolution, DI, config values, hosts |
 | [Joins across applications](./joins.md) | How applications connect |
+| [What Steno must see](./what-steno-must-see.md) | The completeness spec: every way into and out of an application, how each is seen, and the signal when it's missed |
 | [Identify and reconcile](./identify-and-reconcile.md) | Application identity; combining witnesses |
 | [Claims and reconcile](./claims-and-reconcile.md) | What other witnesses say, the claim store, and agreement with the code |
 | [Coverage report](./coverage-report.md) | What no rule explained, and agreement between witnesses |
-| [Rule curation](./rule-curation.md) | Drafting, proving, and approving rules for what no rule explained |
+| [Rule curation](./rule-curation.md) | How the `rule-pack-author` skill works the coverage report: triage, learn, write, check, pull request |
 | [Large repositories](./large-repositories.md) | Ingesting very large repositories within memory: two-pass Java resolution, streaming, compact traces, workers sized to the machine |
