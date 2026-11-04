@@ -218,10 +218,33 @@ code {
   box-shadow: inset 0 0 0 1px var(--border);
 }
 
-.sidebar-footer .theme-toggle {
-  align-self: flex-start;
+.sidebar-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 4px;
 }
+
+.icon-link {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+}
+
+.icon-link:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.icon-link.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+
 
 .theme-toggle button {
   display: grid;

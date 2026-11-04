@@ -1522,6 +1522,19 @@
   font-size: 12px;
 }
 
+.gpanel-summary {
+  margin-top: 14px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.gpanel-summary p {
+  margin: 0 0 6px;
+  line-height: 1.5;
+}
+
 .gprops {
   display: grid;
   gap: 0;
