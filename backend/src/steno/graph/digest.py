@@ -16,8 +16,10 @@ No LLM. Built from the plan once every flow, step, and rollup edge is in it:
     NOTE      2 calls Steno couldn't follow: the flow may do more
 
 DOC is what the code says about itself: the first sentence of the docstring or Javadoc of the
-entry function and the functions closest to it. UNIQUE is what no other flow in the same
-application touches or runs, so flows that share most of their code can still be told apart.
+entry function and the functions closest to it. Interceptors that run in front of the handler
+(security filters) are left out of DOC, UNIQUE, and FUNCTIONS: they say nothing about the flow.
+UNIQUE is what no other flow in the same application touches or runs, so flows that share
+most of their code can still be told apart.
 
 Bounded by construction, however many functions the flow runs (docs/plan/later/jev.md §4):
 at most LIMIT targets per line and FUNCTIONS functions, nearest the entry first, each line
@@ -28,6 +30,7 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
 from steno.graph import trace as trace_codec
+from steno.graph.query import split_identifiers
 
 if TYPE_CHECKING:
     from steno.graph.build import GraphEdge, GraphPlan
@@ -57,11 +60,17 @@ WIDTH = max(
 
 
 def write_digests(plan: "GraphPlan", docs: dict[str, str] | None = None) -> None:
-    """Set `digest` on every Flow in the plan. `docs`: each function's doc, by symbol."""
+    """Set `digest` on every Flow in the plan, and `name_words` on every searchable node: its
+    name's (and a flow's digest's) identifiers split into words, so keyword search finds
+    `git_commit` from `git commit` (`graph.query.split_identifiers`). `docs`: each function's
+    doc, by symbol."""
     index = _Index(plan, docs)
     for node in plan.nodes.values():
         if "Flow" in node.labels:
             node.props["digest"] = flow_digest(plan, node.id, index)
+        if "Searchable" in node.labels:
+            text = f"{node.props.get('name', '')}\n{node.props.get('digest', '')}"
+            node.props["name_words"] = split_identifiers(text) or None
 
 
 def flow_digest(plan: "GraphPlan", flow: str, index: "_Index | None" = None) -> str:
@@ -121,9 +130,17 @@ class _Index:
         return out
 
     def trace(self, flow: str) -> list[dict[str, Any]]:
+        """The flow's own trace: without the interceptors that run before its handler (security
+        filters and the like, D103) and what they call. They run in front of many flows, so
+        their docs and functions would crowd out what this flow does; the flow keeps them in
+        `interceptors` and its full trace, and what they require is the agent's to read (D138)."""
         if flow not in self._traces:
             raw = self.plan.nodes[flow].props.get("trace")
-            self._traces[flow] = trace_codec.decode(raw) if raw else []
+            entries = trace_codec.decode(raw) if raw else []
+            ahead = {str(t["path"]) for t in entries if t.get("interceptor")}
+            self._traces[flow] = [
+                t for t in entries if str(t["path"]).split(".", 1)[0] not in ahead
+            ]
         return self._traces[flow]
 
     def _targets(self, flow: str) -> set[str]:

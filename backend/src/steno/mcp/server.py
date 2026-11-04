@@ -56,9 +56,17 @@ mcp = MCPServer(
         "don't pick one: list the candidates, each with a line on what it is, and ask which "
         "is meant. Answer directly only when one application clearly fits.\n\n"
         "Work top-down; an organization has thousands of flows, and no page shows them all:\n"
-        "1. `search` with the words the code uses. Read `where` first: every space and "
-        "application with matches, and how many. `results` shows only some; when several "
-        "applications match, `search` again with `scope=<application>` for each.\n"
+        "1. `search` with keywords, not the question: the nouns and verbs that would be in the "
+        'code or its names ("how do I delete a conversation?" → `delete conversation`; '
+        '"how do we predict categories?" → `predict category`). Try a few short searches '
+        "with other words (synonyms, the domain's terms, the code's: `suggestion` for "
+        "prediction) before concluding nothing exists. When the question names a kind of "
+        'thing, pass `kind` (`topic` for "which topic…", `table`, `endpoint`, `flow`). '
+        "Typos and the organization's abbreviations (`clt` for client, `prd` for prod) are "
+        "matched; read `matched` to see why each hit came back, and `dropped` for words "
+        "nothing matched. Read `where` first: every space and application with matches, and "
+        "how many. `results` shows only some; when several applications match, `search` "
+        "again with `scope=<application>` for each.\n"
         "2. `get_node` on an application (its flows, data, calls, names, topic agreement), "
         "a space, or `organization` (the spaces and how they communicate).\n"
         + FLOW_HELP
@@ -98,15 +106,30 @@ def ping() -> dict[str, Any]:
 
 @mcp.tool()
 def search(
-    query: str, ctx: Context, scope: str | None = None, limit: int = 10, max_tokens: int = 2000
+    query: str,
+    ctx: Context,
+    scope: str | None = None,
+    kind: str | None = None,
+    limit: int = 10,
+    max_tokens: int = 2000,
 ) -> dict[str, Any]:
-    """Find applications, flows, interfaces, tables, data stores, and external systems by name,
-    or flows by the functions they run. Top-down: `where` lists every space and application
-    with matches and how many; `results` takes each application's best hits in turn and may not
-    show them all (`more`). `scope`: a space or application name to search within. Matches names
-    and words, not meaning (yet): use the words the code uses (`job`, `create_project`)."""
+    """Find applications, flows, topics, endpoints, tables, data stores, and external systems
+    by name, by what each flow does (its trigger, what it reads, writes, calls, and its docs),
+    by what each application is for (its summary), or flows by the functions they run.
+    `query`: keywords, not a sentence (`delete conversation`); every word must match, else one
+    is dropped (`dropped`). Typos, word forms (`categorize` → category), and abbreviations
+    (`clt` for client) match. Top-down: `where` lists every space and application with matches
+    and how many; `results` takes each application's best hits in turn and may not show them
+    all (`more`); `matched` says why a hit came back. `scope`: a space or application name to
+    search within. `kind`: only application, flow, topic, endpoint, table, entity, datastore,
+    external, interface, space, or organization. Matches words, not meaning: try other words
+    when nothing fits."""
     return _run(
-        ctx, "search", locals(), max_tokens, lambda t: t.search(query, scope=scope, limit=limit)
+        ctx,
+        "search",
+        locals(),
+        max_tokens,
+        lambda t: t.search(query, scope=scope, limit=limit, kind=kind),
     )
 
 

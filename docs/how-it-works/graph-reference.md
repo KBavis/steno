@@ -214,7 +214,8 @@ Which Project introduced or changed a fact isn't a property. It's recorded later
 | `card_hash` | A fingerprint of the inputs the card was built from. On re-ingestion, an unchanged fingerprint means the card and its embedding are still valid, so nothing is re-embedded or re-checked. |
 | `summary`, `summary_line` | **Built** on Application, Space, and Organization (D143): the LLM-written summary (a few sentences) and its one-sentence line for routing. Searched by keyword. See [Generated summaries](./retrieval-and-mcp.md#generated-summaries-built-d143) |
 | `summary_hash`, `summary_model` | The hash of the instructions and inputs the summary was written from, and the model that wrote it |
-| `digest` | **Built** on Flow (D143): see [the flow digest](#the-flow-digest-built-d143) |
+| `digest` | **Built** on Flow (D143): see [the flow digest](#the-flow-digest-built-d143). Not shown to people; agents see it only through `search`'s `matched` |
+| `name_words` | **Built** on searchable nodes: the identifiers in its name (and a flow's digest) split into words, for keyword search (`git_commit` → git commit) |
 
 ### Module roles
 
@@ -512,6 +513,7 @@ NOTE      70 calls Steno couldn't follow: the flow may do more
 - **`UNIQUE`: what tells it apart.** The targets and functions no other flow in the same application touches or runs. Flows that share most of their code (three ways into the same job runner) get near-identical effect lines; their own entry functions and steps still differ.
 - **Order:** writes before reads. Calls list another application's interfaces first (with the application that serves it), then named systems, then hosts Steno can't name. Functions are listed nearest the entry first (what the entry calls directly says more about the flow's purpose than helpers deep below), in call order within a level.
 - **Bounded by construction:** at most 8 targets per line and 12 function names, each line saying how many more there are, and long names are cut. A flow with 2,000 functions has a digest about the size of one with 5 (about 1,600 characters at most on Contextualized).
+- **Interceptors are left out** of `DOC`, `UNIQUE`, and `FUNCTIONS`: a security filter runs in front of many flows and says nothing about any of them. The flow keeps them in `interceptors` and its trace.
 - **Gaps stay visible:** `NOTE` says how many calls Steno couldn't follow (D71).
 - **No pointers:** the digest has no line numbers, so it changes only when the flow's facts change. Rebuilt on every run.
 

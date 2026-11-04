@@ -7,12 +7,15 @@ Every view returns the same shape:
 Groups are boxes that contain nodes (a space, a resource such as /api/jobs, a folder).
 """
 
+import time
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import Any
 
 from neo4j import Driver
 
 from steno.graph import ids
+from steno.graph import query as gq
 from steno.graph import trace as trace_codec
 from steno.graph.build import step_of
 
@@ -66,6 +69,39 @@ PROVENANCE = {
 HIDDEN = {"trace", "trace_files", "trace_symbols", "trace_entries", "shared"}
 EFFECT_TYPES = ["READS_FROM", "WRITES_TO", "CALLS", "PRODUCES", "CONSUMES"]
 LEVEL_UNITS = {"CALLS": "calls", "READS_FROM": "tables", "WRITES_TO": "tables"}
+
+
+# `search(kind=…)`: the labels each kind covers. A topic is any messaging interface (a Kafka
+# topic, a queue, an org-defined channel): an interface that isn't an endpoint or a route
+KIND_LABELS = {
+    "application": ["Application"],
+    "flow": ["Flow"],
+    "endpoint": ["HttpEndpoint", "GrpcMethod"],
+    "topic": ["Interface"],
+    "interface": ["Interface"],
+    "entity": ["Entity"],
+    "table": ["Table"],
+    "datastore": ["DataStore"],
+    "external": ["ExternalSystem"],
+    "space": ["Space"],
+    "organization": ["Organization"],
+}
+NOT_TOPICS = ("HttpEndpoint", "GrpcMethod", "Route")
+# Nodes found by their generated summary: where to look, not what was asked for
+LEVELS = ("application", "space", "organization")
+VOCABULARY_TTL = 300  # seconds
+_VOCABULARY: dict[tuple[int, str], tuple[float, list[str]]] = {}
+
+
+@dataclass
+class Hits:
+    """A search's matches: nodes by name (and digest, summary), flows by function; the words
+    it matched, and those it dropped to find anything."""
+
+    names: list[dict[str, Any]]
+    functions: list[dict[str, Any]]
+    words: list[str]
+    dropped: list[str]
 
 
 def kind_of(labels: list[str]) -> str:
@@ -601,8 +637,13 @@ class GraphViews:
             "properties": {
                 k: v
                 for k, v in props.items()
-                if k not in PROVENANCE and k not in HIDDEN and not k.startswith("card")
+                if k not in PROVENANCE
+                and k not in HIDDEN
+                and not k.startswith(("card", "summary"))
+                and k != "digest"  # what routing reads (D143), not for people
             },
+            # What an application, space, or organization is for (D143), shown as a paragraph
+            "summary": props.get("summary"),
             "provenance": {
                 k: props.get(k)
                 for k in (
@@ -682,7 +723,8 @@ class GraphViews:
 
     def search(self, text: str, limit: int = 12) -> list[dict[str, Any]]:
         """The UI's search: names first, then flows by the functions they run."""
-        names, functions = self.search_hits(text, names_limit=limit)
+        hits = self.search_hits(text, names_limit=limit)
+        names, functions = hits.names, hits.functions
         out = [{k: v for k, v in h.items() if k != "symbol"} for h in names]
         out += [
             {
@@ -699,54 +741,89 @@ class GraphViews:
             )
         return out
 
-    def search_hits(
-        self, text: str, names_limit: int = 50
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        """Every match, for searching top-down: nodes whose names or flow digests (D143) match
-        (full-text, best first), and every flow whose trace runs a function whose name
-        contains the words, with the flow's application and space, so matches can be grouped
-        by where they are."""
-        words = search_words(text)
+    def search_hits(self, text: str, names_limit: int = 50, kind: str | None = None) -> "Hits":
+        """Every match, for searching top-down: nodes whose names, flow digests, or summaries
+        (D143) match (full-text, best first), and every flow whose trace runs a function whose
+        name contains the words, with the flow's application and space, so matches can be
+        grouped by where they are.
+
+        The words are built into a query by `steno.graph.query`: stop words dropped, each word
+        matched as itself, a prefix, its stem, with a typo, or by an abbreviation the graph's
+        names use. Every word must match; when nothing matches them all, one word at a time is
+        dropped (`dropped` says which) until something does. `kind`: only this kind of node
+        (`flow`, `topic`, `endpoint`, `table`, `application`, …)."""
+        words = gq.meaningful(gq.words_of(text))
+        ignored = words[gq.MAX_WORDS :]
+        words = words[: gq.MAX_WORDS]
         if not words:
-            return [], []
-        # A prefix match scores the same for every hit; the exact word, boosted, ranks whole-name
-        # matches (the `transaction` table) above names that merely start with it
-        query = " AND ".join(f"({_escape(w)}^4 OR {_escape(w)}*)" for w in words)
-        names = [
-            {
-                "id": row["node"].get("id"),
-                "kind": kind_of(list(row["node"].labels)),
-                "label": row["node"].get("name"),
-                "score": row["score"],
-                "digest": row["node"].get("digest"),
-                "summary": row["node"].get("summary"),
-                "summary_line": row["node"].get("summary_line"),
-            }
-            for row in self._read(
-                "CALL db.index.fulltext.queryNodes('searchable_text', $q) YIELD node, score "
-                "RETURN node, score LIMIT $limit",
-                q=query,
-                limit=names_limit,
+            return Hits([], [], [], [])
+        vocabulary = self._vocabulary()
+        labels = KIND_LABELS.get(kind or "")
+        # A long summary can hold every word of a sentence: an application found that way is
+        # kept, and the search goes on for the flows, interfaces, and tables themselves
+        summaries: list[dict[str, Any]] = []
+        found_words: tuple[list[str], list[str]] | None = None
+        for kept, dropped in gq.rank_tiers(words):
+            names = self._name_hits(gq.query(kept, vocabulary), names_limit, kind, labels)
+            functions = [] if kind not in (None, "flow") else self._function_hits(kept)
+            levels = [h for h in names if h["kind"] in LEVELS]
+            things = [h for h in names if h["kind"] not in LEVELS]
+            if levels and found_words is None:
+                summaries, found_words = levels, (kept, dropped)
+            if things or functions:
+                # The things asked for first; the applications whose summaries matched after
+                # them, as where to look when none of the things is right
+                seen = {h["id"] for h in things}
+                rest = [h for h in [*summaries, *levels] if h["id"] not in seen]
+                rest = list({h["id"]: h for h in rest}.values())
+                return Hits(things + rest, functions, kept, dropped + ignored)
+        if found_words is not None:
+            return Hits(summaries, [], found_words[0], found_words[1] + ignored)
+        return Hits([], [], words, ignored)
+
+    def _name_hits(
+        self, q: str, limit: int, kind: str | None, labels: list[str] | None
+    ) -> list[dict[str, Any]]:
+        out = []
+        for row in self._read(
+            "CALL db.index.fulltext.queryNodes('searchable_text', $q) YIELD node, score "
+            "WHERE $labels IS NULL OR any(l IN labels(node) WHERE l IN $labels) "
+            "RETURN node, score LIMIT $limit",
+            q=q,
+            labels=labels,
+            limit=limit,
+        ):
+            node_labels = list(row["node"].labels)
+            if kind == "topic" and any(x in node_labels for x in NOT_TOPICS):
+                continue
+            out.append(
+                {
+                    "id": row["node"].get("id"),
+                    "kind": kind_of(node_labels),
+                    "label": row["node"].get("name"),
+                    "score": row["score"],
+                    "digest": row["node"].get("digest"),
+                    "summary": row["node"].get("summary"),
+                    "summary_line": row["node"].get("summary_line"),
+                }
             )
-        ]
-        # Functions aren't searchable architecture nodes, but their names help find a flow: a
-        # match in a flow's trace opens that flow. Every word must be in one function's name
-        # (`category suggestion` finds SuggestionEngineClient.predictCategory); if none has
-        # them all, and no name matched, any of them
-        terms = [w.lower() for w in words]
-        cypher = (
+        return out
+
+    def _function_hits(self, words: list[str]) -> list[dict[str, Any]]:
+        """Flows whose trace runs a function whose name has every word (or its stem):
+        `category suggestion` finds SuggestionEngineClient.predictCategory. Functions aren't
+        searchable nodes, but their names help find a flow: a match opens that flow."""
+        rows = self._read(
             "MATCH (fl:Flow) "
-            "WITH fl, [s IN fl.trace_symbols WHERE {test}(t IN $terms WHERE toLower(s) CONTAINS t)]"
-            " AS found WHERE size(found) > 0 "
+            "WITH fl, [s IN fl.trace_symbols WHERE all(ts IN $terms WHERE "
+            "any(t IN ts WHERE toLower(s) CONTAINS t))] AS found WHERE size(found) > 0 "
             "OPTIONAL MATCH (fl)-[:BELONGS_TO]->(a:Application) "
             "OPTIONAL MATCH (a)-[:BELONGS_TO]->(sp:Space) "
             "WITH fl, found, a, sp ORDER BY size(found[0]) "
-            "RETURN fl, found[0] AS symbol, a.name AS app, sp.name AS space"
+            "RETURN fl, found[0] AS symbol, a.name AS app, sp.name AS space",
+            terms=[gq.forms(w) for w in words],
         )
-        rows = self._read(cypher.format(test="all"), terms=terms)
-        if not rows and not names and len(terms) > 1:
-            rows = self._read(cypher.format(test="any"), terms=terms)
-        functions = [
+        return [
             {
                 "id": row["fl"].get("id"),
                 "label": short_symbol(row["symbol"]),
@@ -757,7 +834,25 @@ class GraphViews:
             }
             for row in rows
         ]
-        return names, functions
+
+    def _vocabulary(self) -> list[str]:
+        """Every word part of the searchable names (`ent-clt-prd-sub` → ent, clt, prd, sub), for
+        abbreviation matching. Cached for a few minutes: names change only when a job writes."""
+        key = (id(self.driver), self.database)
+        cached = _VOCABULARY.get(key)
+        now = time.monotonic()
+        if cached and now - cached[0] < VOCABULARY_TTL:
+            return cached[1]
+        parts: set[str] = set()
+        for row in self._read(
+            "MATCH (n:Searchable) RETURN n.name AS name, n.alias_text AS aliases"
+        ):
+            for text in (row["name"], row["aliases"]):
+                if text:
+                    parts.update(w for w in gq.words_of(str(text)) if not w.isdigit())
+        vocabulary = sorted(parts)
+        _VOCABULARY[key] = (now, vocabulary)
+        return vocabulary
 
     def _breadcrumbs(self, node_id: str) -> list[dict[str, Any]]:
         """The node's owners, from the organization down: Org › Space › … › App › Flow."""
@@ -963,12 +1058,5 @@ def _merge_edges(
 
 
 def search_words(text: str) -> list[str]:
-    """A query's words, split the way the full-text index splits names: `budgeting-app` →
-    `budgeting`, `app`; `/auth/register` → `auth`, `register`. Wildcard terms skip the index's
-    analyzer, so a word kept whole (`budgeting\\-app*`) would never match."""
-    return "".join(c if c.isalnum() or c == "_" else " " for c in text.lower()).split()
-
-
-def _escape(word: str) -> str:
-    special = '+-&|!(){}[]^"~*?:\\/'
-    return "".join(f"\\{c}" if c in special else c for c in word)
+    """A query's words, split the way the full-text index splits names (see `graph.query`)."""
+    return gq.words_of(text)
