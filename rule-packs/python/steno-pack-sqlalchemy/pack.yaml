@@ -28,3 +28,15 @@ library:
     - sqlalchemy.update
     - sqlalchemy.delete
     - sqlalchemy.insert
+  # Building engines, sessions, and statements, and shutting them down: the database a URL names
+  # is the sqlalchemy-engine rule's fact, and the reads and writes are the session's (D146)
+    - sqlalchemy.orm.sessionmaker
+    - sqlalchemy.ext.asyncio.async_sessionmaker
+    - sqlalchemy.engine.Engine.dispose
+    - sqlalchemy.Engine.dispose
+    - sqlalchemy.ext.asyncio.AsyncEngine.dispose
+    - sqlalchemy.engine.Engine.connect
+    - sqlalchemy.Engine.connect
+    - sqlalchemy.orm.Session.expire_all
+    - sqlalchemy.orm.mapped_column
+    - sqlalchemy.text

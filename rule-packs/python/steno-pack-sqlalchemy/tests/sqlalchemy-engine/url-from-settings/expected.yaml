@@ -1,0 +1,5 @@
+nodes:
+  - DataStore:
+      vendor: postgresql
+      host: pg.local:5432
+      database: billing
