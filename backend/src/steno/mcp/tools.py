@@ -34,6 +34,7 @@ from steno.graph.build import step_of
 from steno.graph.query import forms
 from steno.graph.views import KIND_LABELS, GraphViews, kind_of
 from steno.graph.writer import marker_id
+from steno.routing import route
 
 EFFECTS = ["READS_FROM", "WRITES_TO", "CALLS", "PRODUCES", "CONSUMES"]
 VERB = {
@@ -74,6 +75,7 @@ class Tools:
     driver: Driver
     database: str
     session: Session  # Postgres: repositories, for links and reading code
+    request_id: str | None = None  # the MCP request, so routing's decisions link to it
     _endpoint_cache: list[dict[str, Any]] | None = field(default=None, init=False, repr=False)
 
     # ------------------------------------------------------------------ helpers
@@ -274,6 +276,22 @@ class Tools:
             )
         if scope:
             hits = [h for h in hits if scope in (h.get("space"), h.get("application"), h["id"])]
+        # Which spaces, applications, and flows the question is about, with confidence (D142);
+        # a scope given skips it
+        routing = (
+            None
+            if scope
+            else route(
+                self.driver,
+                self.database,
+                query,
+                words,
+                hits,
+                found.dropped,
+                session=self.session,
+                request_id=self.request_id,
+            )
+        )
         shown = _interleave(hits, limit)
         rest = len(hits) - len(shown)
         return {
@@ -283,6 +301,7 @@ class Tools:
             # What was searched for: a sentence's stop words aren't; when nothing matched every
             # word, the words dropped to find anything (the hits match the rest only)
             "words": words,
+            **({"routing": routing} if routing else {}),
             **(
                 {
                     "dropped": found.dropped,
