@@ -452,7 +452,9 @@ def _external_calls(
         # Local files are their own signal, ranked below the network, messaging, and databases
         file = any(_within(call.symbol, f) for f in FILE_IO)
         signal = "file_call" if file else "external_call"
-        library = _file_library(call.symbol) if file else call.library
+        # Grouped by library, so a model one application saves (`joblib.dump`) and another
+        # loads (`joblib.load`) are one item, used by both: a hand-off
+        library = call.library
         it = item("external_call", signal, library, "")
         it.add({"file": rel, "line": call.line, "function": call.function.symbol,
                 "library": call.library, "detail": call.symbol})  # fmt: skip
@@ -461,13 +463,6 @@ def _external_calls(
         what = "Unexplained file I/O" if file else "Unexplained I/O calls"
         it.label = f"{what} · {library}" + (f" ({n} methods)" if n > 1 else "")
     return {"total": total, "explained": covered, "by_app": dict(by_app)}
-
-
-def _file_library(symbol: str) -> str:
-    """The file library a call is grouped under: the FILE_IO entry it's within, without a
-    method (`java.nio.file.Files#write` → `java.nio.file.Files`, `builtins.open` → itself)."""
-    best = max((f for f in FILE_IO if _within(symbol, f)), key=len)
-    return best.split("#", 1)[0]
 
 
 def _hooks(plan: GraphPlan, item: Any) -> None:

@@ -143,7 +143,7 @@ def test_a_file_one_application_writes_and_another_reads_stays_visible():
     own = Item("external_call", "file_call", "joblib", "x")
     own.add({"file": "svc/a.py", "function": "a.save", "application": "svc"})
     own.add({"file": "svc/b.py", "function": "b.load", "application": "svc"})
-    handoff = Item("external_call", "file_call", "joblib.load", "x")
+    handoff = Item("external_call", "file_call", "joblib", "x")
     handoff.add({"file": "training/train.py", "function": "train.save", "application": ""})
     handoff.add({"file": "inference/predict.py", "function": "p.load", "application": "inference"})
     _quiet({1: own, 2: handoff})
