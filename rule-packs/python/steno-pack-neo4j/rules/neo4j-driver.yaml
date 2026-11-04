@@ -1,5 +1,5 @@
 id: neo4j-driver
-description: The application's Neo4j database, from the URI its driver is created with, e.g. GraphDatabase.driver("neo4j://graph.internal:7687", auth=(user, password)) - credentials dropped. Whether a query reads or writes depends on its Cypher, which this rule doesn't read.
+description: The application's Neo4j database, from the URI its driver is created with, e.g. GraphDatabase.driver("neo4j://graph.internal:7687", auth=(user, password)) - credentials dropped. It names the store only, with no flow linked to it yet, because whether a query reads or writes depends on its Cypher.
 match:
   rule:
     kind: call
