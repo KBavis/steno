@@ -1,6 +1,6 @@
 # Steno
 
-Steno is an **organization-wide context engine for AI agents**. It ingests an organization's repositories into a layered, continuously updated **knowledge graph** (Organization → Space → Application) and exposes it over **MCP**, so agents like Claude Code and Copilot can understand how everything fits together instead of seeing only the repository they're working in.
+Steno is the **context layer** for an organization's AI agents: one product, behind one **MCP**, holding what an agent needs to know about the organization's software: what exists and how it fits together, what's changing and why, and what must be respected. Its foundation is a layered, continuously updated **knowledge graph** of the architecture (Organization → Space → Application), ingested from the organization's repositories, so agents like Claude Code and Copilot can see how everything fits together instead of only the repository they're working in.
 
 > **Status:** proof of concept, stage A (see the [roadmap](docs/plan/roadmap.md)). Start with the [docs](docs/README.md).
 
@@ -43,9 +43,17 @@ make dev       # databases + API/MCP (:8000) + worker + UI (:5173); Ctrl+C to st
 
 Connect an agent: `claude mcp add --transport http steno http://localhost:8000/mcp`.
 
-## Relationship to Contextualized
+## The context layer
 
-[Contextualized](https://github.com/KBavis/contextualized) gives agents context scoped to a single Project: what that Project changed, and why. Steno supplies the wider view: how those changes fit into the rest of the organization. Steno works on its own. Contextualized will later attribute Steno's deltas to the Projects that caused them; see [Projects](docs/purpose/integration.md).
+The context a good change needs is scattered: the architecture is spread across hundreds of repositories, projects live in tickets and PRs, and constraints live in wikis and people's heads. Steno brings them together as one layer, with three pillars linked by Steno IDs and scopes, behind one MCP (D141):
+
+| Pillar | Answers | Built from |
+|---|---|---|
+| **Architecture** | *What is*: applications, interfaces, flows, tables, and how they connect | Code and the systems around it |
+| **Projects** | *What's changing, why, and who*: what each project changed, attributed to a team | The issue tracker and merged PRs |
+| **Constraints** | *What must be respected*: SLAs, approved technology, standards | Onboarding and the organization's own sources |
+
+The Projects and Constraints pillars attach to the architecture's IDs, so their quality is capped by its accuracy. Tools built on Steno (review agents, planning workflows, test generators: the agent-first SDLC) live in other repositories. See [the context layer](docs/purpose/context-layer.md).
 
 ## Documentation
 
@@ -64,4 +72,4 @@ Start at **[docs/README.md](docs/README.md)**. Each section has a hub page that 
 
 Steno is named after [Nicolas Steno](https://en.wikipedia.org/wiki/Nicolas_Steno), the 17th-century founder of stratigraphy. Steno formulated the law of superposition: rock forms in layers over time, the oldest at the bottom and the newest on top, and that history can be read back out of the layers themselves just by observing how they're stacked.
 
-That's close to what this project does. An organization's software architecture is a set of layers (organization, space, application) that accumulate over time. Each change adds a new layer on top of what existed before, and the *reason* for that layer is worth keeping alongside the structure it produced. Steno's job is to hold that stack: an initial snapshot of "what's there," plus every change after it, each with its own provenance and, once Contextualized is connected, its own why.
+That's close to what this project does. An organization's context accumulates the same way. The architecture is the base: a snapshot of what's there, from the organization down through its spaces and applications. Every change after it adds a new layer on top, and the Projects pillar keeps each layer's *why* and *who* alongside the structure it produced: which project made the change, which team, and for what reason. Steno's job is to hold that stack and read it back, so an agent can see both what the software is today and how it got that way, each layer cited to where it came from.

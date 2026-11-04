@@ -147,7 +147,7 @@ erDiagram
 | Table | Why |
 |---|---|
 | `fact_change` | One row per fact a job **added, removed, or modified**, with `before` and `after`. It backs "what changed today?" (`get_changes`), delta-driven testing, and debugging. Re-ingesting the same commit must produce **zero rows**, which makes it an automated idempotency test. `commit_sha` is set when exactly one commit in the range touched the change's file, which attributes it to one PR. |
-| `job_commit` | Every commit (and its PR) that a job covered. It enables "introduced in PR #123" in citations, and it's the bridge Contextualized will use for PR → Project. |
+| `job_commit` | Every commit (and its PR) that a job covered. It enables "introduced in PR #123" in citations, and it's the bridge the Projects pillar (`v1`) uses for PR → Project. |
 
 **What `fact_change` records.** The graph itself always reflects **every** change in full; this table is only the **history log**:
 - **Architecture nodes:** every change to flows, steps, interfaces, effects, entities, and tables, including LLM text that was regenerated.

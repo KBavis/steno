@@ -3,7 +3,7 @@
 Where Steno is going and where each piece stops: the **proof of concept** (stages 0 and A–D), **v1** (first delivery to a client), and **v2** (later). Part of [Plan](./README.md). Decided (D94).
 
 > **In one minute**
-> - **POC:** prove Steno answers accurately, first on one application, then on a stub organization we wrote (so the correct graph is known), then on real multi-service code, then on our own organization's application.
+> - **POC: the Architecture pillar.** Build the first of the context layer's pillars and prove it answers accurately, first on one application, then on a stub organization we wrote (so the correct graph is known), then on real multi-service code, then on our own organization's application.
 > - **Accuracy is the bar.** Every stage is measured with a question set and against an agent working without Steno. The headline score is **routing accuracy**: did Steno lead to the right spaces, applications, and flows (D140)?
 > - **Breadth, not depth** (D136): Steno stores each application's surface and what its flows reach, and points to the code for the rest. Stage A measures whether flows need their ordered traces (D140).
 > - **Rules keep up by curation** (D120): Steno drafts rules for what its coverage report can't explain, and a person approves them. Built and measured in the POC, on Java first.

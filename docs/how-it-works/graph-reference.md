@@ -20,7 +20,7 @@ How Steno represents an organization's architecture in Neo4j: every label, prope
 | **Every node has exactly one owner in the tree.** A node's layer is where it sits, not a property of its type. | Decided |
 | **Abstraction uses labels, not `IS_A` edges.** Neo4j is a property graph: a node can have several labels. | Decided |
 | **Every fact records where it came from** (repository, file, line, ingested commit), what produced it (a rule or a pipeline step; later, a decision), and its **confidence**. | Decided |
-| **Every fact can be traced to its origin Project** through `Project -CHANGED-> element` edges, added once Contextualized supplies project deltas. | Decided |
+| **Every fact can be traced to its origin Project** through `Project -CHANGED-> element` edges, added by the Projects pillar (`v1`). | Decided |
 
 ### Three independent aspects of every node
 
@@ -200,7 +200,7 @@ A flow's **trace** (L3) is the ordered list of every first-party function it run
 
 **Child IDs are built on the application's permanent Steno ID** (D81), so renames and moves don't change them. Shared nodes (topics, tables, data stores) keep the repository that wrote them first: another repository naming the same node doesn't take it over.
 
-Which Project introduced or changed a fact isn't a property. It's recorded later as `Project -CHANGED-> element` edges from Contextualized (see [Business context](#business-context-from-contextualized-later)).
+Which Project introduced or changed a fact isn't a property. It's recorded later as `Project -CHANGED-> element` edges from the Projects pillar (see [Business context](#business-context-from-projects-v1)).
 
 ### Card properties (searchable nodes only)
 
@@ -446,7 +446,7 @@ What's stored **on the `Flow` node**:
   trigger:      "POST /jobs/projects/{project_id}/data-sources/{data_source_id} (HTTP; 202, then background task)"
   purpose:      "Syncs one data source for a project: pulls the Jira-linked PRs and their file diffs for
                  issue-scoped repos, then downloads, chunks, and re-embeds the source's files."   # LLM
-  purpose_source: llm            # llm | declared | contextualized
+  purpose_source: llm            # llm | declared | project
   # L1 signature (deterministic)
   in:           {path: [project_id, data_source_id]}
   out:          {status: 202, body: [message, project_id, data_source_id]}
@@ -477,7 +477,7 @@ STEPS    create job → [issue-scoped] Jira issues → linked PRs → store PRs 
          → chunk docs/code → embed to Chroma + docstore → roll up status
 TOUCHES  writes jobs, pull_requests, project_file_diffs, docstore_chunks, Chroma · calls Jira, Bitbucket, embedding model
 LEADS TO —
-CONTEXT  (from Contextualized, later) Created by: … · Modified by: …
+CONTEXT  (from the Projects pillar, v1) Created by: … · Modified by: …
 SOURCE   run_data_source_job  apps/backend/app/api/routers/job.py:43 @ ac93a3b
 ```
 
@@ -492,9 +492,9 @@ SOURCE   run_data_source_job  apps/backend/app/api/routers/job.py:43 @ ac93a3b
 - **Keeping cost down at scale:** a small model by default, the Batch API, and **prompt caching**: flows in the same application share a cached prefix (the app's card, its entities, its conventions), so each flow pays only for its own facts. The dry run measures the real cost before any spend.
 - **On re-ingestion:** when a change touches functions in a flow's trace, the deterministic parts are rebuilt for free. A trace that changed only by renames or moved lines, with the same effects and calls, keeps its card. A decision (Jev I5 in `v2`; a stand-in until then) is given the old purpose and narrative plus the fact diff and the changed step names, and decides whether they're still accurate. The LLM regenerates them only if not.
 
-#### Business context from Contextualized (later)
+#### Business context from Projects (`v1`)
 
-**Contextualized is where business purpose comes from.** Projects are attached **at the granularity of what they changed**, never assumed to explain a whole flow:
+**The Projects pillar is where business purpose comes from** ([the context layer §3](../purpose/context-layer.md#3-projects-v1)). Projects are attached **at the granularity of what they changed**, never assumed to explain a whole flow:
 
 ```
 (:Project {id, name, summary})-[:CHANGED {kind: added|modified|removed, pr, commit}]->(element)

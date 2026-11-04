@@ -83,7 +83,7 @@ What each one needs:
 | **Δ** | The delta store (before/after of changed facts) |
 | **Schemas** | Data store schema detail (Data V2, `v2`) |
 | **Runtime** | Runtime evidence (OBSERVED, `v2`) |
-| **Projects** | Contextualized project deltas |
+| **Projects** | The Projects pillar (`v1`): what each project changed, and why |
 
 ★ = lead use cases: need only the graph, no strong existing tool, easy to demonstrate.
 

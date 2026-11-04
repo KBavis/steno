@@ -21,13 +21,13 @@ What Steno provides to the systems and pillars that build on it: workflows and S
 | **Scopes** | The organization, spaces, and applications, with stable IDs, for other systems to attach rules, constraints, or ownership to | Built (spaces, organization); applications with stage A |
 | **Change history** | Every run's added, removed, and changed facts with before and after (`fact_change`) | Built |
 | **Commits → PRs** | Each run's commit range mapped to PRs (`job_commit`), so a change can be attributed | `v1` |
-| **Attribution hook** | `(:Project)-[:CHANGED {kind, pr, commit}]->(element)` edges on the facts a project changed, supplied by a project system as a witness | Designed; with the integration |
+| **Attribution hook** | `(:Project)-[:CHANGED {kind, pr, commit}]->(element)` edges on the facts a project changed, written by the Projects pillar | Designed; `v1` |
 | **Read interface** | MCP tools with citations and completeness | Built (5 tools); more planned |
 | **Sources to fetch** | Every answer that cites code lists its `sources`: repository, clone URL, branch, ingested commit, whether the branch has moved since (`head_moved`), cited folders, and why. A harness that clones for agents (an SDLC tool built on Steno, not part of it) uses it to fetch exactly what a task needs (D119). | Built |
 
 ## 2. Division of work between the architecture and Projects (Decided, D11; Projects becomes a Steno pillar by D141)
 
-Contextualized's ideas, not its code, carry forward as the Projects pillar ([the context layer §3](./context-layer.md#3-projects-v1)).
+Both are Steno pillars; how Projects is set up and ingested is in [the context layer §3](./context-layer.md#3-projects-v1).
 
 | | Architecture | Projects |
 |---|---|---|
@@ -37,18 +37,18 @@ Contextualized's ideas, not its code, carry forward as the Projects pillar ([the
 
 The architecture owns *what* changed (deterministic facts and deltas) and owns re-ingestion. Projects owns *why* and *who*. It never supplies structural facts.
 
-## 3. Attribution, when it's connected
+## 3. Attribution (`v1`)
 
 ```mermaid
 sequenceDiagram
     participant Git as Git host
     participant St as Steno (nightly)
-    participant Ctx as Contextualized
+    participant Pr as Steno Projects pillar
     Git->>St: main moved: commits a1b2..f9e8
     St->>St: re-analyze; fact_change: what was added, removed, changed
     St->>St: job_commit: commits → PRs (#812, #815)
-    St->>Ctx: which project is PR #812 part of?
-    Ctx-->>St: Project "Refunds v2" + summary
+    St->>Pr: which project is PR #812 part of?
+    Pr-->>St: Project "Refunds v2" (via its ticket and epic) + summary
     St->>St: Project -CHANGED-> each fact the PR changed
 ```
 
@@ -58,7 +58,7 @@ Projects attach **at the granularity of what they changed**, never assumed to ex
 - **An existing flow a project changed:** the context is scoped to the change ("Refunds v2 added the audit write at step 1.2"). A PR that only refactored internals is found by matching its changed files and lines against flow traces.
 - **Flows no project touched** keep their code-derived purpose.
 
-The graph side is described in the [graph reference](../how-it-works/graph-reference.md#business-context-from-contextualized-later).
+The graph side is described in the [graph reference](../how-it-works/graph-reference.md#business-context-from-projects-v1).
 
 ## 4. Planning across projects
 

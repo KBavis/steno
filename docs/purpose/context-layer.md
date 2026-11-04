@@ -69,7 +69,7 @@ Project ─▶ top-level ticket ─▶ epics ─▶ teams
 
 ## 3. Projects (`v1`)
 
-Projects carry forward the ideas behind Contextualized (none of its code), redesigned around the issue tracker and teams.
+Projects are built around what an organization already keeps: its issue tracker, its teams, and its merged PRs.
 
 **Set up by a person, ingested by Steno:**
 

@@ -47,7 +47,7 @@ Rough costs:
 | A Jev decision | 70–500 ms |
 | **One agent round trip** (the LLM reads the result, thinks, calls again) | **seconds** |
 
-**Round trips dominate.** Contextualized's main slowness came from them. So the design goal is **fewer, better-shaped calls**, not only faster queries. It's a priority from day one, even though correctness comes first.
+**Round trips dominate.** They're where agent tools usually lose their time. So the design goal is **fewer, better-shaped calls**, not only faster queries. It's a priority from day one, even though correctness comes first.
 
 | Technique | How it cuts round trips | Status |
 |---|---|---|
@@ -388,7 +388,7 @@ A raw diff is too narrow. It misses the PR's context, and the other PRs this cha
 | **Stacked PRs** | The PR's base branch is another open PR's branch |
 | **Same ticket** | The same Jira key in the branch name or title across repos, e.g. `PAY-123` in the producer repo and in the consumer repo |
 | **Explicit links** | "Depends on #123" in the description, or links in the PR itself |
-| **Same Project** (later) | Contextualized knows every PR in a Project, which is the fully holistic view |
+| **Same Project** (`v1`) | The Projects pillar knows every PR in a project, which is the fully holistic view |
 
 **How it's analyzed: a dry-run ingestion.**
 
