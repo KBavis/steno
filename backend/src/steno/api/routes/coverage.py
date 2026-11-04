@@ -4,11 +4,14 @@ See docs/how-it-works/ingestion/coverage-report.md.
 
 Read at any scope of the containment tree, like the graph: the organization, a space (its
 sub-spaces and applications), or one application. Each scope rolls up its applications'
-numbers, lists its children worst first, and ranks its items by reach (how many applications
-and spaces one fix would help), so one rule's value is visible (D62). Triage applies to an
-item everywhere it appears, and carries over to later runs.
+numbers, lists its children worst first, and groups its items by what was missed (D146: the
+catalog's sections, connections between applications first), ranked within each group by
+reach (how many applications and spaces one fix would help). Quiet items (unread files, rule
+health) are left out unless asked for. One-sided joins are read from the graph. Triage applies
+to an item everywhere it appears, and carries over to later runs.
 """
 
+import logging
 from collections import defaultdict
 from typing import Any
 
@@ -18,7 +21,9 @@ from sqlalchemy import select
 
 from steno.api.deps import SessionDep
 from steno.api.links import source_url
-from steno.coverage.runs import latest_runs
+from steno.coverage.joins import one_sided
+from steno.coverage.patterns import triage as pattern_triage
+from steno.coverage.runs import GROUP_OF, GROUPS, SIGNAL_RANK, latest_runs
 from steno.db.models import (
     CoverageItem,
     CoverageKind,
@@ -30,6 +35,9 @@ from steno.db.models import (
     Repository,
     Space,
 )
+from steno.graph.driver import database, get_driver
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/coverage", tags=["coverage"])
 
@@ -41,12 +49,13 @@ class Triage(BaseModel):
     kind: CoverageKind
     target: str
     status: CoverageStatus
+    note: str | None = None
 
 
 @router.get("")
-def report(session: SessionDep, scope: str = "org") -> dict[str, Any]:
+def report(session: SessionDep, scope: str = "org", quiet: bool = False) -> dict[str, Any]:
     """`scope`: `org`, `space:<id>` (or `space:none` for applications no space owns), or
-    `app:<name>`."""
+    `app:<name>`. `quiet`: include what's kept but left out of the report (D146)."""
     latest = latest_runs(session)
     repos = {r.id: r for r in session.scalars(select(Repository))}
     spaces = {s.id: s for s in session.scalars(select(Space))}
@@ -93,7 +102,9 @@ def report(session: SessionDep, scope: str = "org") -> dict[str, Any]:
             return _within(repo.space_id, wanted, spaces)
         return False
 
-    items = _items(session, latest, repos, apps, spaces, in_scope, repo_in_scope)
+    items = _items(session, latest, repos, apps, spaces, in_scope, repo_in_scope, quiet)
+    items += _one_sided(session, apps, spaces, in_scope, kind == "org")
+    items.sort(key=_rank)
     open_by_app: dict[str, int] = defaultdict(int)
     for it in items:
         if it["status"] == "unexplained":
@@ -142,6 +153,10 @@ def report(session: SessionDep, scope: str = "org") -> dict[str, Any]:
         "summary": rollup(in_scope),
         "children": rows,
         "items": items,
+        "groups": [
+            {"key": key, "label": label, "items": sum(1 for it in items if it["group"] == key)}
+            for key, label, _ in GROUPS
+        ],
         "runs": sorted(
             (
                 {
@@ -166,13 +181,16 @@ def _items(
     spaces: dict[int, Space],
     in_scope: set[str],
     repo_in_scope: Any,
+    quiet: bool = False,
 ) -> list[dict[str, Any]]:
-    """Items in the scope, grouped by what they're about across repositories, ranked by reach:
-    applications, then spaces, then occurrences."""
+    """Items in the scope, grouped by what they're about across repositories."""
     jobs = {job.id: repo_id for repo_id, (job, _) in latest.items()}
     grouped: dict[tuple[str, str], dict[str, Any]] = {}
     statuses: dict[tuple[str, str], list[str]] = defaultdict(list)
-    for it in session.scalars(select(CoverageItem).where(CoverageItem.job_id.in_(jobs))):
+    query = select(CoverageItem).where(CoverageItem.job_id.in_(jobs))
+    if not quiet:
+        query = query.where(CoverageItem.quiet.is_(False))
+    for it in session.scalars(query):
         repo = repos[jobs[it.job_id]]
         where = {a: n for a, n in (it.applications or {}).items() if a in apps}
         here = {a: n for a, n in where.items() if a in in_scope}
@@ -187,6 +205,8 @@ def _items(
             {
                 "kind": it.kind.value,
                 "signal": it.signal,
+                "group": GROUP_OF.get(it.signal, "ways_out"),
+                "quiet": it.quiet,
                 "target": it.target_symbol,
                 "label": it.label or it.target_symbol,
                 "occurrences": 0,
@@ -224,7 +244,70 @@ def _items(
         g["status"] = _overall(statuses[key])
         g["spaces"] = len({a["space"] for a in g["applications"]})
         out.append(g)
-    out.sort(key=lambda g: (-len(g["applications"]), -g["spaces"], -g["occurrences"], g["label"]))
+    return out
+
+
+def _rank(g: dict[str, Any]) -> tuple[Any, ...]:
+    """The catalog's order (connections first), then reach: applications, spaces, occurrences."""
+    groups = [key for key, _, _ in GROUPS]
+    group = groups.index(g["group"]) if g["group"] in groups else len(groups)
+    signal = SIGNAL_RANK.get(g["signal"], len(SIGNAL_RANK))
+    return (group, signal, -len(g["applications"]), -g["spaces"], -g["occurrences"], g["label"])
+
+
+def _one_sided(
+    session: Any,
+    apps: dict[str, dict[str, Any]],
+    spaces: dict[int, Space],
+    in_scope: set[str],
+    everything: bool,
+) -> list[dict[str, Any]]:
+    """One-sided joins (D146), read from the graph now: the other end may be in a repository
+    ingested since. Shown in a scope when an application in it holds the end that exists. A
+    pattern triaged expected or ignored carries its status."""
+    try:
+        found = one_sided(get_driver(), database())
+    except Exception as exc:  # noqa: BLE001 - the graph being down mustn't break the report
+        log.warning("one-sided joins not read: %s", exc)
+        return []
+    states = {
+        p.fingerprint: p.state
+        for p in session.scalars(
+            select(CoveragePattern).where(
+                CoveragePattern.fingerprint.in_([f["fingerprint"] for f in found])
+            )
+        )
+    } if found else {}  # fmt: skip
+    status = {PatternState.IGNORED: "ignored", PatternState.EXPECTED: "expected"}
+    out = []
+    for f in found:
+        here = [a for a in f["apps"] if a in in_scope]
+        if not here and not everything:
+            continue
+        rows = [
+            {
+                "name": a,
+                "occurrences": 1,
+                "space": spaces[apps[a]["space"]].name if apps.get(a, {}).get("space") in spaces
+                else None,
+            }
+            for a in here
+        ]  # fmt: skip
+        out.append(
+            {
+                "kind": f["kind"],
+                "signal": f["signal"],
+                "group": GROUP_OF["one_sided"],
+                "quiet": False,
+                "target": f["target"],
+                "label": f["label"],
+                "occurrences": max(len(here), 1),
+                "applications": rows,
+                "samples": [{"detail": f["detail"]}],
+                "status": status.get(states.get(f["fingerprint"]), "unexplained"),  # type: ignore[arg-type]
+                "spaces": len({r["space"] for r in rows}),
+            }
+        )
     return out
 
 
@@ -306,7 +389,16 @@ def _pct(part: int, whole: int) -> float | None:
 
 @router.put("/triage")
 def triage(body: Triage, session: SessionDep) -> dict[str, int]:
-    """Set an item's status in every repository's latest run; later runs carry it over."""
+    """Set an item's status in every repository's latest run; later runs carry it over. A
+    one-sided join (read from the graph, no items) is triaged through its pattern."""
+    if body.kind == CoverageKind.INCONSISTENCY and not body.target.startswith(
+        ("code_only|", "declared_only|")
+    ):
+        state = {
+            CoverageStatus.IGNORED: PatternState.IGNORED,
+            CoverageStatus.EXPECTED: PatternState.EXPECTED,
+        }.get(body.status, PatternState.OPEN)
+        return {"updated": pattern_triage(session, [f"one_sided:{body.target}"], state, body.note)}
     jobs = [job.id for job, _ in latest_runs(session).values()]
     rows = list(
         session.scalars(
@@ -327,8 +419,12 @@ def triage(body: Triage, session: SessionDep) -> dict[str, int]:
         select(CoveragePattern).where(CoveragePattern.fingerprint.in_(fingerprints))
     ):
         if body.status == CoverageStatus.IGNORED:
-            pattern.state, pattern.note = PatternState.IGNORED, "ignored in the coverage report"
-        elif pattern.state in (PatternState.IGNORED, PatternState.REJECTED):
+            pattern.state = PatternState.IGNORED
+            pattern.note = body.note or "ignored in the coverage report"
+        elif body.status == CoverageStatus.EXPECTED:
+            pattern.state = PatternState.EXPECTED
+            pattern.note = body.note or "expected: outside the organization"
+        elif pattern.state in (PatternState.IGNORED, PatternState.EXPECTED, PatternState.REJECTED):
             pattern.state, pattern.note = PatternState.OPEN, "reopened in the coverage report"
     return {"updated": len(rows)}
 
@@ -339,4 +435,6 @@ def _overall(statuses: list[str]) -> str:
         return "unexplained"
     if all(s == "explained" for s in statuses):
         return "explained"
+    if all(s in ("expected", "explained") for s in statuses):
+        return "expected"
     return "ignored"

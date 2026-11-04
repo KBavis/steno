@@ -35,7 +35,31 @@ SIGNAL_WORDS = {
     "unreachable_effect": "code with effects no entry point reaches",
     "dropped_match": "rule matches Steno couldn't complete",
     "unparsed": "files Steno couldn't read",
+    "internal_library": "internal libraries Steno hasn't read",
+    "external_library": "external libraries no rule explains",
+    "file_call": "file reads and writes no rule explains",
+    "silent_repository": "repositories that produced nothing",
+    "silent_witness": "witnesses that stated nothing",
+    "one_sided": "connections with only one end found",
+    "unread_config": "connection settings no rule read",
 }
+
+# The report's sections, in order: the catalog's groups (what-steno-must-see.md §2, D146)
+GROUPS = [
+    ("connections", "Connections between applications",
+     ["one_sided", "unknown_host", "disagreement", "unmatched_name"]),
+    ("repositories", "Repositories and witnesses", ["silent_repository", "silent_witness"]),
+    ("libraries", "Libraries and internal frameworks",
+     ["internal_library", "external_library", "library"]),
+    ("ways_in", "Ways in", ["unknown_hook", "inferred_entry", "no_trigger_application",
+                            "unreachable_effect"]),
+    ("ways_out", "Calls, messages, data, and files",
+     ["external_call", "config_unset", "unread_config", "dropped_match", "file_call"]),
+    ("rule_health", "Rule health", ["version_untested", "version_unknown"]),
+    ("hidden", "Hidden: input for rule authors", ["unread_file"]),
+]  # fmt: skip
+GROUP_OF = {signal: key for key, _, signals in GROUPS for signal in signals}
+SIGNAL_RANK = {signal: n for n, signal in enumerate(s for _, _, ss in GROUPS for s in ss)}
 
 
 def latest_runs(session: Any) -> dict[int, tuple[IngestionJob, IngestionStage]]:
@@ -71,7 +95,9 @@ def unexplained(session: Any, applications: list[str]) -> dict[str, dict[str, in
         return {}
     items = session.scalars(
         select(CoverageItem).where(
-            CoverageItem.job_id.in_(jobs), CoverageItem.status == CoverageStatus.UNEXPLAINED
+            CoverageItem.job_id.in_(jobs),
+            CoverageItem.status == CoverageStatus.UNEXPLAINED,
+            CoverageItem.quiet.is_(False),
         )
     )
     return count_by_application(((it.signal, it.applications or {}) for it in items), wanted)

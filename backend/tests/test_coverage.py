@@ -88,8 +88,12 @@ def test_each_gap_is_an_item(tmp_path):
         ("library", "redis"),
         # Nothing in the code starts it, but it does real work: a flow, flagged (D74)
         ("inferred_entry", "app.nightly_cleanup"),
-        ("unparsed", "broken.py"),
     }
+
+
+def test_unparsed_files_are_a_number_not_an_item(tmp_path):
+    _, metrics = _report(tmp_path)
+    assert metrics["unparsed_files"] == 1  # broken.py (D146)
 
 
 def test_unknown_hosts_keep_their_url_template(tmp_path):

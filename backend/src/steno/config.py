@@ -60,7 +60,13 @@ class Settings(BaseSettings):
     # STENO_DISABLED_PACKS: pack names separated by commas
     disabled_packs: Annotated[list[str], NoDecode] = []
 
-    @field_validator("disabled_packs", mode="before")
+    # The organization's own code, for the coverage report's library gaps (D146): Java packages
+    # (`com.acme`), coordinates (`com.acme:*`), or Python packages (`acme_`). A library under
+    # one is internal; the repository's own package roots count too, so it can stay empty.
+    # STENO_INTERNAL_PREFIXES: prefixes separated by commas. Onboarding takes it over in v1.
+    internal_prefixes: Annotated[list[str], NoDecode] = []
+
+    @field_validator("disabled_packs", "internal_prefixes", mode="before")
     @classmethod
     def _split_names(cls, value: object) -> object:
         if isinstance(value, str):

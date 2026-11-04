@@ -154,3 +154,42 @@ def test_an_approved_or_rejected_pattern_a_rule_now_explains_is_covered(session)
     p.state = PatternState.IGNORED
     record(session, a.id, 4, [])
     assert p.state == PatternState.IGNORED
+
+
+def test_expected_and_proposed_are_triage_states_and_expected_stays(session):
+    """D146, D147: expected (outside the organization) survives the pattern disappearing;
+    proposed (a rule's pull request is open) becomes covered once a rule explains it."""
+    from steno.coverage.patterns import triage
+
+    a = _repo(session, "pattern-test-expected")
+    record(session, a.id, 1, [_hook(("A.java", "A#on()"))])
+    fp = "unknown_hook:com.acme.test.AcmeHandler"
+    triage(session, [fp], PatternState.EXPECTED, "a vendor calls it")
+    record(session, a.id, 2, [])
+    assert _pattern(session).state == PatternState.EXPECTED
+    record(session, a.id, 3, [_hook(("A.java", "A#on()"))])  # back: still expected
+    assert _pattern(session).state == PatternState.EXPECTED
+    triage(session, [fp], PatternState.PROPOSED, "https://github.com/x/pull/1")
+    record(session, a.id, 4, [])  # the rule merged and explains it
+    assert _pattern(session).state == PatternState.COVERED
+
+
+def test_a_one_sided_join_is_triaged_by_creating_its_pattern(session):
+    from steno.coverage.patterns import triage
+
+    fp = "one_sided:interface:space:1:kafka:test-orders.created"
+    assert triage(session, [fp], PatternState.EXPECTED, "a vendor consumes it") == 1
+    p = session.scalar(select(CoveragePattern).where(CoveragePattern.fingerprint == fp))
+    assert (p.signal, p.state) == ("one_sided", PatternState.EXPECTED)
+
+
+def test_a_quiet_item_makes_a_quiet_pattern(session):
+    a = _repo(session, "pattern-test-quiet")
+    it = Item("config", "unread_file", ".xyz@flows/", "Unread files · *.xyz under flows/")
+    it.add({"file": "flows/a.xyz", "function": "", "application": "svc"})
+    it.quiet = True
+    record(session, a.id, 1, [it])
+    p = session.scalar(
+        select(CoveragePattern).where(CoveragePattern.fingerprint == "unread_file:.xyz@flows/")
+    )
+    assert p.quiet is True

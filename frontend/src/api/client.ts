@@ -83,8 +83,31 @@ export interface JobDetail extends Job {
 
 // ---------------------------------------------------------------- coverage
 
-export type CoverageStatus = 'unexplained' | 'ignored' | 'explained'
-export type CoverageSignal = 'unknown_host' | 'external_call' | 'library' | 'unreachable_effect' | 'dropped_match' | 'unparsed' | 'unresolved_type' | 'inferred_entry'
+export type CoverageStatus = 'unexplained' | 'ignored' | 'explained' | 'expected'
+export type CoverageSignal =
+  | 'one_sided'
+  | 'unknown_host'
+  | 'disagreement'
+  | 'unmatched_name'
+  | 'silent_repository'
+  | 'silent_witness'
+  | 'internal_library'
+  | 'external_library'
+  | 'library'
+  | 'unknown_hook'
+  | 'inferred_entry'
+  | 'no_trigger_application'
+  | 'unreachable_effect'
+  | 'external_call'
+  | 'config_unset'
+  | 'unread_config'
+  | 'dropped_match'
+  | 'file_call'
+  | 'version_untested'
+  | 'version_unknown'
+  | 'unread_file'
+/** The report's sections (D146): the catalog's groups, connections between applications first */
+export type CoverageGroup = 'connections' | 'repositories' | 'libraries' | 'ways_in' | 'ways_out' | 'rule_health' | 'hidden'
 
 export interface CoverageSample {
   file?: string | null
@@ -97,6 +120,9 @@ export interface CoverageSample {
 export interface CoverageItem {
   kind: string
   signal: CoverageSignal
+  group: CoverageGroup
+  /** Kept, but left out of the report unless asked for */
+  quiet: boolean
   target: string
   label: string
   /** In the current scope */
@@ -131,6 +157,7 @@ export interface CoverageReport {
   summary: CoverageNumbers
   children: CoverageRow[]
   items: CoverageItem[]
+  groups: { key: CoverageGroup; label: string; items: number }[]
   runs: { application: string; repository: string; job_id: number; commit: string | null; finished_at: string | null }[]
 }
 
@@ -468,7 +495,7 @@ export const api = {
   },
   job: (id: number) => request<JobDetail>(`/jobs/${id}`),
   coverage: {
-    report: (scope = 'org') => request<CoverageReport>(`/coverage?${q({ scope })}`),
+    report: (scope = 'org', quiet = false) => request<CoverageReport>(`/coverage?${q({ scope, quiet: quiet ? 'true' : 'false' })}`),
     triage: (kind: string, target: string, status: CoverageStatus) =>
       request<{ updated: number }>('/coverage/triage', { method: 'PUT', body: JSON.stringify({ kind, target, status }) }),
   },

@@ -156,6 +156,7 @@ class PatternState(StrEnum):
     COVERED = "covered"  # a rule explains it now (approved, or written by hand)
     REJECTED = "rejected"
     IGNORED = "ignored"  # noise, decided once
+    EXPECTED = "expected"  # a real gap, legitimately outside the organization (D146)
     BLOCKED_VOCABULARY = "blocked_vocabulary"  # needs a node, edge, or property Steno lacks
     NEEDS_PERSON = "needs_person"  # the drafter couldn't make a rule work
 
@@ -166,6 +167,7 @@ class CoverageStatus(StrEnum):
     UNEXPLAINED = "unexplained"
     IGNORED = "ignored"  # looked at: not I/O
     EXPLAINED = "explained"  # a rule now covers it
+    EXPECTED = "expected"  # a real gap, legitimately outside the organization (D146)
 
 
 class ChangeKind(StrEnum):
@@ -363,6 +365,8 @@ class CoverageItem(Base):
     status: Mapped[CoverageStatus] = mapped_column(
         _enum(CoverageStatus, "coverage_status"), default=CoverageStatus.UNEXPLAINED
     )
+    # Kept, but left out of the report (D146): input for rule authors, or rule health
+    quiet: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
 
 class CoveragePattern(Base):
@@ -394,6 +398,8 @@ class CoveragePattern(Base):
         DateTime(timezone=True), server_default=_now, onupdate=_now
     )
     note: Mapped[str | None] = mapped_column(Text)  # why it's in its state (who, what)
+    # Left out of the report (D146): unread files and settings, library versions
+    quiet: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
 
 class CoverageOccurrence(Base):

@@ -3,7 +3,7 @@
 After every ingestion, Steno reports **what no rule explained**, so gaps are measured instead of discovered by accident. It exists because Steno's bar is not "never misses" but "never misses silently" ([what Steno must see](./what-steno-must-see.md#why-this-page-exists-never-miss-silently)). It's the main tool for onboarding an organization and for deciding which rule to write next. Part of [Ingestion](./README.md).
 
 > **In one minute**
-> - Fourteen signals reported as items, each a place a fact could hide (§1): unknown hosts, disagreements, unmatched names, unknown hooks, unexplained external calls, config set outside the repository, libraries with no pack, and more. Unresolved library types are a metric; cross-application inconsistencies are planned.
+> - Signals reported as items, each a place a fact could hide (§1, and the new ones in §6): unknown hosts, disagreements, unmatched names, unknown hooks, unexplained external calls, config set outside the repository, libraries with no pack, and more. Unresolved library types are a metric; cross-application inconsistencies are planned.
 > - Items are **aggregated across the organization** (one fix helps every repository that has the gap) and **ranked by reach**: applications, then spaces, then occurrences.
 > - Every item has a **triage state** (unexplained / ignored / explained) that persists, so the report converges instead of staying noisy. Planned (D121): items become org-wide **patterns** with occurrence keys and states that [rule curation](./rule-curation.md) works from.
 > - Disagreements between witnesses (code only, declared only) and unmatched names are items like any other; a dedicated **agreement view** next to the report is planned.
