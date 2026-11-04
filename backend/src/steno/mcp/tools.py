@@ -31,7 +31,8 @@ from steno.extraction.facts import split_url
 from steno.graph import routing
 from steno.graph import trace as trace_codec
 from steno.graph.build import step_of
-from steno.graph.views import GraphViews, kind_of, search_words
+from steno.graph.query import forms
+from steno.graph.views import KIND_LABELS, GraphViews, kind_of
 from steno.graph.writer import marker_id
 
 EFFECTS = ["READS_FROM", "WRITES_TO", "CALLS", "PRODUCES", "CONSUMES"]
@@ -230,12 +231,17 @@ class Tools:
 
     # ------------------------------------------------------------------- search
 
-    def search(self, query: str, scope: str | None = None, limit: int = 10) -> dict[str, Any]:
+    def search(
+        self, query: str, scope: str | None = None, limit: int = 10, kind: str | None = None
+    ) -> dict[str, Any]:
         """Top-down (D2): first where the matches are (every space and application with any,
         and how many), then the hits, each application's best in turn, so one application
-        with many matches can't crowd the others off the page."""
-        names, functions = self.views.search_hits(query, names_limit=max(limit * 3, 30))
-        words = search_words(query)
+        with many matches can't crowd the others off the page. `kind`: only flows, topics,
+        endpoints, tables, applications, … (`KIND_LABELS`)."""
+        if kind is not None and kind not in KIND_LABELS:
+            raise ToolError(f"kind is one of {', '.join(KIND_LABELS)}")
+        found = self.views.search_hits(query, names_limit=max(limit * 3, 30), kind=kind)
+        names, functions, words = found.names, found.functions, found.words
         hits: list[dict[str, Any]] = []
         seen: set[str] = set()
         for h in names:
@@ -260,7 +266,7 @@ class Tools:
                 {
                     "id": f["id"],
                     "kind": "flow",
-                    "name": f["label"],
+                    "name": f["flow"],
                     **({"space": f["space"]} if f["space"] else {}),
                     **({"application": f["application"]} if f["application"] else {}),
                     "matched": _matched(f, words),
@@ -273,6 +279,19 @@ class Tools:
         return {
             "query": query,
             "searched": [scope] if scope else ["organization"],
+            **({"kind": kind} if kind else {}),
+            # What was searched for: a sentence's stop words aren't; when nothing matched every
+            # word, the words dropped to find anything (the hits match the rest only)
+            "words": words,
+            **(
+                {
+                    "dropped": found.dropped,
+                    "note": "nothing matched every word: these hits match the others only; "
+                    "search again with other words for what was dropped",
+                }
+                if found.dropped
+                else {}
+            ),
             **({"where": _where_summary(hits)} if hits else {}),
             "results": shown,
             **(
@@ -583,6 +602,7 @@ class Tools:
             "kind": "application",
             "name": app.get("name"),
             **({"names": names} if names else {}),
+            **_summary(app),
             **(
                 {
                     "ingested": False,
@@ -664,6 +684,7 @@ class Tools:
             "kind": kind,
             "name": node.get("name"),
             **({"description": node.get("description")} if node.get("description") else {}),
+            **_summary(node),
             "contains": children,
             "communication": links,
             **({"talks_to_outside": outside} if outside else {}),
@@ -1496,34 +1517,50 @@ def _matched(f: dict[str, Any], words: list[str]) -> str:
     return f"function {short if named else f['symbol']} in {f['flow']}"
 
 
+def _summary(node: Any) -> dict[str, Any]:
+    """What an application, space, or organization is for, as an LLM wrote it from what Steno
+    found (D143): a starting point to orient by, never a fact to cite."""
+    if not node.get("summary"):
+        return {}
+    return {
+        "summary": node["summary"],
+        "summary_note": "generated from the code, its README, and what it connects to; "
+        "verify against the cited facts before relying on it",
+    }
+
+
 def _digest_matched(h: dict[str, Any], words: list[str]) -> str | None:
-    """Why a hit matched when its name doesn't say. A flow: the items of its digest (D143) with the
-    words, under their line's heading, e.g. `digest: WRITES git_commit (insert)`. Items with
-    every word, when there are any; else those with some, a few per line. An application,
-    space, or organization: its summary's line."""
-    terms = [w.lower() for w in words]
-    if all(t in str(h.get("label", "")).lower() for t in terms):
+    """Why a hit matched when its name doesn't say. A flow: the items of its digest (D143) with
+    the words (or their stems), under their line's heading, e.g. `digest: WRITES git_commit
+    (insert)`; items with every word when there are any, else those with some, a few per line.
+    An application, space, or organization: its summary's line. Matched only by a close
+    spelling or an abbreviation (`clt` for client): said so."""
+    terms = [[f.lower() for f in forms(w)] for w in words]
+
+    def has(text: str, test: Any = all) -> bool:
+        text = text.lower()
+        return bool(terms) and test(any(f in text for f in fs) for fs in terms)
+
+    if has(str(h.get("label", ""))):
         return None
-    if not h.get("digest"):
+    if h.get("digest"):
+        lines = []
+        for line in h["digest"].splitlines()[1:]:
+            heading, _, rest = line.partition(" ")
+            items = [MORE.sub("", i) for i in re.split(r", | · ", rest.strip())]
+            lines.append((heading, items))
+        for test, cap in ((all, None), (any, DIGEST_MATCH_ITEMS)):
+            found = []
+            for heading, items in lines:
+                hit = [i for i in items if has(i, test)][:cap]
+                if hit:
+                    found.append(f"{heading} {', '.join(hit)}")
+            if found:
+                return "digest: " + "; ".join(found)
+    elif h.get("summary") and has(str(h["summary"]), any):
         # An application, space, or organization found by its generated summary (D143)
-        summary = str(h.get("summary") or "").lower()
-        if summary and any(t in summary for t in terms):
-            return f"summary: {h.get('summary_line') or h['summary']}"
-        return None
-    lines = []
-    for line in h["digest"].splitlines()[1:]:
-        heading, _, rest = line.partition(" ")
-        items = [MORE.sub("", i) for i in rest.strip().split(", ")]
-        lines.append((heading, items))
-    for test, cap in ((all, None), (any, DIGEST_MATCH_ITEMS)):
-        found = []
-        for heading, items in lines:
-            hit = [i for i in items if test(t in i.lower() for t in terms)][:cap]
-            if hit:
-                found.append(f"{heading} {', '.join(hit)}")
-        if found:
-            return "digest: " + "; ".join(found)
-    return None
+        return f"summary: {h.get('summary_line') or h['summary']}"
+    return "a close spelling or an abbreviation of the words (`clt` for client)"
 
 
 def _meanings(uses: list[dict[str, Any]]) -> dict[str, str]:

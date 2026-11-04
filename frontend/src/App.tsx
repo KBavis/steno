@@ -22,14 +22,13 @@ const TABS: Record<string, { label: string; icon: LucideIcon }> = {
   spaces: { label: 'Spaces', icon: Layers },
   connectors: { label: 'Connectors', icon: Plug },
   organization: { label: 'Organization', icon: Building2 },
-  settings: { label: 'Settings', icon: Settings },
 }
 
 // The tab lives in the URL hash (#spaces), so reloads and links keep it.
 // Visualize keeps its own location after a slash (#visualize/flow/<id>).
 function tabFromHash(): string {
   const hash = window.location.hash.slice(1).split('/')[0]
-  return hash in TABS ? hash : 'ingestion'
+  return hash in TABS || hash === 'settings' ? hash : 'ingestion'
 }
 
 export default function App() {
@@ -98,7 +97,19 @@ export default function App() {
           ))}
         </nav>
         <div className="sidebar-footer">
-          <ThemeToggle />
+          <div className="sidebar-tools">
+            <ThemeToggle />
+            {/* What the organization chooses for its deployment (onboarding asks it later) */}
+            <a
+              href="#settings"
+              className={`icon-link ${tab === 'settings' ? 'active' : ''}`}
+              title="Settings"
+              aria-label="Settings"
+              aria-current={tab === 'settings' ? 'page' : undefined}
+            >
+              <Settings size={15} />
+            </a>
+          </div>
           <HealthStatus />
         </div>
       </aside>

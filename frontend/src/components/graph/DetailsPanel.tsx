@@ -102,6 +102,13 @@ export function DetailsPanel({
         </div>
       )}
 
+      {detail.summary && (
+        <div className="gpanel-summary">
+          <p>{detail.summary}</p>
+          <span className="muted small">Generated from the code, its README, and what it connects to.</span>
+        </div>
+      )}
+
       {props.length > 0 && (
         <dl className="gprops">
           {props.map(([k, v]) => (

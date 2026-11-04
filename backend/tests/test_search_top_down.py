@@ -3,6 +3,8 @@ takes its turn, so one application with many matches can't crowd the others off 
 
 from steno.mcp.tools import _digest_matched, _interleave, _matched, _where_summary
 
+CLOSE = "a close spelling or an abbreviation of the words (`clt` for client)"
+
 
 def _flow(app: str, n: int) -> dict:
     return {
@@ -62,7 +64,8 @@ def test_a_flow_found_by_its_digest_says_which_part_matched():
     )
     # Its name already says why
     assert _digest_matched(hit, ["jobs"]) is None
-    assert _digest_matched({"label": "x"}, ["job"]) is None
+    # Found, but by nothing the words spell out: a typo or an abbreviation matched
+    assert _digest_matched({"label": "x"}, ["job"]) == CLOSE
 
 
 def test_an_application_found_by_its_summary_shows_its_line():
@@ -72,4 +75,7 @@ def test_an_application_found_by_its_summary_shows_its_line():
         "summary_line": "Backend for a personal budgeting app.",
     }
     assert _digest_matched(hit, ["plaid"]) == "summary: Backend for a personal budgeting app."
-    assert _digest_matched(hit, ["kafka"]) is None
+    assert _digest_matched(hit, ["kafka"]) == CLOSE
+    # A stem matches too: "categorize" is in "categories"
+    hit["summary"] = "Suggests categories for transactions."
+    assert _digest_matched(hit, ["categorize"]).startswith("summary:")
