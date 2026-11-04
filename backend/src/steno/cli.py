@@ -189,9 +189,9 @@ def graph_summaries(
     repo: str = typer.Option(None, help="Only this repository's applications (and their spaces)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Count tokens; write nothing"),
     provider: str = typer.Option(
-        None, help="claude_agent_sdk | fake (default: STENO_LLM_PROVIDER)"
+        None, help="claude_agent_sdk | fake (default: the organization's Settings)"
     ),
-    model: str = typer.Option(None, help="The model (default: STENO_LLM_MODEL)"),
+    model: str = typer.Option(None, help="The model (default: the organization's Settings)"),
 ) -> None:
     """Write the generated summaries (D143) for applications, then their spaces, then the
     organization, from the graph as it is. Only those whose inputs changed are written."""
@@ -200,6 +200,7 @@ def graph_summaries(
     from steno.db.session import session_scope
     from steno.graph.driver import database, get_driver
     from steno.llm import get_provider
+    from steno.llm.choice import llm_choice
     from steno.summaries import summarize
     from steno.summaries.run import host_reader
 
@@ -213,11 +214,12 @@ def graph_summaries(
         if not apps:
             raise typer.BadParameter(f"no applications from repository {repo!r} in the graph")
     with session_scope() as session:
+        chosen = llm_choice(session)
         report = summarize(
             driver,
             db,
             session,
-            get_provider(provider, model),
+            get_provider(provider or chosen["provider"], model or chosen["model"]),
             applications=apps,
             read=host_reader(session),
             dry_run=dry_run,

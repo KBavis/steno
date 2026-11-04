@@ -470,7 +470,8 @@ def cards(ctx: JobContext) -> dict[str, Any]:
     """LLM summaries for applications, spaces, and the organization (D143; flows get a
     deterministic digest in the build instead). In a dry run: count tokens and project cost
     only. Each is written only when its inputs changed; the README is read from the clone."""
-    from steno.llm import LlmUnavailable, get_provider
+    from steno.llm import LlmUnavailable
+    from steno.llm.choice import provider_for
     from steno.summaries import summarize
 
     if not get_settings().summaries_enabled:
@@ -493,7 +494,7 @@ def cards(ctx: JobContext) -> dict[str, Any]:
             get_driver(),
             database(),
             ctx.session,
-            None if ctx.dry_run else get_provider(),
+            provider_for(ctx.session),
             applications=apps,
             read=read,
             job_id=ctx.job.id,

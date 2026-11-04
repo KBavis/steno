@@ -186,6 +186,9 @@ class Organization(Base):
     description: Mapped[str | None] = mapped_column(Text)
     # Set when the admin finishes the onboarding flow; until then the UI shows it
     onboarded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # What the organization chooses for its deployment, set on the Settings page (onboarding
+    # later): {"llm": {"provider", "model"}} for generated summaries (D143)
+    settings: Mapped[dict[str, Any]] = mapped_column(default=dict, server_default="{}")
 
 
 class Connector(Base):

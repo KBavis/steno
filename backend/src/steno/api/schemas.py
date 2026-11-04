@@ -25,6 +25,35 @@ class OrganizationOut(_Orm):
     onboarded_at: datetime | None
 
 
+class LlmChoice(BaseModel):
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+
+
+class LlmModelOption(BaseModel):
+    id: str
+    label: str
+
+
+class LlmProviderOption(BaseModel):
+    id: str
+    label: str
+    hint: str
+    models: list[LlmModelOption]
+
+
+class OrganizationSettingsIn(BaseModel):
+    llm: LlmChoice
+
+
+class OrganizationSettingsOut(BaseModel):
+    """What the organization chose, and what it can choose from. `llm.source`: `organization`
+    when it chose, `default` when the deployment's defaults apply (STENO_LLM_*)."""
+
+    llm: dict[str, str]
+    llm_options: list[LlmProviderOption]
+
+
 # --- Spaces -----------------------------------------------------------------
 
 

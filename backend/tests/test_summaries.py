@@ -80,3 +80,29 @@ def test_the_answer_splits_into_a_line_and_a_summary():
 def test_a_rewrite_of_a_node_keeps_its_summary():
     before = {"id": "app:1", "name": "orders", "summary": "…", "summary_line": "…", "old": 1}
     assert nulls_for(before, {"id": "app:1", "name": "orders"}) == {"old": None}
+
+
+def test_the_organizations_choice_wins_over_the_defaults(session, monkeypatch):
+    from steno.config import get_settings
+    from steno.db.models import Organization
+    from steno.llm.choice import check, llm_choice
+
+    monkeypatch.setattr(get_settings(), "llm_provider", "claude_agent_sdk")
+    monkeypatch.setattr(get_settings(), "llm_model", "claude-haiku-5-5")
+    org = session.get(Organization, 1)
+    if org is None:
+        org = Organization(id=1, name="Test")
+        session.add(org)
+    org.settings = {}
+    session.flush()
+    assert llm_choice(session) == {
+        "provider": "claude_agent_sdk", "model": "claude-haiku-5-5", "source": "default",
+    }  # fmt: skip
+    org.settings = {"llm": {"provider": "claude_agent_sdk", "model": "claude-sonnet-5-5"}}
+    session.flush()
+    assert llm_choice(session)["model"] == "claude-sonnet-5-5"
+    assert llm_choice(session)["source"] == "organization"
+    with pytest.raises(ValueError):
+        check("claude_agent_sdk", "gpt-4o")
+    with pytest.raises(ValueError):
+        check("fake", "fake")  # not offered on the Settings page
