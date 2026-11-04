@@ -299,6 +299,7 @@ def rules_check(
     """Run a rule over every file its patterns occur in, read from the git host at the ingested
     commit: recall, whether it states a surface fact, and the application names it would
     create (rule-curation §6). Exits 1 when the rule must not be proposed."""
+    import dataclasses
     import json
     from pathlib import Path
 
@@ -315,10 +316,13 @@ def rules_check(
     pack_yaml = path.parent.parent / "pack.yaml"
     pack = yaml.safe_load(pack_yaml.read_text()) if pack_yaml.exists() else None
     rule_id = (yaml.safe_load(rule) or {}).get("id")
-    # The rule's own pack, if it's loaded already, is left out so the rule isn't counted twice
-    others = [
-        p for p in load_all_packs() if not (pack and p.name == pack.get("name"))
-    ] if rule_id else None  # fmt: skip
+    # The rule itself is left out of its loaded pack, so it isn't counted twice; the pack's
+    # other rules stay (a model rule gives the table a session rule needs)
+    others = []
+    for p in load_all_packs():
+        if pack and p.name == pack.get("name"):
+            p = dataclasses.replace(p, rules=[r for r in p.rules if r.id != rule_id])
+        others.append(p)
     results = {}
     blocking = False
     with session_scope() as session:
@@ -337,6 +341,8 @@ def rules_check(
             typer.echo(f"{fp}")
             typer.echo(f"  surface fact: {'yes' if r['surface'] else 'no'}")
             typer.echo(f"  recall: explains {len(r['explained'])} of {r['files']} files")
+            for f in r["incomplete"][:10]:
+                typer.echo(f"    matched, but needs files not loaded here: {f}")
             for f in r["missed"][:10]:
                 typer.echo(f"    missed {f}")
             if r["names"]:

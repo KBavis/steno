@@ -61,6 +61,8 @@ class RuleCheck:
     generic: list[str] = field(default_factory=list)
     taken: list[dict[str, str]] = field(default_factory=list)  # {name, by, repository}
     errors: list[str] = field(default_factory=list)
+    # Matched, but the fact needs files the check doesn't load (models, settings)
+    incomplete: list[str] = field(default_factory=list)
     surface: bool = True  # the rule states a surface fact (D136)
 
     def problems(self) -> list[str]:
@@ -71,7 +73,7 @@ class RuleCheck:
                 "surface: the rule states no surface fact (an entry point, a table, topic, or "
                 "endpoint effect, an external call, a claim); mark the pattern ignored instead"
             )
-        if self.files and not self.explained:
+        if self.files and not self.explained and not self.incomplete:
             out.append(f"recall: explains none of the {self.files} files where the pattern occurs")
         if self.generic:
             out.append(
@@ -80,7 +82,7 @@ class RuleCheck:
             )
         for t in self.taken:
             out.append(f"identity: '{t['name']}' is already {t['by']} (in {t['repository']})")
-        if self.missed and self.explained:
+        if self.missed and (self.explained or self.incomplete):
             out.append(
                 f"recall: explains {len(self.explained)} of {self.files} files where the "
                 f"pattern occurs; misses {', '.join(self.missed[:5])}"
@@ -91,14 +93,17 @@ class RuleCheck:
         """Problems a reviewer shouldn't be asked to approve: no surface fact, explaining none of
         its pattern, or an identity clash."""
         return bool(
-            not self.surface or (self.files and not self.explained) or self.generic or self.taken
+            not self.surface
+            or (self.files and not self.explained and not self.incomplete)
+            or self.generic
+            or self.taken
         )
 
     def to_json(self) -> dict[str, Any]:
         return {
             "files": self.files, "explained": self.explained, "missed": self.missed,
             "names": self.names, "generic": self.generic, "taken": self.taken,
-            "errors": self.errors, "surface": self.surface,
+            "errors": self.errors, "surface": self.surface, "incomplete": self.incomplete,
         }  # fmt: skip
 
 
@@ -136,8 +141,12 @@ def check_rule(
         return out
 
     matched = {o.file for o in draft_origins(x)}
+    # Matched, but the fact needs code from files that aren't loaded here (a model's table, a
+    # setting's value): the rule recognizes the pattern, so it isn't a miss
+    partial = {o.file for o, _ in x.dropped if o.pack == DRAFT} - matched
     out.explained = sorted(f for f in files if f in matched)
-    out.missed = sorted(f for f in files if f not in matched)
+    out.incomplete = sorted(f for f in files if f in partial)
+    out.missed = sorted(f for f in files if f not in matched and f not in partial)
 
     # Identity: the application names its claims would create, by the file they came from
     names: dict[str, set[int]] = {}
