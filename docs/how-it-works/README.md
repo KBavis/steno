@@ -86,7 +86,7 @@ flowchart LR
 | Code search at query time | **The git host's search API** when the graph has no lead | No stored index, consistent with no stored contents (D90) | Decided |
 | Decisions | Stand-ins in the POC; **Jev** later | Typed, calibrated, fast decisions | Jev: `v2` |
 | Text (cards) | LLM via **LiteLLM**; small model by default, Batch API, prompt caching; model chosen after the dry run | Flow purposes decide whether flows can be found | Proposed; **Open**: model |
-| Rule drafting | **Claude Agent SDK** by default, or a fixed sequence of calls through LiteLLM (`STENO_RULE_DRAFTER`); proof and approval outside both | Agents work out unfamiliar frameworks; rules then run deterministically | Decided (D124) |
+| Rule drafting | The **`rule-pack-author` skill** in the developer's Claude Code; proof (`steno rules test`, `steno rules check`) and approval (a pull request) outside it | A local agent can clone, search, and read public source to work out unfamiliar frameworks; rules then run deterministically | Decided (D147) |
 | Embeddings | Stored in Neo4j's vector index | One store for vectors and traversal | Decided; **Open**: model |
 | Agent interface | **MCP** over Streamable HTTP | Claude Code, Copilot, custom agents | Decided |
 | Implementation language | **Python** (backend), TypeScript (UI), a small JVM helper | MCP SDK, Neo4j driver, ast-grep bindings, LiteLLM | Decided |

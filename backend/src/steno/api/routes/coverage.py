@@ -424,7 +424,7 @@ def triage(body: Triage, session: SessionDep) -> dict[str, int]:
         elif body.status == CoverageStatus.EXPECTED:
             pattern.state = PatternState.EXPECTED
             pattern.note = body.note or "expected: outside the organization"
-        elif pattern.state in (PatternState.IGNORED, PatternState.EXPECTED, PatternState.REJECTED):
+        elif pattern.state in (PatternState.IGNORED, PatternState.EXPECTED):
             pattern.state, pattern.note = PatternState.OPEN, "reopened in the coverage report"
     return {"updated": len(rows)}
 

@@ -181,5 +181,6 @@ Report back as in step 8, plus what you marked harmless or expected and why.
 - Never edit another pack's rules without saying so.
 - Rules describe what code **says**, not runtime behavior. Values that are only known at runtime stay unresolved; don't guess them.
 - Keep test inputs minimal and free of secrets.
+- In a **core pack** (public libraries, shipped to every organization), test inputs are minimal synthetic snippets, never an organization's real code; real samples belong only in the organization's own packs.
 - Never mark a pattern harmless or expected without a note saying why; the note is what the next person reads.
 - Delete scratch clones when you're done, unless the person asks to keep them.

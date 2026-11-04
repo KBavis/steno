@@ -122,7 +122,7 @@ def graph_reset(
 ) -> None:
     """DESTRUCTIVE: delete every node and edge in Neo4j, then mark every repository not
     ingested so the next run rebuilds the graph from git. Postgres is kept: connectors,
-    repositories, the identity registry (Steno IDs survive), claims, coverage, proposals."""
+    repositories, the identity registry (Steno IDs survive), claims, coverage."""
     from sqlalchemy import select, update
 
     from steno.db.models import IngestionJob, JobStatus, Repository, RepositorySelection
@@ -153,7 +153,7 @@ def graph_reset(
     typer.echo(f"  deletes {before['nodes']} nodes and {before['edges']} edges")
     typer.echo(f"  then marks {len(repos)} repositories not ingested"
                + (" and queues a full run of each" if queue else ""))  # fmt: skip
-    typer.echo("  keeps Postgres: connectors, repositories, identity, claims, coverage, proposals")
+    typer.echo("  keeps Postgres: connectors, repositories, identity, claims, coverage")
     typer.echo("Tip: `steno graph stats --json before.json` first, to compare after re-ingesting.")
     if not yes:
         typed = typer.prompt(f"Type the database name ({db}) to delete it", default="")
@@ -490,123 +490,3 @@ def resolver_check(
     for d in diffs:
         typer.echo(f"  {d}")
     raise typer.Exit(1 if diffs else 0)
-
-
-@app.command()
-def curate(
-    limit: int | None = typer.Option(None, help="At most this many patterns (default: all)"),
-    fingerprint: list[str] = typer.Option(None, help="Work on these patterns only"),
-    drafter: str = typer.Option(None, help="claude_agent_sdk (default) | openai | gemini | …"),
-    budget: float = typer.Option(None, help="Dollars this run may spend (default: setting)"),
-    model: str = typer.Option(None, help="The model to draft with (default: setting)"),
-) -> None:
-    """Rule curation (D120): draft proposals for the open patterns, in score order, until the
-    run's budget is spent. Every rule is proven
-    against its own test cases before it's proposed; a person approves it."""
-    from steno.curation.drafters import get_drafter
-    from steno.curation.run import curate as run_curation
-    from steno.db.models import RuleProposal
-    from steno.db.session import session_scope
-
-    with session_scope() as session:
-        run = run_curation(
-            session, limit=limit, fingerprints=fingerprint or None,
-            drafter=get_drafter(drafter, model), budget_usd=budget, model=model,
-        )  # fmt: skip
-        typer.echo(f"curation run {run.id}: {run.status}, ${run.spent_usd:.2f} spent, {run.stats}")
-        for p in session.query(RuleProposal).filter(RuleProposal.run_id == run.id):
-            typer.echo(f"  #{p.id} {p.kind.value:<12} {p.status.value:<13} {p.title}")
-            typer.echo(f"      {p.summary}")
-
-
-@app.command()
-def proposals(status: str = typer.Option(None, help="ready, needs_person, failed, …")) -> None:
-    """Rule proposals waiting for review (or in a status)."""
-    from steno.db.models import ProposalStatus, RuleProposal
-    from steno.db.session import session_scope
-
-    with session_scope() as session:
-        q = session.query(RuleProposal).order_by(RuleProposal.id.desc())
-        if status:
-            q = q.filter(RuleProposal.status == ProposalStatus(status))
-        for p in q.limit(50):
-            typer.echo(
-                f"#{p.id} {p.kind.value:<12} {p.status.value:<13} ${p.cost_usd:.2f} {p.title}"
-            )
-
-
-@app.command()
-def proposal(proposal_id: int) -> None:
-    """One proposal in full: summary, the rule, its tests and their results."""
-    import json
-
-    import yaml
-
-    from steno.db.models import RuleProposal
-    from steno.db.session import session_scope
-
-    with session_scope() as session:
-        p = session.get(RuleProposal, proposal_id)
-        if p is None:
-            raise typer.BadParameter(f"no proposal #{proposal_id}")
-        typer.echo(f"#{p.id} {p.kind.value} · {p.status.value} · {p.title}")
-        typer.echo(f"patterns: {', '.join(p.fingerprints)}")
-        typer.echo(f"facet: {p.facet}   pack: {p.target_pack}   drafter: {p.drafter}   "
-                   f"${p.cost_usd:.2f}, {p.turns} turns")  # fmt: skip
-        typer.echo(f"\n{p.summary}\n")
-        if p.rule:
-            typer.echo(f"--- rule\n{p.rule}")
-        if p.tests:
-            typer.echo(f"--- tests\n{yaml.safe_dump(p.tests, sort_keys=False)}")
-        if p.proof:
-            typer.echo(f"--- proof\n{json.dumps(p.proof, indent=1)}")
-        for flag in p.flags:
-            typer.echo(f"! {flag}")
-
-
-@app.command()
-def approve(
-    proposal_id: int,
-    by: str = typer.Option(None, help="Who approves (default: your git user)"),
-) -> None:
-    """Approve a ready proposal: a rule is written into its pack with its tests, which must
-    pass, and published (D131: the steno/rules pull request, or a push, per destination);
-    "ignore" ignores the pattern; "vocabulary" sends it to the backlog."""
-    from steno.curation.approve import approve as approve_proposal
-    from steno.db.models import RuleProposal
-    from steno.db.session import session_scope
-
-    with session_scope() as session:
-        p = session.get(RuleProposal, proposal_id)
-        if p is None:
-            raise typer.BadParameter(f"no proposal #{proposal_id}")
-        out = approve_proposal(session, p, by or _git_user())
-        typer.echo(f"#{p.id} approved ({p.kind.value})")
-        for k, v in out.items():
-            typer.echo(f"  {k}: {v}")
-
-
-@app.command()
-def reject(
-    proposal_id: int,
-    why: str = typer.Option(..., help="Why: kept with the proposal and the pattern"),
-    by: str = typer.Option(None, help="Who rejects (default: your git user)"),
-) -> None:
-    """Reject a proposal; its pattern is rejected and isn't proposed again unless it grows."""
-    from steno.curation.approve import reject as reject_proposal
-    from steno.db.models import RuleProposal
-    from steno.db.session import session_scope
-
-    with session_scope() as session:
-        p = session.get(RuleProposal, proposal_id)
-        if p is None:
-            raise typer.BadParameter(f"no proposal #{proposal_id}")
-        reject_proposal(session, p, by or _git_user(), why)
-        typer.echo(f"#{p.id} rejected")
-
-
-def _git_user() -> str:
-    import subprocess
-
-    out = subprocess.run(["git", "config", "user.name"], capture_output=True, text=True)
-    return out.stdout.strip() or "cli"

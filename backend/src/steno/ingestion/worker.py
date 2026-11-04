@@ -22,14 +22,13 @@ log = logging.getLogger(__name__)
 
 
 def run_once() -> bool:
-    """Claim and run one ingestion job, or else one queued curation run. Returns False if
-    there was nothing to do."""
+    """Claim and run one ingestion job. Returns False if there was nothing to do."""
     with session_scope() as session:
         job = claim_next(session, host(), machine())
         job_id = job.id if job is not None else None
         session.commit()  # releases the claim lock, which other workers wait on
     if job_id is None:
-        return run_curation()
+        return False
 
     log.info("job %s: started", job_id)
     with session_scope() as session:
@@ -45,23 +44,6 @@ def run_once() -> bool:
             log.exception("job %s: failed", job_id)
         job.finished_at = datetime.now(UTC)
     log.info("job %s: %s", job_id, job.status)
-    return True
-
-
-def run_curation() -> bool:
-    """Draft one pattern of a rule curation run (D120), if there's one to claim. Drafting is
-    LLM work, kept out of the API process like ingestion; each worker process drafts one
-    pattern at a time, so a run's patterns are drafted in parallel across workers."""
-    from steno.curation.run import claim, draft_one
-
-    with session_scope() as session:
-        work = claim(session)
-        if work is None:
-            return False
-        try:
-            draft_one(session, work)
-        except Exception:
-            log.exception("curation run %s: stopped", work.run_id)
     return True
 
 

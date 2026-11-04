@@ -184,13 +184,13 @@ def _recount(session: Session, pattern_ids: set[int]) -> None:
         p.applications = row.apps if row else 0
         p.occurrences = row.occurrences if row else 0
         p.score = score(p.signal, p.repositories, p.applications, p.occurrences, p.evidence)
-        # Gone: a rule explains it now, whatever its review history (approved, rejected, …);
+        # Gone: a rule explains it now, or the code is gone (a proposed rule merged);
         # an ignored or expected pattern stays so, since that was decided on purpose
         settled = (PatternState.COVERED, PatternState.IGNORED, PatternState.EXPECTED)
         if p.occurrences == 0 and p.state not in settled:
             p.state = PatternState.COVERED
             p.note = "no longer occurs: a rule explains it, or the code is gone"
-        elif p.occurrences and p.state in (PatternState.COVERED, PatternState.APPROVED):
+        elif p.occurrences and p.state == PatternState.COVERED:
             p.state = PatternState.OPEN
             p.note = "occurs again: the rule doesn't cover these"
 

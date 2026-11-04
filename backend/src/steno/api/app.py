@@ -16,7 +16,6 @@ import steno
 from steno.api.routes import (
     connectors,
     coverage,
-    curation,
     graph,
     health,
     jobs,
@@ -56,7 +55,6 @@ def create_app() -> FastAPI:
         graph,
         coverage,
         patterns,
-        curation,
     ):
         app.include_router(module.router, prefix="/api")
 

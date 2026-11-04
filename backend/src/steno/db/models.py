@@ -145,20 +145,14 @@ class CoverageKind(StrEnum):
 
 
 class PatternState(StrEnum):
-    """Where a pattern stands in rule curation (D121): kept across runs, so nothing is
-    proposed twice and noise, once decided, stays decided."""
+    """Where a pattern stands (D121, D147): kept across runs, so a decision once made stays
+    made. The rule author sets ignored, expected, and proposed; Steno sets covered."""
 
-    OPEN = "open"  # not looked at yet
-    QUEUED = "queued"  # taken by the current curation run
-    DRAFTING = "drafting"
-    PROPOSED = "proposed"  # a proven draft awaits review
-    APPROVED = "approved"
-    COVERED = "covered"  # a rule explains it now (approved, or written by hand)
-    REJECTED = "rejected"
-    IGNORED = "ignored"  # noise, decided once
+    OPEN = "open"  # not dealt with yet
+    PROPOSED = "proposed"  # a rule's pull request is open; the note links it
+    COVERED = "covered"  # no occurrences left: a rule explains it, or the code is gone
+    IGNORED = "ignored"  # harmless: never reaches the surface, decided once
     EXPECTED = "expected"  # a real gap, legitimately outside the organization (D146)
-    BLOCKED_VOCABULARY = "blocked_vocabulary"  # needs a node, edge, or property Steno lacks
-    NEEDS_PERSON = "needs_person"  # the drafter couldn't make a rule work
 
 
 class CoverageStatus(StrEnum):
@@ -438,84 +432,6 @@ class IgnoredFile(Base):
     name: Mapped[str] = mapped_column(Text)  # a file name, e.g. package-lock.json
     note: Mapped[str | None] = mapped_column(Text)  # who ignored it and why
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=_now)
-
-
-class ProposalKind(StrEnum):
-    RULE = "rule"  # a drafted rule with its tests
-    ENABLE_PACK = "enable_pack"  # an existing pack already explains it: turn it on
-    IGNORE = "ignore"  # triage says it serves no facet: noise
-    VOCABULARY = "vocabulary"  # needs a node, edge, or property Steno doesn't have
-
-
-class ProposalStatus(StrEnum):
-    DRAFTING = "drafting"
-    READY = "ready"  # proven, waiting for a person
-    APPROVED = "approved"
-    REJECTED = "rejected"
-    SUPERSEDED = "superseded"  # a hand-written rule covers it now
-    NEEDS_PERSON = "needs_person"  # the drafter hit a cap or couldn't make a rule work
-    FAILED = "failed"  # the drafter itself failed (auth, provider error)
-
-
-class CurationRun(Base):
-    """One run of rule curation (D120): which patterns it took, and what it spent."""
-
-    __tablename__ = "curation_run"
-
-    id: Mapped[int] = _pk()
-    trigger: Mapped[str] = mapped_column(String(32), default="manual")  # manual | nightly
-    drafter: Mapped[str] = mapped_column(String(64))
-    model: Mapped[str | None] = mapped_column(String(64))
-    status: Mapped[str] = mapped_column(String(32), default="running")
-    budget_usd: Mapped[float | None] = mapped_column(Float)
-    spent_usd: Mapped[float] = mapped_column(Float, default=0.0)
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=_now)
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    stats: Mapped[dict[str, Any]] = mapped_column(default=dict)
-    error: Mapped[str | None] = mapped_column(Text)
-
-
-class RuleProposal(Base):
-    """A proposed answer for one pattern (or a framework's patterns): a rule with its tests,
-    an existing pack to enable, noise to ignore, or vocabulary Steno lacks (D120). Rules
-    themselves live in YAML once approved; this holds the draft and its review."""
-
-    __tablename__ = "rule_proposal"
-
-    id: Mapped[int] = _pk()
-    run_id: Mapped[int | None] = mapped_column(ForeignKey("curation_run.id", ondelete="SET NULL"))
-    kind: Mapped[ProposalKind] = mapped_column(_enum(ProposalKind, "proposal_kind"))
-    status: Mapped[ProposalStatus] = mapped_column(
-        _enum(ProposalStatus, "proposal_status"), default=ProposalStatus.DRAFTING
-    )
-    fingerprints: Mapped[list[Any]] = mapped_column(default=list)
-    owner: Mapped[str | None] = mapped_column(Text)  # the framework (D123)
-    title: Mapped[str] = mapped_column(Text, default="")  # the pattern's label
-    # The suggestion's name, title case, for the reviewer: "Docker Compose Services"
-    name: Mapped[str | None] = mapped_column(Text)
-    summary: Mapped[str] = mapped_column(Text, default="")  # what it recognizes, in English
-    facet: Mapped[str | None] = mapped_column(String(64))
-    # The use-case question the rule helps answer (D139)
-    question: Mapped[str | None] = mapped_column(Text)
-    # The draft: rule YAML text, its test cases, and the pack it belongs in (D129)
-    rule: Mapped[str | None] = mapped_column(Text)
-    tests: Mapped[dict[str, Any]] = mapped_column(default=dict)
-    target_pack: Mapped[str | None] = mapped_column(Text)
-    pack: Mapped[dict[str, Any]] = mapped_column(default=dict)  # suggested pack.yaml fields
-    # Proof (D120): test results now; the shadow run's impact later
-    proof: Mapped[dict[str, Any]] = mapped_column(default=dict)
-    samples: Mapped[list[Any]] = mapped_column(default=list)
-    flags: Mapped[list[Any]] = mapped_column(default=list)
-    drafter: Mapped[str | None] = mapped_column(String(64))
-    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
-    turns: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=_now)
-    reviewed_by: Mapped[str | None] = mapped_column(String(200))
-    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    comment: Mapped[str | None] = mapped_column(Text)
-    commit_sha: Mapped[str | None] = mapped_column(String(64))
-    # Where an approved rule went (D131): mode, branch, commit, and its pull request
-    published: Mapped[dict[str, Any]] = mapped_column(default=dict)
 
 
 # ---------------------------------------------------------------------------
