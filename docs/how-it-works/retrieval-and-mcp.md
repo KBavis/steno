@@ -31,7 +31,8 @@ flowchart LR
 | `get_interface` with field lists and pointers (D117, D137) | `POC` stage B |
 | `find_paths`, `analyze_change`, `get_changes`, `find_symbols`, `glossary`, `view_file`, `list_directory`, `search_code` | `POC` stages B–D / `v1`, as needed |
 | LLM cards, embeddings, vector search | After the cost dry run (stage D) |
-| Jev routing, verification, navigation (Q0–Q4, N1–N5) | `v2`; stand-ins (global search, ranking by score) until then |
+| Jev routing with confidence in every `search` answer (Q0, Q1, Q2, Q4, N4; D142), from space and application summaries and flow digests (D143) | `POC` stage A; a stand-in (ranking by score, `uncalibrated`) until Jev credits |
+| The rest of Jev's navigation (Q3, N1–N3, N5) | `v2` |
 | MCP authentication and scoping by role | `v1` |
 
 ---
