@@ -1547,7 +1547,7 @@ def _digest_matched(h: dict[str, Any], words: list[str]) -> str | None:
         lines = []
         for line in h["digest"].splitlines()[1:]:
             heading, _, rest = line.partition(" ")
-            items = [MORE.sub("", i) for i in re.split(r", | · ", rest.strip())]
+            items = [MORE.sub("", i) for i in re.split(r", (?![^(]*\))| · ", rest.strip())]
             lines.append((heading, items))
         for test, cap in ((all, None), (any, DIGEST_MATCH_ITEMS)):
             found = []

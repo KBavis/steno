@@ -79,3 +79,11 @@ def test_an_application_found_by_its_summary_shows_its_line():
     # A stem matches too: "categorize" is in "categories"
     hit["summary"] = "Suggests categories for transactions."
     assert _digest_matched(hit, ["categorize"]).startswith("summary:")
+
+
+def test_an_item_with_operations_stays_whole():
+    hit = {
+        "label": "POST /x",
+        "digest": "POST /x · a\nWRITES    orders (delete, upsert), job (insert)",
+    }
+    assert _digest_matched(hit, ["orders"]) == "digest: WRITES orders (delete, upsert)"
