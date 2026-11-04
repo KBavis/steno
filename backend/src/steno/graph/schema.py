@@ -38,8 +38,9 @@ SEARCHABLE = "Searchable"
 
 FULLTEXT_INDEX = "searchable_text"
 # What full-text search reads: names, other names (an application's aliases, D104), flow
-# digests and generated summaries (D143), and cards
-FULLTEXT_PROPERTIES = ("name", "alias_text", "digest", "summary", "card")
+# digests and generated summaries (D143), names split into words (`git_commit` → git commit),
+# and cards
+FULLTEXT_PROPERTIES = ("name", "alias_text", "digest", "summary", "name_words", "card")
 VECTOR_INDEX = "searchable_card_embedding"
 
 

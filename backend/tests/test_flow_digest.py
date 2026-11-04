@@ -145,3 +145,23 @@ def test_unique_tells_apart_flows_that_share_most_of_their_code():
     assert _line(flow_digest(plan, F), "UNIQUE") == "t001, OrderService.f0, OrderService.f2"
     # The application's only flow: nothing to tell apart
     assert _line(flow_digest(_shop(tables=2), F), "UNIQUE") is None
+
+
+def test_interceptors_are_left_out_of_what_the_flow_does():
+    plan = _shop(functions=0)
+    trace = [
+        {"path": "1", "symbol": "sec.JwtFilter.doFilter", "container": "sec.JwtFilter",
+         "name": "doFilter", "file": "F.java", "interceptor": "filter"},
+        {"path": "1.1", "symbol": "sec.Jwt.validate", "container": "sec.Jwt", "name": "validate",
+         "file": "F.java"},
+        {"path": "2", "symbol": "shop.OrderService.place", "container": "shop.OrderService",
+         "name": "place", "file": "O.java", "step": 1},
+    ]  # fmt: skip
+    plan.nodes[F].props["trace"] = trace_codec.encode(trace)
+    docs = {
+        "sec.JwtFilter.doFilter": "Filter incoming requests.",
+        "shop.OrderService.place": "Places an order.",
+    }
+    digest = flow_digest(plan, F, _Index(plan, docs))
+    assert _line(digest, "DOC") == "Places an order."
+    assert _line(digest, "FUNCTIONS") == "OrderService.place"

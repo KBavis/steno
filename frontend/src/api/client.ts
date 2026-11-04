@@ -275,6 +275,8 @@ export interface NodeDetail {
   labels: string[]
   label: string
   properties: Record<string, unknown>
+  /** What an application, space, or organization is for, generated (D143) */
+  summary?: string | null
   provenance: Record<string, string | number>
   neighbors: { type: string; dir: 'in' | 'out'; node: { id: string; kind: string; label: string }; props: Record<string, unknown> }[]
   breadcrumbs: Crumb[]
