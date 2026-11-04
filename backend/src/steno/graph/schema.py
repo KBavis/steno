@@ -37,8 +37,9 @@ CODE_LABELS = (
 SEARCHABLE = "Searchable"
 
 FULLTEXT_INDEX = "searchable_text"
-# What full-text search reads: names, other names (an application's aliases, D104), and cards
-FULLTEXT_PROPERTIES = ("name", "alias_text", "card")
+# What full-text search reads: names, other names (an application's aliases, D104), flow
+# digests and generated summaries (D143), and cards
+FULLTEXT_PROPERTIES = ("name", "alias_text", "digest", "summary", "card")
 VECTOR_INDEX = "searchable_card_embedding"
 
 

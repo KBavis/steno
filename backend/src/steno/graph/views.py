@@ -702,9 +702,10 @@ class GraphViews:
     def search_hits(
         self, text: str, names_limit: int = 50
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        """Every match, for searching top-down: nodes whose names match (full-text, best
-        first), and every flow whose trace runs a function whose name contains the words, with
-        the flow's application and space, so matches can be grouped by where they are."""
+        """Every match, for searching top-down: nodes whose names or flow digests (D143) match
+        (full-text, best first), and every flow whose trace runs a function whose name
+        contains the words, with the flow's application and space, so matches can be grouped
+        by where they are."""
         words = search_words(text)
         if not words:
             return [], []
@@ -717,6 +718,9 @@ class GraphViews:
                 "kind": kind_of(list(row["node"].labels)),
                 "label": row["node"].get("name"),
                 "score": row["score"],
+                "digest": row["node"].get("digest"),
+                "summary": row["node"].get("summary"),
+                "summary_line": row["node"].get("summary_line"),
             }
             for row in self._read(
                 "CALL db.index.fulltext.queryNodes('searchable_text', $q) YIELD node, score "

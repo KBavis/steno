@@ -17,6 +17,21 @@ export interface Organization {
   onboarded_at: string | null
 }
 export type OrganizationInput = Pick<Organization, 'name' | 'description'>
+export interface LlmChoice {
+  provider: string
+  model: string
+}
+export interface LlmProviderOption {
+  id: string
+  label: string
+  hint: string
+  models: { id: string; label: string }[]
+}
+/** What the organization chose (`source: 'default'` until it does) and what it can choose. */
+export interface OrganizationSettings {
+  llm: LlmChoice & { source: 'organization' | 'default' }
+  llm_options: LlmProviderOption[]
+}
 
 export type ConnectorKind = 'bitbucket' | 'github' | 'gitlab'
 
@@ -352,6 +367,9 @@ export const api = {
     put: (body: OrganizationInput) =>
       request<Organization>('/organization', { method: 'PUT', body: JSON.stringify(body) }),
     completeOnboarding: () => request<Organization>('/organization/onboarding/complete', { method: 'POST' }),
+    settings: () => request<OrganizationSettings>('/organization/settings'),
+    putSettings: (body: { llm: LlmChoice }) =>
+      request<OrganizationSettings>('/organization/settings', { method: 'PUT', body: JSON.stringify(body) }),
   },
   spaces: crud<Space, SpaceInput>('/spaces'),
   connectors: crud<Connector, ConnectorInput>('/connectors'),
