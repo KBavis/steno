@@ -11,6 +11,7 @@ is the same item: that's how triage carries over and how the org-wide report add
 """
 
 import re
+import sys
 import time
 from collections import defaultdict
 from collections.abc import Callable, Iterator
@@ -20,11 +21,13 @@ from fnmatch import fnmatch
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from steno.accounting import Ledger
+from steno.accounting import FILE_IO, Ledger, _within
 from steno.extraction.facts import Extraction
 from steno.graph.build import GraphPlan
 from steno.resolvers.base import Function, Resolvers
-from steno.rule_packs.packs import Pack
+from steno.resolvers.java import _DOMAINS
+from steno.rule_packs.packs import Pack, Rule
+from steno.rule_packs.surface import on_surface
 from steno.rule_packs.versions import Dependency, in_range, versions_of
 from steno.source.files import is_test_file
 
@@ -51,6 +54,23 @@ IO_PACKAGES = {
 # about a table (`table_of`), or a query built outside any function
 EXPECTED_DROPS = ("table_of: not a mapped entity", "@function outside a function")
 
+# Signals kept as patterns but left out of the report (D146): unread files and settings are
+# input for a rule author who asks for them; untested or unknown library versions belong to
+# rule health. Everything else in the report points at the surface.
+QUIET = {"unread_file", "version_untested", "version_unknown"}
+# A config key that names a connection: unread under any prefix, it's still an item (D146)
+COMMUNICATION_KEY = re.compile(
+    r"(^|[.\-_])(urls?|uris?|hosts?|endpoints?|base-?url|topics?|queues?|exchanges?|channels?"
+    r"|destinations?|bootstrap-servers|brokers?|bindings?|datasource)($|[.\-_])"
+    r"|^spring\.cloud\.stream\.",
+    re.IGNORECASE,
+)
+# A framework hook whose name says the framework starts work through it: ranked first (D146)
+STARTS_WORK = re.compile(
+    r"(Listener|Handler|Consumer|Subscriber|Receiver|Scheduled|Schedule|Job|Task|Filter|"
+    r"Interceptor|Controller|Endpoint|Mapping|Route|Command|Tool|Worker|Processor|Poller)$"
+)
+
 
 @dataclass
 class Item:
@@ -68,6 +88,8 @@ class Item:
     evidence: set[str] = field(default_factory=set)
     # Config values seen (unread config), for evidence that they name things in the graph
     values: set[str] = field(default_factory=set)
+    # Kept as a pattern but left out of the report (D146): see QUIET
+    quiet: bool = False
 
     @property
     def fingerprint(self) -> str:
@@ -124,11 +146,16 @@ def collect(
     config_used: set[str] | None = None,
     in_library: Callable[[str], bool] | None = None,
     ignored_files: set[tuple[str, str]] | None = None,
+    internal_prefixes: list[str] | None = None,
+    repository: str | None = None,
+    library_modules: int | None = None,
 ) -> Report:
     """`app_of`: the application a file belongs to (its service module's), so items and
     numbers can be shown per application, not just per repository. `enabled`: the packs that
-    ran, checked against `deps`, the versions the build files declare."""
-    items: dict[tuple[str, str], Item] = {}
+    ran, checked against `deps`, the versions the build files declare. `internal_prefixes`:
+    the organization's own code (D146). `repository` and `library_modules`: for telling
+    whether the whole repository produced nothing (a silent repository)."""
+    items: dict[tuple[str, str, str], Item] = {}
     where = app_of or (lambda _file: "")
 
     class _Tagged(Item):
@@ -136,7 +163,7 @@ def collect(
             super().add({**sample, "application": where(sample.get("file"))})
 
     def item(kind: str, signal: str, target: str, label: str) -> Item:
-        key = (kind, target)
+        key = (kind, signal, target)
         if key not in items:
             items[key] = _Tagged(kind, signal, target, label)
         return items[key]
@@ -150,18 +177,20 @@ def collect(
         yield
         timings[name] = round(time.perf_counter() - started, 2)
 
+    rules = {(r.pack, r.id): r for p in all_packs for r in p.rules}
     with timed("entries"):
         _unknown_hosts(plan, resolver, item)
         _inferred(plan, item)
         _kindless(plan, item)
         _unreachable(plan, resolver, item)
-        _dropped(x, item)
-        _unparsed(x, item)
+        dropped = _dropped(x, item, rules)
+        unparsed = _unparsed(x)
     no_io: dict[str, Any] = {"total": 0, "explained": 0, "by_app": {}}
     with timed("external_calls"):
-        io = (
-            _external_calls(x, resolver, all_packs, item, where, plan.ledger) if resolver else no_io
-        )
+        ledger = (plan.ledger or Ledger(x, resolver, all_packs)) if resolver else None
+        io = _external_calls(x, resolver, all_packs, item, where, ledger) if resolver else no_io
+        if resolver and ledger is not None:
+            _library_gaps(ledger, resolver, all_packs, item, internal_prefixes or [])
     with timed("hooks_config_libraries"):
         _hooks(plan, item)
         _config(x, item)
@@ -169,6 +198,7 @@ def collect(
             _libraries(resolver, all_packs, items, item)
         _versions(enabled or [], deps or [], item)
         _agreement(disagreements or [], unmatched or [], item)
+        _silent_witnesses(x, enabled or [], item)
     if files is not None:
         noise = [g for p in all_packs for g in p.noise_files]
         with timed("unread_files"):
@@ -184,28 +214,21 @@ def collect(
     if in_library is not None:
         with timed("in_library"):
             _in_library(items, in_library)
+    if repository is not None and library_modules is not None and files is not None:
+        _silent_repository(x, plan, repository, library_modules, files, read or set(), item)
+    _quiet(items)
     gaps = _unresolved_types(resolver) if resolver else 0
 
     stats = plan.stats
     reachable, total = stats.get("functions_reachable", 0), stats.get("functions", 0)
-    order = [
-        "unknown_hook",
-        "unknown_host",
-        "disagreement",
-        "unmatched_name",
-        "external_call",
-        "config_unset",
-        "library",
-        "version_untested",
-        "version_unknown",
-        "unresolved_type",
-        "inferred_entry",
-        "unreachable_effect",
-        "dropped_match",
-    ]
     ranked = sorted(
         items.values(),
-        key=lambda i: (order.index(i.signal) if i.signal in order else 9, -i.occurrences),
+        key=lambda i: (
+            i.quiet,
+            ORDER.index(i.signal) if i.signal in ORDER else len(ORDER),
+            "can_start_work" not in i.evidence,
+            -i.occurrences,
+        ),
     )
     return Report(
         ranked,
@@ -223,11 +246,42 @@ def collect(
             "unresolved_library_calls": gaps,
             "unknown_hooks": len(plan.stats.get("unknown_hooks", [])),
             "config_unset": len({key for _, key in x.unset_config}),
-            "items": len(ranked),
+            # Numbers, not items (D146): files Steno couldn't read, and rule matches it couldn't
+            # complete that wouldn't have stated a surface fact
+            "unparsed_files": unparsed,
+            "dropped_matches": dropped,
+            "items": sum(1 for i in ranked if not i.quiet),
+            "quiet_items": sum(1 for i in ranked if i.quiet),
             "by_signal": _count(i.signal for i in ranked),
             "applications": _per_application(resolver, plan, io["by_app"], ranked, where),
         },
     )
+
+
+# The report's order (D146): connections between applications first, then ways in, then
+# libraries (internal before external), then the rest of the surface
+ORDER = [
+    "silent_repository",
+    "silent_witness",
+    "unknown_host",
+    "disagreement",
+    "unmatched_name",
+    "unknown_hook",
+    "internal_library",
+    "external_call",
+    "config_unset",
+    "inferred_entry",
+    "no_trigger_application",
+    "library",
+    "external_library",
+    "unreachable_effect",
+    "unread_config",
+    "file_call",
+    "dropped_match",
+    "unread_file",
+    "version_untested",
+    "version_unknown",
+]
 
 
 def _per_application(
@@ -321,27 +375,35 @@ def _unreachable(plan: GraphPlan, r: Resolvers | None, item: Any) -> None:
         )
 
 
-def _dropped(x: Extraction, item: Any) -> None:
+def _dropped(x: Extraction, item: Any, rules: dict[tuple[str, str], Rule]) -> int:
     """Matches a rule found but couldn't complete because Steno couldn't tell: a condition it
-    couldn't check, a name it couldn't resolve. Drops that are the rule working as designed
-    (EXPECTED_DROPS) aren't gaps."""
+    couldn't check, a name it couldn't resolve. An item only when the rule states a surface
+    fact (D146); the rest are counted. Drops that are the rule working as designed
+    (EXPECTED_DROPS) aren't gaps. Returns how many were counted, not listed."""
+    counted = 0
     for origin, reason in x.dropped:
         if reason in EXPECTED_DROPS:
+            continue
+        rule = rules.get((origin.pack, origin.rule))
+        if rule is not None and not on_surface(rule):
+            counted += 1
             continue
         why = reason.split(":", 1)[0] if reason.startswith("where") else reason
         target = f"{origin.rule}: {why}"
         item("unmet_join", "dropped_match", target, target).add(
             {"file": origin.file, "line": origin.line, "detail": reason}
         )
+    return counted
 
 
-def _unparsed(x: Extraction, item: Any) -> None:
+def _unparsed(x: Extraction) -> int:
     """Files Steno couldn't read at all, and build modules the Java resolver couldn't resolve
-    when it read a repository module by module (D127): nothing in them is in the graph."""
-    for error in x.errors:
-        file, _, message = error.partition(": ")
-        if "syntax error" in message or message.startswith("Java resolver failed"):
-            item("unparsed", "unparsed", file, file).add({"file": file, "detail": message})
+    when it read a repository module by module (D127): a number on the application (D146)."""
+    return sum(
+        1
+        for error in x.errors
+        if "syntax error" in (m := error.partition(": ")[2]) or m.startswith("Java resolver failed")
+    )
 
 
 def _external_calls(
@@ -368,7 +430,9 @@ def _external_calls(
             covered += 1
             counts["explained"] += 1
             continue
-        item("external_call", "external_call", call.symbol, call.symbol).add(
+        # Local files are still a gap, ranked below the network, messaging, and databases
+        signal = "file_call" if any(_within(call.symbol, f) for f in FILE_IO) else "external_call"
+        item("external_call", signal, call.symbol, call.symbol).add(
             {"file": rel, "line": call.line, "function": call.function.symbol,
              "library": call.library}
         )  # fmt: skip
@@ -381,11 +445,15 @@ def _hooks(plan: GraphPlan, item: Any) -> None:
     One item per framework type, annotation, or decorator, so one rule fixes them all."""
     for h in plan.stats.get("unknown_hooks", []):
         target = h["target"]
-        label = f"Framework hook no rule explains · {target.replace('#', '.').rsplit('.', 1)[-1]}"
-        item("unmet_join", "unknown_hook", target, label).add(
+        name = target.replace("#", ".").rsplit(".", 1)[-1]
+        label = f"Framework hook no rule explains · {name}"
+        it = item("unmet_join", "unknown_hook", target, label)
+        it.add(
             {"file": h["file"], "line": h["line"], "function": h["symbol"],
              "detail": f"{h['kind']} {target}"}
         )  # fmt: skip
+        if STARTS_WORK.search(name.split("(", 1)[0]):
+            it.evidence.add("can_start_work")
 
 
 def _config(x: Extraction, item: Any) -> None:
@@ -403,7 +471,7 @@ def _libraries(r: Resolvers, packs: list[Pack], items: dict[Any, Item], item: An
     covered = set().union(*(_libs(p) for p in packs)) if packs else set()
     with_calls = {
         i.samples[0].get("library") or i.target.split(".")[0]
-        for (kind, _), i in items.items()
+        for (kind, _, _), i in items.items()
         if kind == "external_call" and i.samples
     }
     files: dict[str, list[str]] = defaultdict(list)
@@ -416,6 +484,136 @@ def _libraries(r: Resolvers, packs: list[Pack], items: dict[Any, Item], item: An
         it = item("library", "library", lib, lib)
         for f in sorted(where):
             it.add({"file": f, "detail": f"imports {lib}"})
+
+
+def _library_gaps(
+    ledger: Ledger, r: Resolvers, packs: list[Pack], item: Any, prefixes: list[str]
+) -> None:
+    """Calls into a library no rule explains, that isn't declared I/O or harmless, and that no
+    pack covers (D146): one item per library. *Internal* (the organization's code, by
+    `prefixes` or the repository's own package roots): Steno hasn't read it, and it may wrap a
+    call to another application. *External*: a public or vendor library no list knows."""
+    covered = set().union(*(_libs(p) for p in packs)) if packs else set()
+    roots = _own_roots(r)
+    for call, explained in ledger.others:
+        library = call.library
+        if explained or _covers(covered, _norm(library)) or _standard(library):
+            continue
+        internal = is_internal(call.symbol, library, prefixes, roots)
+        signal = "internal_library" if internal else "external_library"
+        label = (
+            f"Internal library not followed · {library}"
+            if internal
+            else f"External library no rule explains · {library}"
+        )
+        item("library", signal, library, label).add(
+            {"file": r.rel(call.function.path), "line": call.line,
+             "function": call.function.symbol, "detail": call.symbol}
+        )  # fmt: skip
+
+
+def _standard(library: str) -> bool:
+    """The language's own library (`urllib.parse`, `javax.crypto`): its I/O is declared in the
+    core lists, and the rest can't reach the surface."""
+    return library.split(".")[0] in sys.stdlib_module_names or library.startswith(
+        ("java.", "javax.")
+    )
+
+
+def is_internal(symbol: str, library: str, prefixes: list[str], roots: set[str]) -> bool:
+    """Whether a library is the organization's own code: under one of its prefixes (a Java
+    package `com.acme`, a coordinate `com.acme:*`, a Python package prefix `acme_`), or under
+    one of the repository's own package roots (`com.acme` for code in `com.acme.billing`)."""
+    for raw in [*prefixes, *roots]:
+        p = raw.strip().removesuffix(".*").removesuffix("*")
+        if ":" in p:
+            p = p.split(":", 1)[0]  # a coordinate's group is its package
+        if not p:
+            continue
+        if p.endswith(("_", "-", ".")):
+            if library.startswith(p) or symbol.startswith(p):
+                return True
+        elif any(n == p or n.startswith(p + ".") for n in (library, symbol)):
+            return True
+    return False
+
+
+def _own_roots(r: Resolvers) -> set[str]:
+    """The organization-level package roots of the repository's own Java code: `com.acme`
+    for `com.acme.billing.Invoice`. Python packages have no such root, so it's prefixes only."""
+    roots: set[str] = set()
+    for fn in r.functions():
+        if "#" not in fn.symbol:
+            continue
+        parts = [p for p in fn.symbol.split("#", 1)[0].split(".") if p and not p[0].isupper()]
+        n = 2 if parts and parts[0] in _DOMAINS else 1
+        if len(parts) > n:  # a root that's the whole package would match nothing else
+            roots.add(".".join(parts[:n]))
+    return roots
+
+
+def _silent_witnesses(x: Extraction, enabled: list[Pack], item: Any) -> None:
+    """A PLATFORM or DECLARED pack that ran (its files are here) but stated nothing: the
+    witness is broken, not missing (D146)."""
+    stated = {
+        o.pack
+        for o in [
+            *(c.origin for c in x.claims),
+            *(n.origin for n in x.nodes),
+            *(e.origin for e in x.edges),
+        ]
+    }
+    for pack in enabled:
+        if pack.witness_type == "CODE" or pack.name in stated or not pack.rules:
+            continue
+        it = item(
+            "unmet_join", "silent_witness", pack.name, f"Witness stated nothing · {pack.name}"
+        )
+        it.add(
+            {
+                "file": "",
+                "detail": f"{pack.witness_type} pack ran on this repository and "
+                "stated nothing: its files changed shape, or its rules don't match them",
+            }
+        )
+
+
+def _silent_repository(
+    x: Extraction,
+    plan: GraphPlan,
+    repository: str,
+    library_modules: int,
+    files: list[str],
+    read: set[str],
+    item: Any,
+) -> None:
+    """A repository that produced nothing (D146): no applications, no claims, no library
+    modules. Usually a witness no pack reads (a config, deploy, or ACL repository), a library
+    that isn't linked yet, or a repository with nothing to say. The item lists what it holds."""
+    apps = [n for n in plan.nodes.values() if "Application" in n.labels and not n.props.get("stub")]
+    if apps or x.claims or library_modules:
+        return
+    unread = [f for f in files if f not in read and not is_test_file(Path(f))]
+    kinds: dict[str, int] = defaultdict(int)
+    for rel in unread:
+        p = PurePosixPath(rel)
+        kinds[f"*{p.suffix.lower() or p.name} under {convention(rel)}"] += 1
+    holds = sorted(kinds.items(), key=lambda kv: -kv[1])[:6]
+    it = item("unmet_join", "silent_repository", repository,
+              f"Repository that produced nothing · {repository}")  # fmt: skip
+    it.add({"file": "", "detail": "holds " + ", ".join(f"{n} {k}" for k, n in holds)
+            if holds else "holds no files Steno reads"})  # fmt: skip
+
+
+def _quiet(items: dict[Any, Item]) -> None:
+    """Mark what's kept as a pattern but left out of the report (D146)."""
+    for it in items.values():
+        if it.signal in QUIET:
+            it.quiet = True
+        elif it.signal == "unread_config":
+            keys = [str(s.get("function") or "") for s in it.samples] + [it.target]
+            keys += [sym for _, sym, _ in it.keys]
+            it.quiet = not any(COMMUNICATION_KEY.search(k) for k in keys)
 
 
 def _unread_files(
@@ -460,7 +658,7 @@ FILE_TOKEN = re.compile(r"[\w][\w.-]*")  # a file name, as code writes it in a p
 def _referenced(items: dict[Any, Item], root: Path | None, read: set[str]) -> None:
     """An unread file whose name the code mentions (`getResource("flows/order.xyz")`) is
     probably wiring, not noise: evidence that ranks its pattern higher (D122)."""
-    unread = [i for (_, _), i in items.items() if i.signal == "unread_file"]
+    unread = [i for i in items.values() if i.signal == "unread_file"]
     if root is None or not unread:
         return
     names: dict[str, list[Item]] = defaultdict(list)

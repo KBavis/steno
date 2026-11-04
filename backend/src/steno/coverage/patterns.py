@@ -26,8 +26,13 @@ from steno.db.models import (
     PatternState,
 )
 
-# How much a pattern of each signal can change the map (D101, D122): hooks and I/O first
+# How much a pattern of each signal can change the map (D101, D122, D146): what can hide a
+# connection between applications first, then the rest of the surface
 WEIGHT = {
+    "silent_repository": 4.0,
+    "silent_witness": 4.0,
+    "one_sided": 3.5,
+    "internal_library": 3.0,
     "unknown_hook": 3.0,
     "external_call": 3.0,
     "disagreement": 2.5,
@@ -35,6 +40,8 @@ WEIGHT = {
     "no_trigger_application": 2.0,
     "unreachable_effect": 2.0,
     "library": 2.0,
+    "external_library": 1.5,
+    "file_call": 1.0,
     "unknown_host": 1.5,
     "unmatched_name": 1.5,
     "config_unset": 1.0,
@@ -48,7 +55,7 @@ WEIGHT = {
 # Signals about the application's own code, which no library owns
 OWN_CODE = {
     "inferred_entry", "no_trigger_application", "unreachable_effect", "unknown_host",
-    "dropped_match", "unparsed", "unread_file",
+    "dropped_match", "unparsed", "unread_file", "silent_repository", "one_sided",
 }  # fmt: skip
 
 
@@ -81,12 +88,14 @@ def record(
                 owner=owner_of(it),
                 first_seen_job=job_id,
                 state=PatternState.OPEN,
+                quiet=it.quiet,
             )
             session.add(p)
             patterns[fp] = p
             created += 1
         else:
             p.label = it.label
+            p.quiet = it.quiet
         if it.evidence or p.evidence:
             p.evidence = sorted(it.evidence | set(p.evidence or []))
     session.flush()
@@ -145,6 +154,9 @@ def record(
         if statuses.get(fp) == CoverageStatus.IGNORED and p.state == PatternState.OPEN:
             p.state = PatternState.IGNORED
             p.note = "ignored in the coverage report"
+        elif statuses.get(fp) == CoverageStatus.EXPECTED and p.state == PatternState.OPEN:
+            p.state = PatternState.EXPECTED
+            p.note = "expected: outside the organization"
     return {"patterns": len(by_fp), "new_patterns": created, "new_occurrences": new,
             "gone_occurrences": len(gone)}  # fmt: skip
 
@@ -172,12 +184,13 @@ def _recount(session: Session, pattern_ids: set[int]) -> None:
         p.applications = row.apps if row else 0
         p.occurrences = row.occurrences if row else 0
         p.score = score(p.signal, p.repositories, p.applications, p.occurrences, p.evidence)
-        # Gone: a rule explains it now, whatever its review history (approved, rejected, …);
-        # an ignored pattern stays ignored, since its occurrences were filtered out on purpose
-        if p.occurrences == 0 and p.state not in (PatternState.COVERED, PatternState.IGNORED):
+        # Gone: a rule explains it now, or the code is gone (a proposed rule merged);
+        # an ignored or expected pattern stays so, since that was decided on purpose
+        settled = (PatternState.COVERED, PatternState.IGNORED, PatternState.EXPECTED)
+        if p.occurrences == 0 and p.state not in settled:
             p.state = PatternState.COVERED
             p.note = "no longer occurs: a rule explains it, or the code is gone"
-        elif p.occurrences and p.state in (PatternState.COVERED, PatternState.APPROVED):
+        elif p.occurrences and p.state == PatternState.COVERED:
             p.state = PatternState.OPEN
             p.note = "occurs again: the rule doesn't cover these"
 
@@ -241,16 +254,22 @@ def frameworks(patterns: list[CoveragePattern]) -> list[dict[str, Any]]:
     return out
 
 
-# What a person may set by triage; the other states belong to rule curation
-TRIAGE = {PatternState.IGNORED, PatternState.OPEN}
+# What the rule author or a person may set (D147): ignored (harmless), expected (outside the
+# organization), proposed (a rule's pull request is open), or open again. Covered is Steno's
+TRIAGE = {PatternState.IGNORED, PatternState.EXPECTED, PatternState.PROPOSED, PatternState.OPEN}
+STATUS_OF = {
+    PatternState.IGNORED: CoverageStatus.IGNORED,
+    PatternState.EXPECTED: CoverageStatus.EXPECTED,
+}
 
 
 def triage(
     session: Session, fingerprints: list[str], state: PatternState, note: str | None = None
 ) -> int:
-    """Ignore or reopen whole patterns (D122), in bulk, with why. The same items in every
-    repository's latest coverage run follow, so the report and the patterns agree; later runs
-    carry the decision over. Returns how many patterns changed."""
+    """Set whole patterns' state (D122, D147), in bulk, with why: ignored, expected, proposed,
+    or open. The same items in every repository's latest coverage run follow, so the report
+    and the patterns agree; later runs carry the decision over. A one-sided join has no items
+    (it's read from the graph), so its pattern is created here. Returns how many changed."""
     if state not in TRIAGE:
         raise ValueError(f"triage sets {sorted(s.value for s in TRIAGE)}, not {state.value}")
     patterns = list(
@@ -258,7 +277,15 @@ def triage(
             select(CoveragePattern).where(CoveragePattern.fingerprint.in_(fingerprints))
         )
     )
-    status = CoverageStatus.IGNORED if state == PatternState.IGNORED else CoverageStatus.UNEXPLAINED
+    status = STATUS_OF.get(state, CoverageStatus.UNEXPLAINED)
+    known = {p.fingerprint for p in patterns}
+    for fp in fingerprints:
+        if fp.startswith("one_sided:") and fp not in known:
+            p = CoveragePattern(fingerprint=fp, kind=CoverageKind.INCONSISTENCY,
+                                signal="one_sided", label=fp, state=state)  # fmt: skip
+            session.add(p)
+            patterns.append(p)
+            known.add(fp)
     jobs = [job.id for job, _ in latest_runs(session).values()]
     for p in patterns:
         p.state = state
@@ -273,3 +300,59 @@ def triage(
         ):
             it.status = status
     return len(patterns)
+
+
+def occurrences(session: Session, fingerprint: str, limit: int = 50) -> dict[str, Any]:
+    """Where a pattern occurs now, for the rule author (D147): each place with its repository,
+    file, enclosing symbol, application, and the commit Steno ingested, spread across
+    repositories; plus the samples (with lines) from each repository's latest coverage item."""
+    from steno.api.links import source_url
+    from steno.db.models import Repository
+
+    p = session.scalar(select(CoveragePattern).where(CoveragePattern.fingerprint == fingerprint))
+    if p is None:
+        raise LookupError(f"no pattern {fingerprint!r}")
+    latest = latest_runs(session)
+    repos = {r.id: r for r in session.scalars(select(Repository))}
+    places: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for o in session.scalars(
+        select(CoverageOccurrence)
+        .where(CoverageOccurrence.pattern_id == p.id)
+        .order_by(CoverageOccurrence.file)
+    ):
+        repo, job = repos.get(o.repository_id), latest.get(o.repository_id, (None, None))[0]
+        places[o.repository_id].append({
+            "repository": repo.name if repo else "?",
+            "file": o.file, "symbol": o.symbol, "application": o.application,
+            "commit": job.to_sha if job else None,
+            "url": source_url(repo.clone_url if repo else None, job.to_sha if job else None,
+                              o.file, None),
+        })  # fmt: skip
+    spread: list[dict[str, Any]] = []
+    while len(spread) < limit and any(places.values()):
+        for rid in list(places):  # round-robin, so one large repository doesn't fill it
+            if places[rid] and len(spread) < limit:
+                spread.append(places[rid].pop(0))
+    signal, _, target = fingerprint.partition(":")
+    samples = []
+    jobs = {job.id: rid for rid, (job, _) in latest.items()}
+    for it in session.scalars(
+        select(CoverageItem).where(
+            CoverageItem.job_id.in_(jobs),
+            CoverageItem.signal == signal,
+            CoverageItem.target_symbol == target,
+        )
+    ):
+        repo, job = repos.get(jobs[it.job_id]), latest[jobs[it.job_id]][0]
+        for smp in it.samples:
+            samples.append({
+                **smp, "repository": repo.name if repo else "?",
+                "url": source_url(repo.clone_url if repo else None, job.to_sha,
+                                  smp.get("file"), smp.get("line")),
+            })  # fmt: skip
+    return {
+        "fingerprint": p.fingerprint, "signal": p.signal, "label": p.label, "owner": p.owner,
+        "state": p.state.value, "note": p.note, "repositories": p.repositories,
+        "applications": p.applications, "occurrences": p.occurrences,
+        "places": spread, "more": max(p.occurrences - len(spread), 0), "samples": samples[:20],
+    }  # fmt: skip

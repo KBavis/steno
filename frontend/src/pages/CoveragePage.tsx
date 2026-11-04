@@ -1,43 +1,95 @@
 import { AppWindow, ArrowUpRight, ChevronRight, Layers, ScanSearch } from 'lucide-react'
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import { api, type CoverageItem, type CoverageRow, type CoverageSignal, type CoverageStatus } from '../api/client'
+import { api, type CoverageGroup, type CoverageItem, type CoverageRow, type CoverageSignal, type CoverageStatus } from '../api/client'
 import { EmptyState, ErrorAlert, PageHeader } from '../components/ui'
 import { usePoll } from '../hooks/usePoll'
 import { timeAgo } from '../lib/time'
 
-/** What each signal means, and what usually fixes it */
+/** What each signal means, and what usually fixes it (the catalog: docs/how-it-works/ingestion/what-steno-must-see.md) */
 const SIGNALS: Record<CoverageSignal, { label: string; help: string }> = {
+  one_sided: {
+    label: 'One end missing',
+    help: 'A topic produced but never consumed, consumed but never produced, or an endpoint called that no application exposes. The other end was missed, or is outside the organization (mark it Expected).',
+  },
   unknown_host: {
     label: 'Unknown hosts',
-    help: "HTTP calls whose host is only known at runtime (read from config or a database row). The graph shows each as an \"Unknown host\" node for the class making the call; the URL template is kept on every call.",
+    help: 'HTTP calls whose host is only known where the app runs (config, a database row). Each is an "Unknown host" node for the calling class; the URL template and its config keys are kept.',
   },
-  external_call: {
-    label: 'Unexplained calls',
-    help: 'Calls into a library that look like I/O, in functions where no rule recorded what they read, write, or call. Usually a rule worth writing.',
+  disagreement: {
+    label: 'Disagreements',
+    help: 'The code and another witness disagree: a use no ACL grants (code only), or a grant no code shows (declared only).',
+  },
+  unmatched_name: {
+    label: 'Unmatched names',
+    help: 'A name another witness uses (an ACL user, a manifest component) that matches no application: not ingested, or named differently.',
+  },
+  silent_repository: {
+    label: 'Silent repositories',
+    help: 'A repository that produced nothing: no applications, no claims, no library modules. Usually a witness no pack reads (config, deploy, ACLs), or a library not linked yet. Mark it Ignore if it really has nothing to say.',
+  },
+  silent_witness: {
+    label: 'Silent witnesses',
+    help: 'A PLATFORM or DECLARED pack ran on this repository and stated nothing: its files changed shape, or its rules no longer match them.',
+  },
+  internal_library: {
+    label: 'Internal libraries',
+    help: "Calls into the organization's own library that Steno hasn't read (STENO_INTERNAL_PREFIXES, or the repository's own package roots). A wrapper can hide a call to another application: ingest the library's repository, or write a rule for it.",
+  },
+  external_library: {
+    label: 'External libraries',
+    help: 'Calls into a public or vendor library that no pack covers and no list declares as I/O or harmless. Mark it Ignore if it never reaches the surface; otherwise a core-pack rule.',
   },
   library: {
-    label: 'Uncovered libraries',
+    label: 'Uncovered I/O libraries',
     help: 'I/O libraries the code imports that no rule pack covers. A pack (or an org rule) for it would explain its calls.',
   },
-  unresolved_type: {
-    label: 'Missing library types',
-    help: "Calls where a flow stopped because a value's type comes from a library Steno can't see (no dependency JARs yet), one item per library. The biggest ones say which JARs would help most.",
+  unknown_hook: {
+    label: 'Unknown hooks',
+    help: 'Code a framework runs without the code calling it (a listener, a filter, an annotation) that no rule explains. Hooks that can start work are listed first.',
   },
   inferred_entry: {
     label: 'Unknown triggers',
-    help: "Work inside an application that nothing in the code starts (a worker loop, a CLI command, a callback a framework registers). Steno still gives it a flow, marked inferred; a rule that names its trigger makes the flow certain.",
+    help: 'Work inside an application that nothing in the code starts (a worker loop, a CLI command). Steno still gives it a flow, marked inferred; a rule that names its trigger makes the flow certain.',
+  },
+  no_trigger_application: {
+    label: 'No known trigger',
+    help: "An application none of whose flows has a known trigger, so its kind is unknown. A rule for whatever starts it gives it one.",
   },
   unreachable_effect: {
-    label: 'Unreachable code',
-    help: "Code that reads, writes, or calls out, but that no entry point reaches: dead code, a missing entry point (a consumer, a schedule), or a call the resolver can't follow.",
+    label: 'Unreachable effects',
+    help: "Code that reads, writes, or calls out, but that no entry point reaches: usually a missing entry point (a consumer, a schedule).",
+  },
+  external_call: {
+    label: 'Unexplained I/O calls',
+    help: 'Network, messaging, and database calls no rule explains. Usually a rule worth writing.',
+  },
+  config_unset: {
+    label: 'Config set elsewhere',
+    help: 'Config keys a fact needs (a topic, a host, a datasource) that no file in the repository sets: set where the app runs.',
+  },
+  unread_config: {
+    label: 'Connection settings unread',
+    help: 'Config keys that name a connection (a URL, a host, a topic, a binding) that no rule read.',
   },
   dropped_match: {
     label: "Couldn't check",
-    help: "Matches a rule found but couldn't complete because Steno couldn't tell: a condition it couldn't check, a name it couldn't resolve.",
+    help: "Matches of a rule that states a surface fact (a table, a topic, an endpoint) that Steno couldn't complete.",
   },
-  unparsed: {
-    label: 'Unparsed files',
-    help: "Files Steno couldn't read at all, so nothing in them is in the graph.",
+  file_call: {
+    label: 'Unexplained file I/O',
+    help: 'Local file reads and writes no rule explains: model artifacts, uploads, exports. Ranked below the network.',
+  },
+  version_untested: {
+    label: 'Untested versions',
+    help: 'A pack ran on a library version outside the range it is tested on. Rule health, not a gap.',
+  },
+  version_unknown: {
+    label: 'Unknown versions',
+    help: "No build file states the version of a library a pack is tested against. Rule health, not a gap.",
+  },
+  unread_file: {
+    label: 'Unread files',
+    help: 'Files no rule read, grouped by extension and place: input for a rule author, hidden from the report.',
   },
 }
 
@@ -45,10 +97,16 @@ const STATUS_BADGE: Record<CoverageStatus, string> = {
   unexplained: 'badge badge-warn',
   ignored: 'badge',
   explained: 'badge badge-ok',
+  expected: 'badge',
 }
-const STATUS_LABEL: Record<CoverageStatus, string> = { unexplained: 'open', ignored: 'ignored', explained: 'explained' }
+const STATUS_LABEL: Record<CoverageStatus, string> = {
+  unexplained: 'open',
+  ignored: 'ignored',
+  explained: 'explained',
+  expected: 'expected',
+}
 
-type StatusFilter = 'open' | 'ignored' | 'explained' | 'all'
+type StatusFilter = 'open' | 'ignored' | 'expected' | 'explained' | 'all'
 type SortKey = 'label' | 'io_explained_pct' | 'reachable_pct' | 'open_items' | 'applications'
 
 // The scope lives in the hash after the tab: #coverage, #coverage/space:3, #coverage/app:billing
@@ -68,9 +126,10 @@ export function CoveragePage() {
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
-  const load = useCallback(() => api.coverage.report(scope), [scope])
+  const [hidden, setHidden] = useState(false)
+  const load = useCallback(() => api.coverage.report(scope, hidden), [scope, hidden])
   const { data, error, reload } = usePoll(load, 10000)
-  const [signal, setSignal] = useState<CoverageSignal | 'all'>('all')
+  const [group, setGroup] = useState<CoverageGroup | 'all'>('all')
   const [status, setStatus] = useState<StatusFilter>('open')
   const [open, setOpen] = useState<string>()
   const [busy, setBusy] = useState<string>()
@@ -92,10 +151,11 @@ export function CoveragePage() {
   )
   const counts = useMemo(() => {
     const c: Record<string, number> = {}
-    for (const i of items) if (matchesStatus(i)) c[i.signal] = (c[i.signal] ?? 0) + 1
+    for (const i of items) if (matchesStatus(i)) c[i.group] = (c[i.group] ?? 0) + 1
     return c
   }, [items, matchesStatus])
-  const shown = items.filter((i) => matchesStatus(i) && (signal === 'all' || i.signal === signal))
+  const groups = (data?.groups ?? []).filter((g) => hidden || (g.key !== 'hidden' && g.key !== 'rule_health'))
+  const shown = items.filter((i) => matchesStatus(i) && (group === 'all' || i.group === group))
   const rows = useMemo(() => sortRows(data?.children ?? [], sort.key, sort.asc), [data, sort])
 
   const triage = async (i: CoverageItem, next: CoverageStatus) => {
@@ -232,29 +292,31 @@ export function CoveragePage() {
           )}
 
           <div className="section-title">
-            <h2>{isApp ? 'Items' : 'Rule backlog'}</h2>
-            {!isApp && <span className="muted small">ranked by reach: applications, then spaces, then occurrences</span>}
+            <h2>What Steno might be missing</h2>
+            <span className="muted small">grouped by what was missed, connections between applications first; ranked by reach within each group</span>
           </div>
           <div className="coverage-filters">
-            <div className="coverage-chips" role="tablist" aria-label="Signal">
-              <button role="tab" aria-selected={signal === 'all'} className={signal === 'all' ? 'on' : ''} onClick={() => setSignal('all')}>
+            <div className="coverage-chips" role="tablist" aria-label="What was missed">
+              <button role="tab" aria-selected={group === 'all'} className={group === 'all' ? 'on' : ''} onClick={() => setGroup('all')}>
                 All <span>{Object.values(counts).reduce((a, b) => a + b, 0)}</span>
               </button>
-              {(Object.keys(SIGNALS) as CoverageSignal[]).map((k) => (
-                <button key={k} role="tab" aria-selected={signal === k} className={signal === k ? 'on' : ''} onClick={() => setSignal(k)}>
-                  {SIGNALS[k].label} <span>{counts[k] ?? 0}</span>
+              {groups.map((g) => (
+                <button key={g.key} role="tab" aria-selected={group === g.key} className={group === g.key ? 'on' : ''} onClick={() => setGroup(g.key)}>
+                  {g.label} <span>{counts[g.key] ?? 0}</span>
                 </button>
               ))}
             </div>
             <select className="coverage-status" value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)} aria-label="Status">
               <option value="open">Open</option>
               <option value="ignored">Ignored</option>
+              <option value="expected">Expected</option>
               <option value="explained">Explained</option>
               <option value="all">All statuses</option>
             </select>
+            <label className="muted small" title="Unread files and rule health: input for rule authors, left out of the report">
+              <input type="checkbox" checked={hidden} onChange={(e) => setHidden(e.target.checked)} /> Show hidden
+            </label>
           </div>
-
-          {signal !== 'all' && <p className="coverage-help">{SIGNALS[signal].help}</p>}
 
           <div className="card">
             {shown.length === 0 ? (
@@ -276,7 +338,9 @@ export function CoveragePage() {
                     <li key={key}>
                       <div className={`list-row clickable ${expanded ? 'selected' : ''}`} onClick={() => setOpen(expanded ? undefined : key)}>
                         <ChevronRight size={16} className="muted" style={{ transform: expanded ? 'rotate(90deg)' : undefined, transition: 'transform .15s' }} />
-                        <span className={`coverage-signal sig-${i.signal}`}>{SIGNALS[i.signal]?.label ?? i.signal}</span>
+                        <span className={`coverage-signal sig-${i.signal}`} title={SIGNALS[i.signal]?.help}>
+                          {SIGNALS[i.signal]?.label ?? i.signal}
+                        </span>
                         <div className="list-main">
                           <div className="list-title mono coverage-label" title={i.target}>{i.label}</div>
                           <div className="list-sub">{reach}</div>
@@ -285,11 +349,11 @@ export function CoveragePage() {
                         <div className="list-actions" onClick={(e) => e.stopPropagation()}>
                           {i.status === 'unexplained' ? (
                             <>
-                              <button className="btn btn-ghost btn-sm" disabled={busy === key} onClick={() => triage(i, 'ignored')} title="Not I/O, or not worth a rule">
+                              <button className="btn btn-ghost btn-sm" disabled={busy === key} onClick={() => triage(i, 'ignored')} title="Harmless: never reaches the surface">
                                 Ignore
                               </button>
-                              <button className="btn btn-secondary btn-sm" disabled={busy === key} onClick={() => triage(i, 'explained')} title="A rule now covers it">
-                                Explained
+                              <button className="btn btn-secondary btn-sm" disabled={busy === key} onClick={() => triage(i, 'expected')} title="A real gap, legitimately outside the organization">
+                                Expected
                               </button>
                             </>
                           ) : (

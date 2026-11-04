@@ -81,3 +81,14 @@ noise:
     - spring.lifecycle
     - spring.web
     - springdoc
+# Libraries whose calls never reach an application's surface, so they're never a library gap
+# (D146). Their file I/O stays a gap: a more specific I/O entry (`torch.save`,
+# `pathlib.Path.write_text`, `numpy.load`) wins over these. Frameworks with hooks (servlet
+# filters, Spring's context) are never listed here.
+library:
+  harmless:
+    - pathlib
+    - numpy
+    - scipy
+    - torch
+    - dotenv

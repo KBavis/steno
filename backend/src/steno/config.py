@@ -55,12 +55,18 @@ class Settings(BaseSettings):
             return [Path(p.strip()).expanduser() for p in value.split(",") if p.strip()]
         return value
 
-    # Packs Steno acts as if it didn't have, everywhere (ingestion, and the drafter's tools):
-    # for measuring rule curation against a pack we wrote (rule-curation §10).
+    # Packs Steno acts as if it didn't have, everywhere: for measuring rule curation against a
+    # pack we wrote (rule-curation §8).
     # STENO_DISABLED_PACKS: pack names separated by commas
     disabled_packs: Annotated[list[str], NoDecode] = []
 
-    @field_validator("disabled_packs", mode="before")
+    # The organization's own code, for the coverage report's library gaps (D146): Java packages
+    # (`com.acme`), coordinates (`com.acme:*`), or Python packages (`acme_`). A library under
+    # one is internal; the repository's own package roots count too, so it can stay empty.
+    # STENO_INTERNAL_PREFIXES: prefixes separated by commas. Onboarding takes it over in v1.
+    internal_prefixes: Annotated[list[str], NoDecode] = []
+
+    @field_validator("disabled_packs", "internal_prefixes", mode="before")
     @classmethod
     def _split_names(cls, value: object) -> object:
         if isinstance(value, str):
@@ -88,41 +94,6 @@ class Settings(BaseSettings):
     # A repository with more Java files than this resolves in batches from its first run: one
     # pass ran a 5,500-file repository out of memory at a 2 GB heap (D127)
     resolver_jvm_batch_above_files: int = 3000
-
-    # Rule curation (D120, D130): which provider drafts rules, and the caps on each pattern.
-    # claude_agent_sdk uses this machine's Claude Code login, or ANTHROPIC_API_KEY when set
-    rule_drafter: str = "claude_agent_sdk"  # claude_agent_sdk | openai | gemini | azure_openai
-    rule_drafter_model: str = "claude-opus-5-5"  # the default; a search can pick another
-    # The models a search may choose from, as model id → name shown in the UI
-    rule_drafter_models: dict[str, str] = {
-        "claude-opus-5-5": "Claude Opus 5.5",
-        "claude-sonnet-5-5": "Claude Sonnet 5.5",
-        "claude-haiku-5-5": "Claude Haiku 5.5",
-    }
-    rule_drafter_effort: str = "high"
-    rule_drafter_max_turns: int = 30
-    rule_drafter_max_usd: float = 2.0  # per pattern
-    curation_budget_usd: float = 10.0  # per run
-    # Patterns of one run drafted at once, across every worker (each worker process drafts one
-    # at a time); a claim not finished within the timeout (a worker died) is drafted again
-    curation_parallel: int = 4
-    # The cost check (§9): a search whose projection passes its limit, or with no history to
-    # project from, is confirmed first, and can start as a pilot of this many patterns
-    curation_pilot: int = 10
-    rule_drafter_timeout_min: int = 30
-    # Times a draft goes back to the drafter with what Steno's checks found (recall, identity)
-    rule_drafter_revisions: int = 1
-    # Publishing approved rules (D131): `pr` collects them on one `steno/rules` branch with one
-    # open pull request per destination; `push` commits straight to the default branch
-    rules_publish_core: str = "pr"  # Steno's own rule-packs/ (rules for public libraries)
-    rules_publish_org: str = "pr"  # the organization's rule-pack repository
-    # Everything to the organization's repository: a rule for a public library becomes an
-    # extension pack there (core-extensions/, marked for upstreaming) instead of a change to
-    # Steno's own rule-packs/. For running Steno inside an organization whose code mustn't
-    # leave it, and that can't push to Steno's repository (D129). STENO_RULES_CORE_TO_ORG
-    rules_core_to_org: bool = False
-    # Steno's own working files (the worktrees it publishes rules from)
-    cache_dir: Path = Path.home() / ".cache" / "steno"
 
     # A ceiling on ingestion jobs running at once across every machine. Within it, each
     # machine takes only what fits its memory and CPUs (D128; docs: storage.md)

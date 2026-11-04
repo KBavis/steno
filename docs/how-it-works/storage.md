@@ -93,7 +93,7 @@ erDiagram
 
 | Table | Holds |
 |---|---|
-| `coverage_pattern` | One row per fingerprint across the organization (`signal:target`, e.g. `unknown_hook:com.acme.messaging.AcmeHandler`): `kind`, `signal`, `label`, `owner` (the library, package root, or config prefix it's clustered by; none for an application's own code), reach (`repositories`, `applications`, `occurrences`), `score`, `state` (open / ignored / expected / proposed / covered), `first_seen_job`, `note` (why it's in its state) |
+| `coverage_pattern` | One row per fingerprint across the organization (`signal:target`, e.g. `unknown_hook:com.acme.messaging.AcmeHandler`): `kind`, `signal`, `label`, `owner` (the library, package root, or config prefix it's clustered by; none for an application's own code), reach (`repositories`, `applications`, `occurrences`), `score`, `state` (open / ignored / expected / proposed / covered), `quiet` (left out of the report: unread files and settings, library versions, D146), `first_seen_job`, `note` (why it's in its state) |
 | `coverage_occurrence` | One row per place a pattern occurs in a repository's latest run: `pattern_id`, `repository_id`, `file`, `symbol` (the enclosing function, so moved lines aren't new code), `application`, `first_seen_job`. Each run replaces its repository's rows: what's gone is deleted. Reach is counted from these; new code is the rows a run saw first. |
 | `ignored_file` | A file name ignored within one unread-files pattern: `fingerprint`, `name`, `note`. Approving an ignore for `unread_file:.yml@/` because of `docker-compose.local.yml` ignores that name there, not every root-level `.yml` file; coverage skips only those names, and the pattern reopens when other files appear. |
 | `rule_health` | Per rule and run: matches, confirmations by other witnesses, `version_untested`; what the "rule broke" alarms read (D126) |
@@ -113,7 +113,7 @@ erDiagram
 | `repository_rule_pack` | `repository_id`, `rule_pack_id`, `enabled`, `reason` (auto / manual) |
 | `ingestion_job` | `id`, `repository_id`, `trigger` (initial / nightly / manual), `mode` (full / dry_run), `from_sha`, `to_sha`, `status` (queued / running / succeeded / failed), `queued_at`, `started_at`, `finished_at`, `error`, `stats` (json), `host` and `memory_reserved_mb` (the machine running it and what it reserved there, D128) |
 | `ingestion_stage` | `id`, `job_id`, `stage` (clone / deps / parse / extract / assemble / identify / flows / write / reconcile / coverage / cards), `started_at`, `finished_at`, `status`, `metrics` (json), `llm_cost`, `jev_cost` |
-| `coverage_item` | `id`, `job_id`, `repository_id`, `kind` (external call / library / unreachable / unmet join / inconsistency / config), `target_symbol`, `occurrences`, `samples` (json), `status` (unexplained / ignored / explained) |
+| `coverage_item` | `id`, `job_id`, `repository_id`, `kind` (external call / library / unreachable / unmet join / inconsistency / config), `target_symbol`, `occurrences`, `samples` (json), `status` (unexplained / ignored / explained / expected), `quiet` (left out of the report, D146) |
 | `fact_change` | `id`, `job_id`, `fact_id`, `fact_type`, `change` (added / removed / modified), `before` (json), `after` (json), `commit_sha` |
 | `job_commit` | `job_id`, `commit_sha`, `pr_number`, `pr_url`, `merged_at` |
 | `llm_call` | `id`, `job_id`, `stage_id`, `node_id`, `purpose`, `model`, `input_tokens`, `output_tokens`, `cached_tokens`, `cost`, `latency_ms` |
@@ -138,7 +138,7 @@ erDiagram
 |---|---|
 | `ingestion_job` | Every job (`trigger`: initial / nightly / manual; `mode`: full / **dry_run**) and its status (**queued** / running / succeeded / failed). **It's also the work queue.** |
 | `ingestion_stage` | Per stage (clone, deps, parse, extract, assemble, identify, flows, write, reconcile, coverage, cards): timings, metrics (files, functions, flows; planned: peak memory and the JVM helper's peak heap, D127), and **cost** (`llm_cost`, `jev_cost`, summed from the calls made in that stage). This is the dry-run report. |
-| `coverage_item` | What **no rule explained** but looks like it matters (the coverage signals; see [Coverage report](./ingestion/coverage-report.md)), with occurrence counts and sample locations. `status` is unexplained / ignored / explained, so it's tracked across jobs, noise stays hidden once ignored, and open items measure how complete an app's graph is. The org-wide report groups items by `target_symbol` across repositories. |
+| `coverage_item` | What **no rule explained** but looks like it matters (the coverage signals; see [Coverage report](./ingestion/coverage-report.md)), with occurrence counts and sample locations. `status` is unexplained / ignored / explained / expected (a real gap outside the organization, D146), so it's tracked across jobs, noise stays hidden once ignored, and open items measure how complete an app's graph is. The org-wide report groups items by `target_symbol` across repositories. |
 
 ### Change history
 

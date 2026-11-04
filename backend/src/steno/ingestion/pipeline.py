@@ -361,6 +361,9 @@ def coverage(ctx: JobContext) -> dict[str, Any]:
             engine.config_used
             | (getattr(engine.resolver.properties, "used", set()) if engine.resolver else set())
         ),
+        internal_prefixes=get_settings().internal_prefixes,
+        repository=ctx.repository.name,
+        library_modules=sum(1 for m in ctx.state["structure"].modules if "Library" in m.roles),
     )
     previous = _previous_triage(ctx)
     statuses: dict[str, CoverageStatus] = {}
@@ -382,9 +385,10 @@ def coverage(ctx: JobContext) -> dict[str, Any]:
                 samples=it.samples,
                 applications=it.applications,
                 status=status,
+                quiet=it.quiet,
             )
         )
-    # The organization's patterns: what rule curation works from (D121)
+    # The organization's patterns: what the rule author works from (D121, D147)
     started = time.perf_counter()
     patterns = record_patterns(ctx.session, ctx.repository.id, ctx.job.id, report.items, statuses)
     timings = {

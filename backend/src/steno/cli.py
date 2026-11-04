@@ -13,8 +13,13 @@ db_app = typer.Typer(no_args_is_help=True, help="Postgres schema.")
 graph_app = typer.Typer(no_args_is_help=True, help="Neo4j schema and projections.")
 job_app = typer.Typer(no_args_is_help=True, help="Ingestion jobs.")
 rules_app = typer.Typer(no_args_is_help=True, help="Rule packs.")
+coverage_app = typer.Typer(
+    no_args_is_help=True,
+    help="The coverage report's patterns: the rule author's worklist (D146, D147).",
+)
 app.add_typer(db_app, name="db")
 app.add_typer(rules_app, name="rules")
+app.add_typer(coverage_app, name="coverage")
 app.add_typer(graph_app, name="graph")
 app.add_typer(job_app, name="job")
 
@@ -117,7 +122,7 @@ def graph_reset(
 ) -> None:
     """DESTRUCTIVE: delete every node and edge in Neo4j, then mark every repository not
     ingested so the next run rebuilds the graph from git. Postgres is kept: connectors,
-    repositories, the identity registry (Steno IDs survive), claims, coverage, proposals."""
+    repositories, the identity registry (Steno IDs survive), claims, coverage."""
     from sqlalchemy import select, update
 
     from steno.db.models import IngestionJob, JobStatus, Repository, RepositorySelection
@@ -148,7 +153,7 @@ def graph_reset(
     typer.echo(f"  deletes {before['nodes']} nodes and {before['edges']} edges")
     typer.echo(f"  then marks {len(repos)} repositories not ingested"
                + (" and queues a full run of each" if queue else ""))  # fmt: skip
-    typer.echo("  keeps Postgres: connectors, repositories, identity, claims, coverage, proposals")
+    typer.echo("  keeps Postgres: connectors, repositories, identity, claims, coverage")
     typer.echo("Tip: `steno graph stats --json before.json` first, to compare after re-ingesting.")
     if not yes:
         typed = typer.prompt(f"Type the database name ({db}) to delete it", default="")
@@ -285,6 +290,151 @@ def rules_test(
         raise typer.Exit(1)
 
 
+@rules_app.command("check")
+def rules_check(
+    rule_file: str = typer.Argument(..., help="The rule's YAML, inside its pack's rules/ folder"),
+    pattern: list[str] = typer.Option(..., "--pattern", "-p", help="Fingerprints it explains"),
+    as_json: bool = typer.Option(False, "--json", help="Print the result as JSON"),
+) -> None:
+    """Run a rule over every file its patterns occur in, read from the git host at the ingested
+    commit: recall, whether it states a surface fact, and the application names it would
+    create (rule-curation §6). Exits 1 when the rule must not be proposed."""
+    import json
+    from pathlib import Path
+
+    import yaml
+    from sqlalchemy import select
+
+    from steno.db.models import CoveragePattern
+    from steno.db.session import session_scope
+    from steno.rule_packs.check import check_rule, git_host_reader
+    from steno.rule_packs.packs import load_all_packs
+
+    path = Path(rule_file)
+    rule = path.read_text()
+    pack_yaml = path.parent.parent / "pack.yaml"
+    pack = yaml.safe_load(pack_yaml.read_text()) if pack_yaml.exists() else None
+    rule_id = (yaml.safe_load(rule) or {}).get("id")
+    # The rule's own pack, if it's loaded already, is left out so the rule isn't counted twice
+    others = [
+        p for p in load_all_packs() if not (pack and p.name == pack.get("name"))
+    ] if rule_id else None  # fmt: skip
+    results = {}
+    blocking = False
+    with session_scope() as session:
+        read = git_host_reader(session)
+        for fp in pattern:
+            p = session.scalar(select(CoveragePattern).where(CoveragePattern.fingerprint == fp))
+            if p is None:
+                raise typer.BadParameter(f"no pattern {fp!r}: see `steno coverage patterns`")
+            result = check_rule(session, p, rule, pack, read, others)
+            results[fp] = {**result.to_json(), "problems": result.problems()}
+            blocking = blocking or result.blocking()
+    if as_json:
+        typer.echo(json.dumps(results, indent=2))
+    else:
+        for fp, r in results.items():
+            typer.echo(f"{fp}")
+            typer.echo(f"  surface fact: {'yes' if r['surface'] else 'no'}")
+            typer.echo(f"  recall: explains {len(r['explained'])} of {r['files']} files")
+            for f in r["missed"][:10]:
+                typer.echo(f"    missed {f}")
+            if r["names"]:
+                typer.echo(f"  application names: {', '.join(r['names'])}")
+            for e in r["errors"]:
+                typer.echo(f"  error: {e}")
+            for problem in r["problems"]:
+                typer.echo(typer.style(f"  problem: {problem}", fg="red"))
+    if blocking:
+        raise typer.Exit(1)
+
+
+@coverage_app.command("patterns")
+def coverage_patterns(
+    state: str = typer.Option("open", help="open, ignored, expected, proposed, covered"),
+    limit: int = typer.Option(20, help="How many frameworks or lone patterns"),
+    quiet: bool = typer.Option(False, "--quiet", help="Include unread files and rule health"),
+    as_json: bool = typer.Option(False, "--json", help="Print the result as JSON"),
+) -> None:
+    """Patterns in a state, as frameworks ranked by score: the report's order (D146)."""
+    import json
+
+    from steno.api.routes.patterns import patterns
+    from steno.db.models import PatternState
+    from steno.db.session import session_scope
+
+    with session_scope() as session:
+        out = patterns(session, PatternState(state), limit, quiet)
+    if as_json:
+        typer.echo(json.dumps(out, indent=2))
+        return
+    for g in out["frameworks"]:
+        owner = g["owner"] or "(the application's own code)"
+        typer.echo(f"{g['score']:10.1f}  {owner}")
+        for p in g["patterns"]:
+            reach = (
+                f"{p['repositories']} repos, {p['applications']} apps, {p['occurrences']} places"
+            )
+            typer.echo(f"            {p['fingerprint']}\n              {p['label']} · {reach}")
+    if out["more"]:
+        typer.echo(f"\n{out['more']} more; raise --limit")
+
+
+@coverage_app.command("show")
+def coverage_show(
+    fingerprint: str = typer.Argument(..., help="A pattern's fingerprint, `signal:target`"),
+    limit: int = typer.Option(20, help="How many places"),
+    as_json: bool = typer.Option(False, "--json", help="Print the result as JSON"),
+) -> None:
+    """Where a pattern occurs, with links to the code at the ingested commit, and samples."""
+    import json
+
+    from steno.coverage.patterns import occurrences
+    from steno.db.session import session_scope
+
+    with session_scope() as session:
+        try:
+            out = occurrences(session, fingerprint, limit)
+        except LookupError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+    if as_json:
+        typer.echo(json.dumps(out, indent=2))
+        return
+    typer.echo(f"{out['label']}  [{out['state']}]  owner: {out['owner'] or '-'}")
+    for place in out["places"]:
+        typer.echo(f"  {place['repository']}/{place['file']}  {place['symbol']}")
+        if place["url"]:
+            typer.echo(f"    {place['url']}")
+    for smp in out["samples"][:10]:
+        line = f":{smp['line']}" if smp.get("line") else ""
+        typer.echo(
+            f"  sample {smp['repository']}/{smp.get('file')}{line}  {smp.get('detail') or ''}"
+        )
+    if out["more"]:
+        typer.echo(f"  {out['more']} more places; raise --limit")
+
+
+@coverage_app.command("mark")
+def coverage_mark(
+    fingerprints: list[str] = typer.Argument(..., help="Patterns' fingerprints"),
+    state: str = typer.Option(..., help="ignored, expected, proposed, or open"),
+    note: str = typer.Option(..., help="Why: harmless because…, outside the organization…, a PR"),
+) -> None:
+    """Set patterns' state, everywhere they occur and in later runs (D147)."""
+    from steno.coverage.patterns import TRIAGE, triage
+    from steno.db.models import PatternState
+    from steno.db.session import session_scope
+
+    wanted = PatternState(state)
+    if wanted not in TRIAGE:
+        raise typer.BadParameter(f"state is one of {sorted(s.value for s in TRIAGE)}")
+    with session_scope() as session:
+        changed = triage(session, fingerprints, wanted, note)
+    typer.echo(f"{changed} of {len(set(fingerprints))} patterns marked {state}")
+    if changed < len(set(fingerprints)):
+        raise typer.Exit(1)
+
+
 @app.command()
 def extract(
     path: str = typer.Argument(..., help="A local repository or folder"),
@@ -340,123 +490,3 @@ def resolver_check(
     for d in diffs:
         typer.echo(f"  {d}")
     raise typer.Exit(1 if diffs else 0)
-
-
-@app.command()
-def curate(
-    limit: int | None = typer.Option(None, help="At most this many patterns (default: all)"),
-    fingerprint: list[str] = typer.Option(None, help="Work on these patterns only"),
-    drafter: str = typer.Option(None, help="claude_agent_sdk (default) | openai | gemini | …"),
-    budget: float = typer.Option(None, help="Dollars this run may spend (default: setting)"),
-    model: str = typer.Option(None, help="The model to draft with (default: setting)"),
-) -> None:
-    """Rule curation (D120): draft proposals for the open patterns, in score order, until the
-    run's budget is spent. Every rule is proven
-    against its own test cases before it's proposed; a person approves it."""
-    from steno.curation.drafters import get_drafter
-    from steno.curation.run import curate as run_curation
-    from steno.db.models import RuleProposal
-    from steno.db.session import session_scope
-
-    with session_scope() as session:
-        run = run_curation(
-            session, limit=limit, fingerprints=fingerprint or None,
-            drafter=get_drafter(drafter, model), budget_usd=budget, model=model,
-        )  # fmt: skip
-        typer.echo(f"curation run {run.id}: {run.status}, ${run.spent_usd:.2f} spent, {run.stats}")
-        for p in session.query(RuleProposal).filter(RuleProposal.run_id == run.id):
-            typer.echo(f"  #{p.id} {p.kind.value:<12} {p.status.value:<13} {p.title}")
-            typer.echo(f"      {p.summary}")
-
-
-@app.command()
-def proposals(status: str = typer.Option(None, help="ready, needs_person, failed, …")) -> None:
-    """Rule proposals waiting for review (or in a status)."""
-    from steno.db.models import ProposalStatus, RuleProposal
-    from steno.db.session import session_scope
-
-    with session_scope() as session:
-        q = session.query(RuleProposal).order_by(RuleProposal.id.desc())
-        if status:
-            q = q.filter(RuleProposal.status == ProposalStatus(status))
-        for p in q.limit(50):
-            typer.echo(
-                f"#{p.id} {p.kind.value:<12} {p.status.value:<13} ${p.cost_usd:.2f} {p.title}"
-            )
-
-
-@app.command()
-def proposal(proposal_id: int) -> None:
-    """One proposal in full: summary, the rule, its tests and their results."""
-    import json
-
-    import yaml
-
-    from steno.db.models import RuleProposal
-    from steno.db.session import session_scope
-
-    with session_scope() as session:
-        p = session.get(RuleProposal, proposal_id)
-        if p is None:
-            raise typer.BadParameter(f"no proposal #{proposal_id}")
-        typer.echo(f"#{p.id} {p.kind.value} · {p.status.value} · {p.title}")
-        typer.echo(f"patterns: {', '.join(p.fingerprints)}")
-        typer.echo(f"facet: {p.facet}   pack: {p.target_pack}   drafter: {p.drafter}   "
-                   f"${p.cost_usd:.2f}, {p.turns} turns")  # fmt: skip
-        typer.echo(f"\n{p.summary}\n")
-        if p.rule:
-            typer.echo(f"--- rule\n{p.rule}")
-        if p.tests:
-            typer.echo(f"--- tests\n{yaml.safe_dump(p.tests, sort_keys=False)}")
-        if p.proof:
-            typer.echo(f"--- proof\n{json.dumps(p.proof, indent=1)}")
-        for flag in p.flags:
-            typer.echo(f"! {flag}")
-
-
-@app.command()
-def approve(
-    proposal_id: int,
-    by: str = typer.Option(None, help="Who approves (default: your git user)"),
-) -> None:
-    """Approve a ready proposal: a rule is written into its pack with its tests, which must
-    pass, and published (D131: the steno/rules pull request, or a push, per destination);
-    "ignore" ignores the pattern; "vocabulary" sends it to the backlog."""
-    from steno.curation.approve import approve as approve_proposal
-    from steno.db.models import RuleProposal
-    from steno.db.session import session_scope
-
-    with session_scope() as session:
-        p = session.get(RuleProposal, proposal_id)
-        if p is None:
-            raise typer.BadParameter(f"no proposal #{proposal_id}")
-        out = approve_proposal(session, p, by or _git_user())
-        typer.echo(f"#{p.id} approved ({p.kind.value})")
-        for k, v in out.items():
-            typer.echo(f"  {k}: {v}")
-
-
-@app.command()
-def reject(
-    proposal_id: int,
-    why: str = typer.Option(..., help="Why: kept with the proposal and the pattern"),
-    by: str = typer.Option(None, help="Who rejects (default: your git user)"),
-) -> None:
-    """Reject a proposal; its pattern is rejected and isn't proposed again unless it grows."""
-    from steno.curation.approve import reject as reject_proposal
-    from steno.db.models import RuleProposal
-    from steno.db.session import session_scope
-
-    with session_scope() as session:
-        p = session.get(RuleProposal, proposal_id)
-        if p is None:
-            raise typer.BadParameter(f"no proposal #{proposal_id}")
-        reject_proposal(session, p, by or _git_user(), why)
-        typer.echo(f"#{p.id} rejected")
-
-
-def _git_user() -> str:
-    import subprocess
-
-    out = subprocess.run(["git", "config", "user.name"], capture_output=True, text=True)
-    return out.stdout.strip() or "cli"

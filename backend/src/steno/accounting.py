@@ -23,7 +23,7 @@ from steno.extraction.facts import Extraction
 from steno.resolvers.base import Function, Hook, LibraryCall, Resolvers, UnresolvedCall
 
 # Libraries whose calls can reach the network, a store, or a broker
-IO_LIBRARIES = {
+NETWORK_IO = {
     "aiohttp", "aiokafka", "anthropic", "asyncpg", "atlassian", "boto3", "botocore", "chromadb",
     "confluent_kafka", "elasticsearch", "ftplib", "github", "google.cloud", "grpc", "httpx",
     "jira", "kafka", "langchain", "llama_index.llms", "llama_index.embeddings",
@@ -39,7 +39,10 @@ IO_LIBRARIES = {
     "org.springframework.jms", "org.springframework.kafka", "org.springframework.web.client",
     "org.springframework.web.reactive.function.client", "redis.clients", "software.amazon",
     "java.net.http", "java.net.HttpURLConnection", "java.sql",
-    # Files: model artifacts, uploads, exports are stores too
+}  # fmt: skip
+# Files: model artifacts, uploads, exports are stores too (D101). A call into one that no rule
+# explains is still a gap, ranked below the network, messaging, and databases (D146)
+FILE_IO = {
     "builtins.open", "pathlib.Path.open", "pathlib.Path.read_text", "pathlib.Path.write_text",
     "pathlib.Path.read_bytes", "pathlib.Path.write_bytes", "shutil", "pickle.load",
     "pickle.dump", "joblib.load", "joblib.dump", "onnxruntime.InferenceSession", "torch.load",
@@ -47,6 +50,7 @@ IO_LIBRARIES = {
     "java.nio.file.Files", "java.io.FileInputStream", "java.io.FileOutputStream",
     "java.io.FileReader", "java.io.FileWriter", "java.io.RandomAccessFile",
 }  # fmt: skip
+IO_LIBRARIES = NETWORK_IO | FILE_IO
 # Never an entry point or an integration point on their own
 HARMLESS = {
     "java.", "javax.annotation", "lombok", "com.fasterxml.jackson", "org.mapstruct",
@@ -94,6 +98,10 @@ class Ledger:
         self.providers = self._providers(x, rs)
         self.provided: dict[str, list[tuple[LibraryCall, str]]] = defaultdict(list)
         self.calls: list[tuple[LibraryCall, bool]] = []  # I/O-capable calls, explained?
+        # Calls into every other library that isn't harmless, explained? What the coverage
+        # report's library gaps are counted from (D146): an internal client wrapper, or a
+        # vendor SDK no list knows, can do I/O nobody declared
+        self.others: list[tuple[LibraryCall, bool]] = []
         self.hooks: list[tuple[Hook, bool]] = []  # framework hooks, explained?
         self._marks: dict[str, list[str]] = defaultdict(list)
         if rs:
@@ -106,8 +114,13 @@ class Ledger:
                     exact_io = any(call.symbol.split("#", 1)[0] == i for i in self.io)
                     if _exception(call.symbol) or (_constructor(call.symbol) and not exact_io):
                         continue  # reading an exception's message, building a client: not I/O
-                    if self.is_io(call.symbol) and not self.is_harmless(call.symbol):
+                    io = self.is_io(call.symbol)
+                    if self.is_harmless(call.symbol) and not io:
+                        continue
+                    if io:
                         self.calls.append((call, self._explained(call)))
+                    elif not _constructor(call.symbol):
+                        self.others.append((call, self._at_rule(call)))
                 for hook in getattr(r, "hook_candidates", lambda: [])():
                     for symbol in hook.entries:
                         if hook.target not in self._marks[symbol]:
@@ -122,13 +135,24 @@ class Ledger:
     # ------------------------------------------------------------ classification
 
     def is_io(self, symbol: str | None) -> bool:
-        return bool(symbol) and any(_within(symbol, lib) for lib in self.io)  # type: ignore[arg-type]
+        """Declared I/O, unless a more specific harmless entry says otherwise: `java.` is
+        harmless, but `java.net.http` and `java.nio.file.Files` are I/O."""
+        if not symbol:
+            return False
+        io = _longest(symbol, self.io)
+        return io > 0 and io >= _longest(symbol, self.harmless)
 
     def is_harmless(self, symbol: str | None) -> bool:
         return bool(symbol) and any(
             _within(symbol, h) or (h.endswith(".") and symbol.startswith(h))  # type: ignore[union-attr]
             for h in self.harmless
         )
+
+    def _at_rule(self, call: LibraryCall) -> bool:
+        """A rule matched on the call's own lines."""
+        assert self.rs
+        lines = self.origins.get(self.rs.rel(call.function.path), set())
+        return any(line in lines for line in range(call.line, call.end_line + 1))
 
     def _explained(self, call: LibraryCall) -> bool:
         """A rule matched on the call's lines (the call became a fact)."""
@@ -228,6 +252,18 @@ def _exception(symbol: str) -> bool:
     return owner.rsplit(".", 1)[-1].endswith(("Exception", "Error"))
 
 
+def _longest(symbol: str, prefixes: set[str]) -> int:
+    """The length of the longest prefix `symbol` is within; 0 for none."""
+    return max(
+        (
+            len(p)
+            for p in prefixes
+            if _within(symbol, p) or (p.endswith(".") and symbol.startswith(p))
+        ),
+        default=0,
+    )
+
+
 def _within(symbol: str, prefix: str) -> bool:
     """`org.springframework.data.jpa.repository.JpaRepository#save` is within
     `org.springframework.data`, `…JpaRepository`, and `…JpaRepository#save`."""
@@ -241,4 +277,4 @@ def short(target: str) -> str:
     return target.replace("#", ".").rsplit(".", 1)[-1]
 
 
-__all__ = ["HARMLESS", "IO_LIBRARIES", "Gap", "Ledger", "short"]
+__all__ = ["FILE_IO", "HARMLESS", "IO_LIBRARIES", "NETWORK_IO", "Gap", "Ledger", "short"]

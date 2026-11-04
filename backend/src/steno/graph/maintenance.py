@@ -2,8 +2,8 @@
 
 Neo4j must stay rebuildable from Postgres + git (D36), so a reset deletes only the graph:
 every node and edge in Neo4j. What Steno was told and did stays in Postgres (connectors,
-repositories, the identity registry, so Steno IDs survive; claims; coverage patterns; rule
-proposals; job history). After a reset the repositories are marked not ingested, so the next
+repositories, the identity registry, so Steno IDs survive; claims; coverage patterns;
+job history). After a reset the repositories are marked not ingested, so the next
 nightly run (or `--queue`) re-ingests every one and reconcile rebuilds agreement.
 """
 

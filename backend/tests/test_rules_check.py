@@ -1,6 +1,6 @@
 """Checks a drafted rule passes before a person sees it: recall and identity."""
 
-from steno.curation.checks import RuleCheck, run_draft
+from steno.rule_packs.check import RuleCheck, run_draft
 
 HANDLER = """
 id: acme-handler
@@ -58,3 +58,24 @@ def test_problems_say_what_a_reviewer_must_know():
     assert not RuleCheck(files=2, explained=["a", "b"]).problems()
     # Missing some files is shown, but only identity problems keep a rule from "ready"
     assert not RuleCheck(files=2, explained=["a"], missed=["b"]).blocking()
+
+
+def test_a_rule_with_no_surface_fact_or_no_recall_is_blocked():
+    """D147: a rule that states nothing on the surface should be a harmless mark instead, and
+    one that explains none of its pattern isn't the rule for it."""
+    no_surface = RuleCheck(files=2, explained=["a", "b"], surface=False)
+    assert no_surface.blocking()
+    assert any(p.startswith("surface:") for p in no_surface.problems())
+    nothing = RuleCheck(files=3, missed=["a", "b", "c"])
+    assert nothing.blocking()
+    assert nothing.problems() == ["recall: explains none of the 3 files where the pattern occurs"]
+
+
+def test_a_clue_that_completes_a_surface_fact_counts_as_surface():
+    from steno.rule_packs.packs import Rule
+    from steno.rule_packs.surface import on_surface
+
+    table = Rule("t", "p", "java", "code", {}, [{"clue": "table_of", "entity": "@class"}])
+    label = Rule("l", "p", "java", "code", {}, [{"clue": "label", "name": "$X"}])
+    assert on_surface(table, clues=True) and not on_surface(table)
+    assert not on_surface(label, clues=True)
