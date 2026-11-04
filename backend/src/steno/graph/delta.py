@@ -31,8 +31,8 @@ VOLATILE = {
 }
 # Pointers into the code on Steps and Flows (a trace's are its entries' POINTERS)
 NODE_POINTERS = {"file", *POINTERS, "entry_file", "entry_start_line", "entry_end_line"}
-# Written by later stages (cards), never part of a plan
-LATER = ("card",)
+# Written by later stages (cards, generated summaries: D143), never part of a plan
+LATER = ("card", "summary")
 TRACE_FIELDS = {"trace", "trace_files", "trace_symbols", "trace_entries"}
 
 EdgeKey = tuple[str, str, str]

@@ -123,6 +123,15 @@ class Settings(BaseSettings):
     nightly_enabled: bool = True
     nightly_at: str = "02:00"
 
+    # Generated text (D143): summaries for applications, spaces, and the organization. The
+    # provider: claude_agent_sdk (this machine's Claude Code login, or ANTHROPIC_API_KEY; for
+    # development), or fake (tests). An organization's gateway (Azure) comes later. The model
+    # is still Open, decided from a dry run's token counts
+    llm_provider: str = "claude_agent_sdk"
+    llm_model: str = "claude-sonnet-5-5"
+    # Generate summaries in the job's cards stage (off: only `steno summaries` writes them)
+    summaries_enabled: bool = True
+
     api_host: str = "127.0.0.1"
     api_port: int = 8000
     cors_origins: list[str] = ["http://localhost:5173"]

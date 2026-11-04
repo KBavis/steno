@@ -58,6 +58,8 @@ AGREEMENT = {
 }
 CHARS_PER_TOKEN = 4
 OUTLINE = 25  # steps a flow's outline aims for, before folding deeper levels
+DIGEST_MATCH_ITEMS = 3  # items per digest line shown when no item has every word
+MORE = re.compile(r" \(\+\d+ more\)$")  # a digest line's "(+N more)"
 HEAD_TTL = 300  # seconds a repository's remote head is trusted before it's read again
 _heads: dict[int, tuple[float, str | None]] = {}  # repository id → (when read, head commit)
 
@@ -240,8 +242,15 @@ class Tools:
             if not h.get("id") or h["id"] in seen:
                 continue
             seen.add(h["id"])
+            why = _digest_matched(h, words)
             hits.append(
-                {"id": h["id"], "kind": h["kind"], "name": h["label"], **self._where(h["id"])}
+                {
+                    "id": h["id"],
+                    "kind": h["kind"],
+                    "name": h["label"],
+                    **self._where(h["id"]),
+                    **({"matched": why} if why else {}),
+                }
             )
         for f in functions:
             if f["id"] in seen:  # named and running a matching function: one hit
@@ -1485,6 +1494,36 @@ def _matched(f: dict[str, Any], words: list[str]) -> str:
     short = f["label"]
     named = all(w in short.lower() for w in words)
     return f"function {short if named else f['symbol']} in {f['flow']}"
+
+
+def _digest_matched(h: dict[str, Any], words: list[str]) -> str | None:
+    """Why a hit matched when its name doesn't say. A flow: the items of its digest (D143) with the
+    words, under their line's heading, e.g. `digest: WRITES git_commit (insert)`. Items with
+    every word, when there are any; else those with some, a few per line. An application,
+    space, or organization: its summary's line."""
+    terms = [w.lower() for w in words]
+    if all(t in str(h.get("label", "")).lower() for t in terms):
+        return None
+    if not h.get("digest"):
+        # An application, space, or organization found by its generated summary (D143)
+        summary = str(h.get("summary") or "").lower()
+        if summary and any(t in summary for t in terms):
+            return f"summary: {h.get('summary_line') or h['summary']}"
+        return None
+    lines = []
+    for line in h["digest"].splitlines()[1:]:
+        heading, _, rest = line.partition(" ")
+        items = [MORE.sub("", i) for i in rest.strip().split(", ")]
+        lines.append((heading, items))
+    for test, cap in ((all, None), (any, DIGEST_MATCH_ITEMS)):
+        found = []
+        for heading, items in lines:
+            hit = [i for i in items if test(t in i.lower() for t in terms)][:cap]
+            if hit:
+                found.append(f"{heading} {', '.join(hit)}")
+        if found:
+            return "digest: " + "; ".join(found)
+    return None
 
 
 def _meanings(uses: list[dict[str, Any]]) -> dict[str, str]:

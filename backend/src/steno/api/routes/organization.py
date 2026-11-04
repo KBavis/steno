@@ -1,12 +1,21 @@
-"""The organization this deployment serves (one row, D34) and its onboarding state."""
+"""The organization this deployment serves (one row, D34), its onboarding state, and its
+settings (the LLM that writes summaries, D143)."""
 
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException
 
 from steno.api.deps import SessionDep, sync_graph
-from steno.api.schemas import OrganizationIn, OrganizationOut
+from steno.api.schemas import (
+    LlmModelOption,
+    LlmProviderOption,
+    OrganizationIn,
+    OrganizationOut,
+    OrganizationSettingsIn,
+    OrganizationSettingsOut,
+)
 from steno.db.models import Organization
+from steno.llm.choice import PROVIDERS, check, llm_choice
 
 router = APIRouter(prefix="/organization", tags=["organization"])
 
@@ -38,3 +47,33 @@ def complete_onboarding(session: SessionDep) -> Organization:
     org.onboarded_at = datetime.now(UTC)
     session.flush()
     return org
+
+
+@router.get("/settings", response_model=OrganizationSettingsOut)
+def get_settings_(session: SessionDep) -> OrganizationSettingsOut:
+    return OrganizationSettingsOut(
+        llm=llm_choice(session),
+        llm_options=[
+            LlmProviderOption(
+                id=pid,
+                label=p["label"],
+                hint=p["hint"],
+                models=[LlmModelOption(id=m, label=label) for m, label in p["models"].items()],
+            )
+            for pid, p in PROVIDERS.items()
+        ],
+    )
+
+
+@router.put("/settings", response_model=OrganizationSettingsOut)
+def put_settings(body: OrganizationSettingsIn, session: SessionDep) -> OrganizationSettingsOut:
+    """Choose the provider and model that write summaries. Summaries already written stay
+    until their inputs change."""
+    org = get_organization(session)
+    try:
+        check(body.llm.provider, body.llm.model)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    org.settings = {**(org.settings or {}), "llm": body.llm.model_dump()}
+    session.flush()
+    return get_settings_(session)

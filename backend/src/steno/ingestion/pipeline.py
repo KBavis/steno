@@ -13,6 +13,7 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -466,8 +467,50 @@ def _previous_triage(ctx: JobContext) -> dict[tuple[str, str], CoverageStatus]:
 
 
 def cards(ctx: JobContext) -> dict[str, Any]:
-    """Generate LLM purposes and narratives. In a dry run: count tokens and project cost only."""
-    raise Skip("not built yet")
+    """LLM summaries for applications, spaces, and the organization (D143; flows get a
+    deterministic digest in the build instead). In a dry run: count tokens and project cost
+    only. Each is written only when its inputs changed; the README is read from the clone."""
+    from steno.llm import LlmUnavailable
+    from steno.llm.choice import provider_for
+    from steno.summaries import summarize
+
+    if not get_settings().summaries_enabled:
+        raise Skip("summaries are turned off (STENO_SUMMARIES_ENABLED)")
+    apps = sorted(
+        {ids.application_id(i.steno_id) for i in ctx.state.get("identities", {}).values()}
+    )
+    if not apps:
+        raise Skip("no applications in this repository")
+    workspace = ctx.workspace
+
+    def read(repo: str, commit: str | None, path: str) -> str | None:
+        file = workspace / path if workspace else None
+        if file is None or not file.is_file():
+            return None
+        return file.read_text(errors="replace")
+
+    try:
+        report = summarize(
+            get_driver(),
+            database(),
+            ctx.session,
+            provider_for(ctx.session),
+            applications=apps,
+            read=read,
+            job_id=ctx.job.id,
+            dry_run=ctx.dry_run,
+        )
+    except LlmUnavailable as exc:
+        raise Skip(f"no summaries written: {exc}") from exc
+    # What this stage spent, on its own row (the dry-run report reads it per stage)
+    stage = ctx.session.scalar(
+        select(IngestionStage).where(
+            IngestionStage.job_id == ctx.job.id, IngestionStage.stage == StageName.CARDS
+        )
+    )
+    if stage is not None:
+        stage.llm_cost = Decimal(str(round(report.cost_usd, 6)))
+    return report.as_dict()
 
 
 STAGES: list[tuple[StageName, StageFn]] = [

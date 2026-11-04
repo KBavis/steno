@@ -116,7 +116,7 @@ Other points:
 | `Interface` + `KafkaTopic` / `Queue` | **a Space**, never an Application | `name` | See [Topic ownership](#topic-ownership) |
 | `Interface` + org-defined label | a Space, like topics | `name` (the shared key) | An org's own communication channel, e.g. `:PxChannel`. See [Communication of any kind](#communication-of-any-kind-decided). |
 | `Schedule` | Application | `kind` (cron / fixed-rate / fixed-delay), `expression` | A trigger that isn't an interface |
-| `Flow` | Application | `name`, `entry_symbol`, `entry_file`, `entry_lines`, `trace`, `trace_files`, `trace_symbols` (see [Trace entries](#trace-entries)), `trigger_kind`, `inferred`, `incomplete`, `unresolved_calls`; later `primary_entity`, `operation`, `technical` (decisions I9, I10; `v2`) | See [Flows](#6-flows) |
+| `Flow` | Application | `name`, `entry_symbol`, `entry_file`, `entry_lines`, `trace`, `trace_files`, `trace_symbols` (see [Trace entries](#trace-entries)), `trigger_kind`, `inferred`, `incomplete`, `unresolved_calls`, `digest` (see [the flow digest](#the-flow-digest-built-d143)); later `primary_entity`, `operation`, `technical` (decisions I9, I10; `v2`) | See [Flows](#6-flows) |
 | `Step` | Flow | `path` (e.g. `1.1.3`), `label` (LLM phrasing), `branch_raw`, `branch` (LLM phrasing), `effects` | One significant step of a flow (L2). Also carries its function's `symbol`, `file`, and `lines` at the ingested commit; its effects are edges from the Step. |
 | `DataStore` + `Relational` / `Document` / `KeyValue` / `Search` / `Graph` / `Vector` | Space | `vendor` (Postgres, Oracle, Mongo, Redis, …), `version`, `host`, `database` | The **category is a label**, because it changes the model (relational stores have schemas and tables; document and vector stores have collections). The **vendor is a property**, because it's an open-ended list that doesn't change the model. |
 | `Schema` | DataStore | `name` | Not built: a property of the table today; a node in Data V2 (`v2`) |
@@ -204,7 +204,7 @@ Which Project introduced or changed a fact isn't a property. It's recorded later
 
 ### Card properties (searchable nodes only)
 
-**Not built yet:** the cards stage is skipped, so no node has a card today and search matches names only. Cards will exist **only** on node types that search covers: **Flow, Application, Space, Organization, Interface, Entity, Table** (data stores, external systems, and interceptors are searched by name, D104, D116). Steps, traces, modules, files, and edges have no card. These nodes also carry the `:Searchable` label, so one vector index and one full-text index cover them all.
+**Cards aren't built yet;** flows carry a deterministic `digest`, and applications, spaces, and the organization an LLM-written `summary` (D143), both searched by keyword. Cards will exist **only** on node types that search covers: **Flow, Application, Space, Organization, Interface, Entity, Table** (data stores, external systems, and interceptors are searched by name, D104, D116). Steps, traces, modules, files, and edges have no card. These nodes also carry the `:Searchable` label, so one vector index and one full-text index cover them all.
 
 | Property | Purpose |
 |---|---|
@@ -212,6 +212,9 @@ Which Project introduced or changed a fact isn't a property. It's recorded later
 | `card_embedding` | The card's vector, which the vector index searches to find candidates for a question |
 | `card_embedding_model` | Which model produced the vector. The question must be embedded with the same model; changing models means re-embedding. |
 | `card_hash` | A fingerprint of the inputs the card was built from. On re-ingestion, an unchanged fingerprint means the card and its embedding are still valid, so nothing is re-embedded or re-checked. |
+| `summary`, `summary_line` | **Built** on Application, Space, and Organization (D143): the LLM-written summary (a few sentences) and its one-sentence line for routing. Searched by keyword. See [Generated summaries](./retrieval-and-mcp.md#generated-summaries-built-d143) |
+| `summary_hash`, `summary_model` | The hash of the instructions and inputs the summary was written from, and the model that wrote it |
+| `digest` | **Built** on Flow (D143): see [the flow digest](#the-flow-digest-built-d143) |
 
 ### Module roles
 
@@ -485,7 +488,36 @@ SOURCE   run_data_source_job  apps/backend/app/api/routers/job.py:43 @ ac93a3b
 - The card is **bounded by construction**, however large the flow is. Detail lives in L2 and L3, one call away.
 - **Cards are written during the run, from the in-memory analysis.** The worker still has the clone, the full call graph, and every function's source when the cards stage runs, so nothing about cards depends on storing functions.
 
+#### The flow digest (Built, D143)
+
+**Flows get no LLM purpose up front.** Each flow carries a deterministic **`digest`** instead: a short text of what starts it and what it does across its application's edge, built from the flow's trigger, its rollup edges, the entities on its interfaces and tables, and its trace. Keyword search indexes it, and routing reads it (Jev's Q4, D142). Built at the end of the graph build, in `backend/src/steno/graph/digest.py`.
+
+```
+POST /api/projects/{project_id}/data-sources/{data_source_id} · contextualized-backend
+TRIGGER   http POST /api/projects/{project_id}/data-sources/{data_source_id}
+DOC       Associate an existing Data Source with a Project. · Link an existing DataSource to this Project. (+1 more)
+WRITES    chroma @ localhost (insert), chroma_collection (update), … (+2 more)
+READS     chroma @ localhost, chroma_collection (select), data_source (select), … (+4 more)
+CALLS     api.github.com, raw.githubusercontent.com, Unknown host · JiraDataProvider (jira.py)
+ENTITIES  ChromaCollection, DocstoreChunk, DataSource, … (+6 more)
+UNIQUE    link_data_source, ProjectService.link_data_source_to_project, IngestibleDataProvider.is_ingestible
+FUNCTIONS link_data_source, ProjectService.aget_project_by_id, ProjectService.link_data_source_to_project, … (+122 more)
+NOTE      70 calls Steno couldn't follow: the flow may do more
+```
+
+(The example is shortened with "…"; a real line shows up to 8 items.)
+
+- **Lines:** a headline (the flow's name and application), `TRIGGER` (its kind, name, and access; `unknown` for an inferred entry point, with the framework that calls it), `DOC`, `WRITES`, `READS`, `CALLS`, `PRODUCES`, `CONSUMES`, `ENTITIES`, `UNIQUE`, `FUNCTIONS`, and `NOTE`. A line with nothing to say is left out.
+- **`DOC`: what the code says about itself.** The first sentence of the docstring or Javadoc of the entry function and of the steps it calls directly (functions that lead to an effect, not helpers), at most 3. Route summaries from OpenAPI annotations aren't read yet (no rule captures them).
+- **`UNIQUE`: what tells it apart.** The targets and functions no other flow in the same application touches or runs. Flows that share most of their code (three ways into the same job runner) get near-identical effect lines; their own entry functions and steps still differ.
+- **Order:** writes before reads. Calls list another application's interfaces first (with the application that serves it), then named systems, then hosts Steno can't name. Functions are listed nearest the entry first (what the entry calls directly says more about the flow's purpose than helpers deep below), in call order within a level.
+- **Bounded by construction:** at most 8 targets per line and 12 function names, each line saying how many more there are, and long names are cut. A flow with 2,000 functions has a digest about the size of one with 5 (about 1,600 characters at most on Contextualized).
+- **Gaps stay visible:** `NOTE` says how many calls Steno couldn't follow (D71).
+- **No pointers:** the digest has no line numbers, so it changes only when the flow's facts change. Rebuilt on every run.
+
 #### How the purpose and narrative are generated
+
+> **Revised by D143:** flows no longer get an LLM purpose and narrative at initial ingestion; they get the deterministic [digest](#the-flow-digest-built-d143). A purpose written lazily (the first time a flow is a candidate for a question and its digest isn't enough) is Proposed. The design below is kept for that case.
 
 - **At initial ingestion, every flow gets an LLM purpose and narrative** (Decided). Without them, semantic search has nothing meaningful to match, and declared summaries are often missing or vague.
 - **LLM input:** the L1 signature, the L2 skeleton with raw branch conditions, declared docs (route summaries, docstrings, Javadoc, OpenAPI), the code of the significant steps (bounded), and the downstream flows' L0 purposes.

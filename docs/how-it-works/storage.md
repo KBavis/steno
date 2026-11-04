@@ -104,7 +104,7 @@ erDiagram
 
 | Table | Columns |
 |---|---|
-| `organization` | `id` (always 1), `name`, `description`, `onboarded_at` |
+| `organization` | `id` (always 1), `name`, `description`, `onboarded_at`, `settings` (JSON: what the organization chooses for its deployment, e.g. `llm.provider` and `llm.model` for generated summaries) |
 | `connector` | `id`, `name`, `kind` (bitbucket / github / gitlab), `base_url`, `scope` (json: workspace, project, org), `credentials_ref` |
 | `repository` | `id`, `connector_id`, `space_id`, `name`, `clone_url`, `default_branch`, `selection` (included / discovered / excluded), `last_ingested_sha`, `status` |
 | `space` | `id`, `parent_id`, `name`, `description` |
@@ -125,7 +125,7 @@ erDiagram
 
 | Table | Why |
 |---|---|
-| `organization` | The organization this deployment serves: one row, entered in onboarding. The root of the space tree. Projected into Neo4j. |
+| `organization` | The organization this deployment serves: one row, entered in onboarding. The root of the space tree. Projected into Neo4j. Its `settings` are chosen on the Settings page (onboarding asks them later). |
 | `connector` | A source system plus a scope (a Bitbucket workspace or project, a GitHub org). `credentials_ref` points into a secret manager; secrets are never stored. |
 | `repository` | The include list now, discovery later (`selection`: included / discovered / excluded). `space_id` places it in the org. `last_ingested_sha` decides whether the nightly run includes it. |
 | `space` | Admin-declared spaces, which can nest. Projected into Neo4j. |
