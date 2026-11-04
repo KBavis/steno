@@ -140,7 +140,7 @@ sequenceDiagram
 - **The delta** (added, removed, changed) is logged in `fact_change`. Re-ingesting the same commit must produce **zero rows**: an automated idempotency test.
 - **The write is many small Neo4j transactions (D135), not one.** Neo4j's memory then depends on the size of a chunk, not of the repository. Every write merges on the stable ID, so doing one twice is harmless; nothing is removed until everything has been written; and the repository is marked *writing*, *complete*, or *incomplete*. A write that stopped partway is finished by the next run, whose comparison with the graph finds only what is left. See [stages §7](./stages.md#7-write) and [Large repositories §8a](./large-repositories.md#8a-writing-the-graph-to-neo4j-in-chunks-d135).
 
-**Steno owns re-ingestion (Decided, D11).** Only Steno's rules produce facts in Steno's model. Contextualized later adds *which project* and *why*; it never supplies structural facts.
+**Steno owns re-ingestion (Decided, D11).** Only Steno's rules produce facts in Steno's model. The Projects pillar (`v1`) adds *which project* and *why*; it never supplies structural facts.
 
 ## 6. Where the time goes
 
