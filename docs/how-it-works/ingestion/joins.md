@@ -94,6 +94,6 @@ A config repository describes *other* applications. Its facts attach to **what t
 | **Join rate** | Share of sends that reach a known receiver or a known external system |
 | **Unjoined sends** | Calls or publishes with no receiver: a target not ingested, a host that's runtime data, or a missed receiver rule |
 | **Orphan receivers** | Endpoints or consumers nothing sends to: unused, called from outside (public), or a missed sender rule |
-| **Cross-app inconsistencies** | A topic produced but never consumed (or the reverse); a call to an endpoint the target doesn't expose. Built once several applications are ingested (stage B). |
+| **Cross-app inconsistencies** | A topic produced but never consumed (or the reverse); a call to an endpoint the target doesn't expose. Planned with the coverage report rebuild (Proposed, [coverage report §6.3](./coverage-report.md#63-the-plan)); it needs several applications ingested. |
 
 See [Trust](../../concepts/trust.md#4-every-signal-that-something-is-incomplete).

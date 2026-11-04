@@ -7,7 +7,7 @@ The format of Steno's rules and rule packs: how a rule finds code, what it emits
 > - Rules never reference each other. Facts spread across files are combined by **clues**, labeled with the symbol they're about, and a fixed set of **assemblers**.
 > - Rules come in versioned **packs**, grouped by ecosystem, auto-enabled by dependencies or imports. Every rule ships with **test cases**.
 > - Most organizations need only their framework packs plus an **org pack per in-house framework**. See the [catalog](#10-pack-catalog) for what exists.
-> - Rules are written by hand, with the `rule-pack-author` skill, or drafted by Steno's [rule curation](./rule-curation.md) job and approved by a person (D120). Either way, they're YAML in git.
+> - Rules are written by hand or with the `rule-pack-author` skill, which also works the coverage report's open items ([rule curation](./rule-curation.md), D147). Either way, a person approves them and they're YAML in git.
 
 ```mermaid
 flowchart LR
@@ -430,12 +430,12 @@ entry_points:
 
 ## 8. Writing rules: by hand, with the skill, or by curation (Decided)
 
-A person approves every rule, whether they write the YAML by hand, use an AI assistant, or approve a draft from Steno's rule curation job.
+A person approves every rule, whether they write the YAML by hand or with an AI assistant.
 
 - **By hand:** read this doc, write the rule and its tests, run `steno rules test`.
 - **With the `rule-pack-author` skill** (`.claude/skills/rule-pack-author/`): describe what you want recognized ("topics declared under `app.kafka.topics` in `application.yml` are Kafka topics"). The skill finds real examples in the code, maps them to existing node and edge types, writes the rule and its tests, checks how often the pattern matches, and **proposes** any new node, edge, or clue type instead of inventing one silently. Schema changes are design decisions.
 
-- **By rule curation** (D120): Steno's own job drafts rules for what the coverage report couldn't explain, proves each draft (its tests, a shadow run across the organization), and queues it for a person to approve in plain English. Approved rules are committed as YAML, authored by Steno. The job and the skill share one authoring kit. See [Rule curation](./rule-curation.md).
+- **By working the coverage report** (D147): the same skill takes the report's open items in order, learns what each needs (the library's repository, a local clone, public source), writes the rule, proves it with `steno rules test` and `steno rules check`, opens the pull request, and marks the patterns. Steno runs no drafting job of its own. See [Rule curation](./rule-curation.md).
 
 ## 9. Rules, assemblers, and plugins
 

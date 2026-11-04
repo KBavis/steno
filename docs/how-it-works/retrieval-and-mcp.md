@@ -418,7 +418,7 @@ To be validated against real usage. Every tool call is logged in `tool_call` (gr
 
 ## 7. LLM use and cost
 
-- **An LLM writes text and drafts rules, never facts:** flow purposes and narratives, application, space, and organization cards, glossary definitions on request, and rule drafts that a person approves after Steno proves them ([rule curation](./ingestion/rule-curation.md), D120). Steno runs no LLM at query time. (Decided)
+- **An LLM writes text and drafts rules, never facts:** flow purposes and narratives, application, space, and organization cards, glossary definitions on request, and rule drafts, written by the `rule-pack-author` skill and approved by a person after they're proven ([rule curation](./ingestion/rule-curation.md), D147). Steno runs no LLM at query time. (Decided)
 - **Every flow gets an LLM-written purpose and narrative** at initial ingestion, on top of its deterministic signature (D24). Applications, spaces, and the organization get LLM cards. Interfaces, entities, and tables get deterministic cards. Functions get none.
 - **Levers for scale:** a small model by default, the Batch API (50% cheaper), and prompt caching (flows in one application share a cached prefix). On re-ingestion, a decision (Jev I5 later, a stand-in now) checks whether a flow's purpose is still accurate before anything is regenerated.
 - **Output is cached by the hash of its inputs** (`llm_output`), so unchanged inputs are never paid for twice, and Neo4j can be rebuilt without re-spending.
