@@ -719,6 +719,8 @@ class GraphViews:
                 "label": row["node"].get("name"),
                 "score": row["score"],
                 "digest": row["node"].get("digest"),
+                "summary": row["node"].get("summary"),
+                "summary_line": row["node"].get("summary_line"),
             }
             for row in self._read(
                 "CALL db.index.fulltext.queryNodes('searchable_text', $q) YIELD node, score "

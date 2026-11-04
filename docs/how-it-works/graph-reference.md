@@ -204,7 +204,7 @@ Which Project introduced or changed a fact isn't a property. It's recorded later
 
 ### Card properties (searchable nodes only)
 
-**Not built yet:** the cards stage is skipped, so no node has a card today and search matches names only. Cards will exist **only** on node types that search covers: **Flow, Application, Space, Organization, Interface, Entity, Table** (data stores, external systems, and interceptors are searched by name, D104, D116). Steps, traces, modules, files, and edges have no card. These nodes also carry the `:Searchable` label, so one vector index and one full-text index cover them all.
+**Cards aren't built yet;** flows carry a deterministic `digest`, and applications, spaces, and the organization an LLM-written `summary` (D143), both searched by keyword. Cards will exist **only** on node types that search covers: **Flow, Application, Space, Organization, Interface, Entity, Table** (data stores, external systems, and interceptors are searched by name, D104, D116). Steps, traces, modules, files, and edges have no card. These nodes also carry the `:Searchable` label, so one vector index and one full-text index cover them all.
 
 | Property | Purpose |
 |---|---|
@@ -212,6 +212,9 @@ Which Project introduced or changed a fact isn't a property. It's recorded later
 | `card_embedding` | The card's vector, which the vector index searches to find candidates for a question |
 | `card_embedding_model` | Which model produced the vector. The question must be embedded with the same model; changing models means re-embedding. |
 | `card_hash` | A fingerprint of the inputs the card was built from. On re-ingestion, an unchanged fingerprint means the card and its embedding are still valid, so nothing is re-embedded or re-checked. |
+| `summary`, `summary_line` | **Built** on Application, Space, and Organization (D143): the LLM-written summary (a few sentences) and its one-sentence line for routing. Searched by keyword. See [Generated summaries](./retrieval-and-mcp.md#generated-summaries-built-d143) |
+| `summary_hash`, `summary_model` | The hash of the instructions and inputs the summary was written from, and the model that wrote it |
+| `digest` | **Built** on Flow (D143): see [the flow digest](#the-flow-digest-built-d143) |
 
 ### Module roles
 

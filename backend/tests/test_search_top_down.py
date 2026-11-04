@@ -63,3 +63,13 @@ def test_a_flow_found_by_its_digest_says_which_part_matched():
     # Its name already says why
     assert _digest_matched(hit, ["jobs"]) is None
     assert _digest_matched({"label": "x"}, ["job"]) is None
+
+
+def test_an_application_found_by_its_summary_shows_its_line():
+    hit = {
+        "label": "budget-app",
+        "summary": "Links bank accounts through Plaid to track transactions.",
+        "summary_line": "Backend for a personal budgeting app.",
+    }
+    assert _digest_matched(hit, ["plaid"]) == "summary: Backend for a personal budgeting app."
+    assert _digest_matched(hit, ["kafka"]) is None

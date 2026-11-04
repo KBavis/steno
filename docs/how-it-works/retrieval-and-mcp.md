@@ -9,7 +9,7 @@ How agents get context out of Steno quickly and accurately: the MCP tools, searc
 > - **How the tools work together** ([§5](#how-the-tools-work-together-built)): top-down, `search` → `where` → `scope` → `get_node` → `get_flow` → `view_flow_code`, reading `completeness` and `agreement` before claiming anything is complete. The server sends this to agents as its MCP instructions when they connect.
 > - **No file contents are stored:** code is read from the git host at the ingested commit; code search goes through the git host's search API.
 > - **Breadth, not depth** ([§4](#breadth-and-depth-decided-d119)): Steno answers *what and where* and serves the code; the consuming agent reasons, and clones only when a task needs it. Every answer that cites code says which `sources` to fetch. What Steno stores stops at five layers: placement, surface, reach, search text, pointers (D136).
-> - **Next:** LLM-written summaries for applications, spaces, and the organization, and the `routing` block in `search` (D142, D143). Flows get a deterministic digest, not an LLM purpose. **Later:** vector search (after the cost dry run). The routing design below describes the end state.
+> - **Built (D143):** a deterministic digest on every flow, and LLM-written summaries for applications, spaces, and the organization, both searched by keyword. **Next:** the `routing` block in `search` (D142). **Later:** vector search (after the cost dry run). The routing design below describes the end state.
 
 ```mermaid
 flowchart LR
@@ -125,11 +125,20 @@ This is structural retrieval, which embeddings alone can't do. Combined with Jev
 | Node | Card contents | Written by |
 |---|---|---|
 | **Flow** | The **digest** (D143): trigger, what it writes, reads, calls, and produces, the entities it uses, its function names, its application. See the [flow digest](./graph-reference.md#the-flow-digest-built-d143). | **Deterministic, no LLM** (built). A purpose written lazily, the first time a flow is a candidate and its digest isn't enough, is Proposed (D143) |
-| **Application, Space, Organization** | Purpose, key flows and interfaces, ins and outs | LLM (few nodes, high value, and routing depends on them) |
+| **Application, Space, Organization** | `summary` (3–6 sentences: what it's for in the domain's words, then how) and `summary_line` (one sentence, for routing). An application's is written from its README, its ways in (each flow with its `DOC` line), its ways out, who uses it, and its entities; a space's from its applications' summaries; the organization's from its spaces'. See [Generated summaries](#generated-summaries-built-d143). | **LLM, built** (few nodes, high value, and routing depends on them) |
 | **Interface, Entity, Table, Module** | Facts and neighbors | Deterministic template |
 
 - **Why flows get no LLM purpose up front (D143):** an organization has thousands of flows, so an LLM purpose for each would make cost follow the number of flows rather than the questions asked. The digest is free, rebuilt on every run, and enough for keyword search and Jev's Q4; the LLM writes the few summaries routing reads first (applications, spaces, the organization).
 - **Keeping summaries affordable:** they're rewritten only when their inputs change (a hash of them), and a dry run counts tokens before any spend.
+#### Generated summaries (Built, D143)
+
+- **Bottom up, in the job's `cards` stage:** the repository's applications, then the spaces they belong to, then the organization. `steno graph summaries [--repo R] [--dry-run]` does the same for the graph as it is (the README read from the git host at the ingested commit).
+- **Written only when the inputs change:** the instructions plus the inputs are hashed, and the text is cached in `llm_output` by that hash, so an unchanged application costs nothing and a rebuilt graph gets its summaries back without new spend. A summary is never erased by the write stage (it's written after the plan, like cards). Changing the instructions rewrites every summary of that kind.
+- **Bounded inputs:** at most 150 flows, 40 targets per kind of way out, 60 entities, and 4,000 characters of README per application; 80 applications per space. Measured on our four applications: about 7,400 input tokens for the largest application (Steno), 6,000 for the space.
+- **Grounded:** the instructions say to use only the inputs, to prefer the domain's words, and to say when a purpose isn't stated rather than guess.
+- **Provider** (`STENO_LLM_PROVIDER`): the Claude Agent SDK on the machine's Claude Code login for development; an organization's gateway (Azure) is another provider behind the same interface. The model (`STENO_LLM_MODEL`, Sonnet for now) is still Open, decided from dry-run token counts. Every call is logged in `llm_call` with its tokens and cost, and the stage's cost in `ingestion_stage.llm_cost`.
+- **Not yet:** catalog descriptions as input (no claim type carries them), an admin's correction (ADMIN, cited), and a quality check beyond spot-checking during the trial.
+
 - **Cards are written for two readers:** embeddings and Jev (short, precise, bounded in size), and agents (sources and next steps). Their bounded size keeps **Jev's input bounded** for huge flows (see [Jev §4](../plan/later/jev.md#4-what-jev-sees-state-design)).
 
 ### How embeddings are stored and searched (Decided)
