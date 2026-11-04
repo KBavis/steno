@@ -5,7 +5,7 @@ from test_graph_build import FLOW, _app, _plan
 
 from steno.graph import trace as trace_codec
 from steno.graph.build import GraphPlan
-from steno.graph.digest import FUNCTIONS, LIMIT, flow_digest
+from steno.graph.digest import FUNCTIONS, LIMIT, _Index, flow_digest
 
 F = "flow:shop:POST /orders"
 
@@ -58,9 +58,9 @@ def test_every_flow_the_build_writes_has_a_digest(tmp_path):
     assert lines[0] == "POST /projects/ · demo"
     assert lines[1].split() == ["TRIGGER", "http", "POST", "/projects/"]
     assert any(x.startswith("WRITES") and "project (insert)" in x for x in lines)
-    # Its steps' functions come first, in order, then the rest of the trace
+    # Nearest the entry first: the entry, then what it calls directly, in call order
     functions = next(x for x in lines if x.startswith("FUNCTIONS")).split(None, 1)[1]
-    assert functions.startswith("create_project, ProjectService.create")
+    assert functions.startswith("create_project, ProjectService.describe, ProjectService.create")
     assert "fmt" in functions
     assert all("digest" in n.props for n in plan.nodes.values() if "Flow" in n.labels)
 
@@ -111,3 +111,37 @@ def test_the_same_flow_always_gets_the_same_digest():
     assert flow_digest(_shop(tables=20, functions=40), F) == flow_digest(
         _shop(tables=20, functions=40), F
     )
+
+
+def _line(digest: str, word: str) -> str | None:
+    return next((x.split(None, 1)[1] for x in digest.splitlines() if x.startswith(word)), None)
+
+
+def test_doc_is_what_the_entry_and_its_nearest_steps_say():
+    plan = _shop(functions=3)
+    docs = {
+        "shop.OrderService.f0": "Places an order.",
+        "shop.OrderService.f1": "Opens a session.",  # depth 1 too here: the trace is flat
+    }
+    digest = flow_digest(plan, F, _Index(plan, docs))
+    assert _line(digest, "DOC") == "Places an order. · Opens a session."
+    assert _line(flow_digest(plan, F), "DOC") is None  # no docs: no line
+
+
+def test_unique_tells_apart_flows_that_share_most_of_their_code():
+    plan = _shop(tables=2, functions=3)
+    other = "flow:shop:POST /orders/bulk"
+    plan.node(
+        other,
+        ["Flow"],
+        name="POST /orders/bulk",
+        trace=trace_codec.encode(
+            [{"path": "1", "symbol": "shop.OrderService.f1", "name": "f1", "file": "x"}]
+        ),
+    )
+    plan.edge("BELONGS_TO", other, "app:shop")
+    plan.edge("WRITES_TO", other, "table:t000", rollup=True)
+    # t000 and f1 are shared; t001, f0, and f2 are this flow's own
+    assert _line(flow_digest(plan, F), "UNIQUE") == "t001, OrderService.f0, OrderService.f2"
+    # The application's only flow: nothing to tell apart
+    assert _line(flow_digest(_shop(tables=2), F), "UNIQUE") is None

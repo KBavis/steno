@@ -490,19 +490,25 @@ SOURCE   run_data_source_job  apps/backend/app/api/routers/job.py:43 @ ac93a3b
 **Flows get no LLM purpose up front.** Each flow carries a deterministic **`digest`** instead: a short text of what starts it and what it does across its application's edge, built from the flow's trigger, its rollup edges, the entities on its interfaces and tables, and its trace. Keyword search indexes it, and routing reads it (Jev's Q4, D142). Built at the end of the graph build, in `backend/src/steno/graph/digest.py`.
 
 ```
-POST /api/jobs/projects/{project_id} · contextualized-backend
-TRIGGER   http POST /api/jobs/projects/{project_id}
+POST /api/projects/{project_id}/data-sources/{data_source_id} · contextualized-backend
+TRIGGER   http POST /api/projects/{project_id}/data-sources/{data_source_id}
+DOC       Associate an existing Data Source with a Project. · Link an existing DataSource to this Project. (+1 more)
 WRITES    chroma @ localhost (insert), chroma_collection (update), … (+2 more)
 READS     chroma @ localhost, chroma_collection (select), data_source (select), … (+4 more)
 CALLS     api.github.com, raw.githubusercontent.com, Unknown host · JiraDataProvider (jira.py)
 ENTITIES  ChromaCollection, DocstoreChunk, DataSource, … (+6 more)
-FUNCTIONS run_project_jobs, JobService.run_project_jobs, JobService.create_job, … (+120 more)
-NOTE      65 calls Steno couldn't follow: the flow may do more
+UNIQUE    link_data_source, ProjectService.link_data_source_to_project, IngestibleDataProvider.is_ingestible
+FUNCTIONS link_data_source, ProjectService.aget_project_by_id, ProjectService.link_data_source_to_project, … (+122 more)
+NOTE      70 calls Steno couldn't follow: the flow may do more
 ```
 
-- **Lines:** a headline (the flow's name and application), `TRIGGER` (its kind, name, and access; `unknown` for an inferred entry point, with the framework that calls it), `WRITES`, `READS`, `CALLS`, `PRODUCES`, `CONSUMES`, `ENTITIES`, `FUNCTIONS`, and `NOTE`. A line with nothing to say is left out.
-- **Order:** writes before reads. Calls list another application's interfaces first (with the application that serves it), then named systems, then hosts Steno can't name. Functions list the flow's steps first, in order, then the rest of its trace.
-- **Bounded by construction:** at most 8 targets per line and 12 function names, each line saying how many more there are, and long names are cut. A flow with 2,000 functions has a digest about the size of one with 5 (about 1,300 characters at most on Contextualized).
+(The example is shortened with "…"; a real line shows up to 8 items.)
+
+- **Lines:** a headline (the flow's name and application), `TRIGGER` (its kind, name, and access; `unknown` for an inferred entry point, with the framework that calls it), `DOC`, `WRITES`, `READS`, `CALLS`, `PRODUCES`, `CONSUMES`, `ENTITIES`, `UNIQUE`, `FUNCTIONS`, and `NOTE`. A line with nothing to say is left out.
+- **`DOC`: what the code says about itself.** The first sentence of the docstring or Javadoc of the entry function and of the steps it calls directly (functions that lead to an effect, not helpers), at most 3. Route summaries from OpenAPI annotations aren't read yet (no rule captures them).
+- **`UNIQUE`: what tells it apart.** The targets and functions no other flow in the same application touches or runs. Flows that share most of their code (three ways into the same job runner) get near-identical effect lines; their own entry functions and steps still differ.
+- **Order:** writes before reads. Calls list another application's interfaces first (with the application that serves it), then named systems, then hosts Steno can't name. Functions are listed nearest the entry first (what the entry calls directly says more about the flow's purpose than helpers deep below), in call order within a level.
+- **Bounded by construction:** at most 8 targets per line and 12 function names, each line saying how many more there are, and long names are cut. A flow with 2,000 functions has a digest about the size of one with 5 (about 1,600 characters at most on Contextualized).
 - **Gaps stay visible:** `NOTE` says how many calls Steno couldn't follow (D71).
 - **No pointers:** the digest has no line numbers, so it changes only when the flow's facts change. Rebuilt on every run.
 

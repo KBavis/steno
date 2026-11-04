@@ -260,7 +260,8 @@ class _Builder:
         self._flows()
         self._kinds()
         self._file_nodes()
-        write_digests(self.plan)  # D143: what routing and keyword search read
+        # D143: what routing and keyword search read
+        write_digests(self.plan, {s: f.doc for s, f in self.functions.items() if f.doc})
         self.plan.stats["unmet_joins"] = self.unmet
         return self.plan
 
