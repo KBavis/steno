@@ -27,6 +27,7 @@ from steno.graph.build import GraphPlan
 from steno.resolvers.base import Function, Resolvers
 from steno.resolvers.java import _DOMAINS
 from steno.rule_packs.packs import Pack, Rule
+from steno.rule_packs.surface import on_surface
 from steno.rule_packs.versions import Dependency, in_range, versions_of
 from steno.source.files import is_test_file
 
@@ -69,12 +70,6 @@ STARTS_WORK = re.compile(
     r"(Listener|Handler|Consumer|Subscriber|Receiver|Scheduled|Schedule|Job|Task|Filter|"
     r"Interceptor|Controller|Endpoint|Mapping|Route|Command|Tool|Worker|Processor|Poller)$"
 )
-# What a rule emits that's on the surface (D136): a dropped match of such a rule lost a fact
-SURFACE_NODES = {
-    "Application", "Interface", "HttpEndpoint", "GrpcMethod", "KafkaTopic", "Queue", "Table",
-    "DataStore", "ExternalSystem", "Route", "Gateway", "Schedule",
-}  # fmt: skip
-SURFACE_EDGES = {"CALLS", "PRODUCES", "CONSUMES", "READS_FROM", "WRITES_TO", "STARTS", "EXPOSES"}
 
 
 @dataclass
@@ -390,7 +385,7 @@ def _dropped(x: Extraction, item: Any, rules: dict[tuple[str, str], Rule]) -> in
         if reason in EXPECTED_DROPS:
             continue
         rule = rules.get((origin.pack, origin.rule))
-        if rule is not None and not _on_surface(rule):
+        if rule is not None and not on_surface(rule):
             counted += 1
             continue
         why = reason.split(":", 1)[0] if reason.startswith("where") else reason
@@ -399,32 +394,6 @@ def _dropped(x: Extraction, item: Any, rules: dict[tuple[str, str], Rule]) -> in
             {"file": origin.file, "line": origin.line, "detail": reason}
         )
     return counted
-
-
-def _on_surface(rule: Rule) -> bool:
-    """Whether a rule states something on the surface: an entry point, a claim, or a node or
-    edge an application's surface is made of."""
-    for e in rule.emit:
-        if not isinstance(e, dict):
-            continue
-        if {"entry_point", "claim", "interceptor"} & set(e):
-            return True
-        if _names(e.get("node")) & SURFACE_NODES or _names(e.get("edge")) & SURFACE_EDGES:
-            return True
-        if _names(e.get("to")) & SURFACE_NODES:
-            return True
-    return False
-
-
-def _names(value: Any) -> set[str]:
-    """The type names an emit field holds: `KafkaTopic`, `[Table, View]`, `{KafkaTopic: {…}}`."""
-    if isinstance(value, str):
-        return {value}
-    if isinstance(value, dict):
-        return {str(k) for k in value}
-    if isinstance(value, list):
-        return {n for v in value for n in _names(v)}
-    return set()
 
 
 def _unparsed(x: Extraction) -> int:

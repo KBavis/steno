@@ -1,11 +1,13 @@
 ---
 name: rule-pack-author
-description: Write or change Steno rules and rule packs from a plain-language request, such as "topics under app.kafka.topics in application.yml are Kafka topics" or "SQLAlchemy models with __tablename__ map to tables". Finds real examples in the code, maps them to Steno's node, edge, clue, and entry-point vocabulary, proposes new types instead of inventing them, writes the rule and its test cases, and measures how often the pattern matches. Use whenever someone asks to recognize a framework pattern, add or fix a rule, create a rule pack, or act on a coverage-report item.
+description: Write or change Steno rules and rule packs from a plain-language request, such as "topics under app.kafka.topics in application.yml are Kafka topics" or "SQLAlchemy models with __tablename__ map to tables", or work through the coverage report's open items ("work the top 10 coverage items"). Finds real examples in the code, learns what an unfamiliar library does (cloning its repository or reading its public source), maps it to Steno's node, edge, clue, and entry-point vocabulary, proposes new types instead of inventing them, writes the rule and its test cases, proves it with steno rules test and steno rules check, marks patterns harmless or expected, and opens the pull request. Use whenever someone asks to recognize a framework pattern, add or fix a rule, create a rule pack, act on a coverage-report item, or work the coverage report.
 ---
 
 # Rule pack author
 
 You help a person write **rules**: "when you see this code, it means this fact." The person owns the result; you do the legwork and explain your choices.
+
+Two ways in: a **request** ("recognize X"; the workflow below), or **working the coverage report** (its open items, in order; see the last section, which reuses the workflow for each item). Steno runs no drafting job of its own: rules are written here, on the developer's machine, and approved by a person on a pull request (D147).
 
 A rule is an ast-grep `match` (where the pattern is) plus a Steno `emit` (what it means). Rules are deterministic YAML; nothing you write runs an LLM at ingestion time.
 
@@ -125,6 +127,53 @@ Give the person a short summary:
 - **Proposed, not done:** any new type or plugin the request needs.
 - **Tests:** the `steno rules test` result for the pack.
 
+## Working the coverage report (D147)
+
+The coverage report lists what Steno might be missing, grouped and ranked: connections between applications first, internal libraries before external ones (D146; `docs/how-it-works/ingestion/coverage-report.md` §6). Work it top down, a framework at a time. Steno must be running with the organization ingested (`make up`, `make migrate`).
+
+**1. Pull the worklist.**
+
+```sh
+cd backend && uv run steno coverage patterns --limit 10        # frameworks and patterns, ranked
+uv run steno coverage show <fingerprint>                        # where it occurs, links, samples
+```
+
+Patterns sharing an owner (a library, a package root) are one framework: learn it once and write its rules together.
+
+**2. Triage each pattern.** Decide one of these, and say why:
+
+| Decision | When | Then |
+|---|---|---|
+| **A rule** | It states a surface fact (an entry point, a call, a publish, a table read or write, a file, an external system) and you can name the facet and use-case question (step 1 above) | Steps 3–6 below |
+| **Harmless** | It never reaches the surface: a utility library, an in-process helper, a logging call | `steno coverage mark <fp> --state ignored --note "<why>"` |
+| **Expected** | A real gap that's legitimately outside the organization: an endpoint only external clients call, a topic a vendor consumes | `steno coverage mark <fp> --state expected --note "<why>"` |
+| **Needs source** | An internal library whose repository isn't ingested, and you can't get it | Tell the person which repository to connect; leave it open |
+| **A blind spot** | A mechanism the catalog doesn't list, or one Steno's vocabulary can't express | Add a row to `docs/how-it-works/ingestion/what-steno-must-see.md` and propose the design (step 3 above: "If nothing fits") |
+
+By signal: `internal_library` and `unknown_hook` on an organization type are usually an **internal framework** (a sender and a receiver, D61); `external_library` is usually harmless or a core-pack rule; `silent_repository` and `silent_witness` usually need a PLATFORM or DECLARED pack for files no pack reads; `one_sided` means the other end's rule is missing in the application that holds it, or it's expected.
+
+**3. Learn what the code does.** Don't guess from names. In order:
+- The library's own repository, when it's ingested: `steno coverage show` links its code at the ingested commit.
+- A local clone. Sparse-clone only what you need into a scratch folder with the person's own credentials (`git clone --depth 1 --filter=blob:none --sparse <url>`, then `git sparse-checkout set <folders>`), and delete it afterwards.
+- The public library's source or documentation, for an external library.
+
+Then write the rule and its tests as in the workflow above (steps 2–7), using the samples from `steno coverage show` and the clone as the code to learn from.
+
+**4. Prove it.**
+
+```sh
+uv run steno rules test <pack-name>
+uv run steno rules check <path/to/rules/rule-id.yaml> -p <fingerprint> [-p <fingerprint> …]
+```
+
+`steno rules check` runs the rule over every file the pattern occurs in (read from the git host at the ingested commit). It exits 1 when the rule states no surface fact, explains none of the pattern, or would create a generic or already-taken application name. Fix it, or change the triage. Misses are fine when you can explain them; say so in the pull request.
+
+**5. Open the pull request** as the developer, one per destination: rules for public libraries to the core packs in `rule-packs/`, rules for the organization's frameworks to its pack repository (`STENO_RULE_PACK_DIRS`; D129). Put each rule's `steno rules check` output, its facet, and its use-case question in the description. Follow the repository's own branch and PR conventions.
+
+**6. Mark the patterns** the pull request explains: `steno coverage mark <fp>… --state proposed --note "<PR URL>"`. Once it merges and the next ingestion runs, they become `covered` on their own; any that still occur reopen.
+
+Report back as in step 8, plus what you marked harmless or expected and why.
+
 ## Guardrails
 
 - Never invent node, edge, property, or clue types. Propose them.
@@ -132,3 +181,5 @@ Give the person a short summary:
 - Never edit another pack's rules without saying so.
 - Rules describe what code **says**, not runtime behavior. Values that are only known at runtime stay unresolved; don't guess them.
 - Keep test inputs minimal and free of secrets.
+- Never mark a pattern harmless or expected without a note saying why; the note is what the next person reads.
+- Delete scratch clones when you're done, unless the person asks to keep them.

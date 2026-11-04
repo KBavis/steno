@@ -300,3 +300,59 @@ def triage(
         ):
             it.status = status
     return len(patterns)
+
+
+def occurrences(session: Session, fingerprint: str, limit: int = 50) -> dict[str, Any]:
+    """Where a pattern occurs now, for the rule author (D147): each place with its repository,
+    file, enclosing symbol, application, and the commit Steno ingested, spread across
+    repositories; plus the samples (with lines) from each repository's latest coverage item."""
+    from steno.api.links import source_url
+    from steno.db.models import Repository
+
+    p = session.scalar(select(CoveragePattern).where(CoveragePattern.fingerprint == fingerprint))
+    if p is None:
+        raise LookupError(f"no pattern {fingerprint!r}")
+    latest = latest_runs(session)
+    repos = {r.id: r for r in session.scalars(select(Repository))}
+    places: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for o in session.scalars(
+        select(CoverageOccurrence)
+        .where(CoverageOccurrence.pattern_id == p.id)
+        .order_by(CoverageOccurrence.file)
+    ):
+        repo, job = repos.get(o.repository_id), latest.get(o.repository_id, (None, None))[0]
+        places[o.repository_id].append({
+            "repository": repo.name if repo else "?",
+            "file": o.file, "symbol": o.symbol, "application": o.application,
+            "commit": job.to_sha if job else None,
+            "url": source_url(repo.clone_url if repo else None, job.to_sha if job else None,
+                              o.file, None),
+        })  # fmt: skip
+    spread: list[dict[str, Any]] = []
+    while len(spread) < limit and any(places.values()):
+        for rid in list(places):  # round-robin, so one large repository doesn't fill it
+            if places[rid] and len(spread) < limit:
+                spread.append(places[rid].pop(0))
+    signal, _, target = fingerprint.partition(":")
+    samples = []
+    jobs = {job.id: rid for rid, (job, _) in latest.items()}
+    for it in session.scalars(
+        select(CoverageItem).where(
+            CoverageItem.job_id.in_(jobs),
+            CoverageItem.signal == signal,
+            CoverageItem.target_symbol == target,
+        )
+    ):
+        repo, job = repos.get(jobs[it.job_id]), latest[jobs[it.job_id]][0]
+        for smp in it.samples:
+            samples.append({
+                **smp, "repository": repo.name if repo else "?",
+                "url": source_url(repo.clone_url if repo else None, job.to_sha,
+                                  smp.get("file"), smp.get("line")),
+            })  # fmt: skip
+    return {
+        "fingerprint": p.fingerprint, "signal": p.signal, "label": p.label, "owner": p.owner,
+        "state": p.state.value, "note": p.note, "repositories": p.repositories,
+        "applications": p.applications, "occurrences": p.occurrences,
+        "places": spread, "more": max(p.occurrences - len(spread), 0), "samples": samples[:20],
+    }  # fmt: skip

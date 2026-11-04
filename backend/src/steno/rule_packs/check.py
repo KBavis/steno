@@ -1,14 +1,18 @@
-"""Checks a drafted rule passes before a person sees it (rule-curation §6). Its own tests prove
-it on the samples the drafter chose; these run it where its pattern really occurs:
+"""`steno rules check`: what a rule must pass before its pull request opens (rule-curation §6,
+D147). Its own tests (`steno rules test`) prove it on the samples its author chose; these run it
+where its pattern really occurs:
 
-- **Recall:** every file the pattern occurs in (up to `MAX_FILES`), read from the git host:
-  which the rule explains, and which it misses, so a blind spot is visible ("explains 3 of 5").
+- **Recall:** every file the pattern occurs in (up to `MAX_FILES`), read from the git host at the
+  ingested commit: which the rule explains, and which it misses ("explains 3 of 5").
+- **Surface:** the rule must state a surface fact (D136): an entry point, a table, topic, or
+  endpoint effect, an external call, a claim. A rule that doesn't is refused: the pattern
+  should be marked harmless (`ignored`) instead.
 - **Identity:** the application names its claims would create. A generic name (`backend`,
   `api`) or one another repository's application already has would merge or split
   applications across the organization, so it's a problem, not a detail.
 
-A rule with a problem goes back to the drafter once with what was found; if it still has one,
-it reaches the reviewer flagged.
+Deterministic: it runs wherever the `rule-pack-author` skill runs, and its output goes into the
+pull request's description.
 """
 
 import logging
@@ -22,16 +26,19 @@ import yaml
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from steno.connectors.source import read_file
 from steno.coverage.runs import latest_runs
 from steno.db.models import (
     ApplicationAlias,
     ApplicationIdentity,
+    Connector,
     CoverageOccurrence,
     CoveragePattern,
     Repository,
 )
 from steno.ingestion.local import run_folder
-from steno.rule_packs.packs import Pack, load_all_packs, load_pack
+from steno.rule_packs.packs import Pack, Rule, load_all_packs, load_pack
+from steno.rule_packs.surface import on_surface
 
 log = logging.getLogger(__name__)
 
@@ -54,10 +61,18 @@ class RuleCheck:
     generic: list[str] = field(default_factory=list)
     taken: list[dict[str, str]] = field(default_factory=list)  # {name, by, repository}
     errors: list[str] = field(default_factory=list)
+    surface: bool = True  # the rule states a surface fact (D136)
 
     def problems(self) -> list[str]:
         """What a reviewer must know, each in one line; empty when the rule is clean."""
         out = []
+        if not self.surface:
+            out.append(
+                "surface: the rule states no surface fact (an entry point, a table, topic, or "
+                "endpoint effect, an external call, a claim); mark the pattern ignored instead"
+            )
+        if self.files and not self.explained:
+            out.append(f"recall: explains none of the {self.files} files where the pattern occurs")
         if self.generic:
             out.append(
                 f"identity: names too generic to identify one application: "
@@ -65,7 +80,7 @@ class RuleCheck:
             )
         for t in self.taken:
             out.append(f"identity: '{t['name']}' is already {t['by']} (in {t['repository']})")
-        if self.missed:
+        if self.missed and self.explained:
             out.append(
                 f"recall: explains {len(self.explained)} of {self.files} files where the "
                 f"pattern occurs; misses {', '.join(self.missed[:5])}"
@@ -73,14 +88,17 @@ class RuleCheck:
         return out
 
     def blocking(self) -> bool:
-        """Problems a reviewer shouldn't be asked to approve: identity ones."""
-        return bool(self.generic or self.taken)
+        """Problems a reviewer shouldn't be asked to approve: no surface fact, explaining none of
+        its pattern, or an identity clash."""
+        return bool(
+            not self.surface or (self.files and not self.explained) or self.generic or self.taken
+        )
 
     def to_json(self) -> dict[str, Any]:
         return {
             "files": self.files, "explained": self.explained, "missed": self.missed,
             "names": self.names, "generic": self.generic, "taken": self.taken,
-            "errors": self.errors,
+            "errors": self.errors, "surface": self.surface,
         }  # fmt: skip
 
 
@@ -92,9 +110,14 @@ def check_rule(
     read: Callable[[str, str], str],
     packs: list[Pack] | None = None,
 ) -> RuleCheck:
-    """Run a drafted rule over every file its pattern occurs in, and check what it would
-    create (module docstring)."""
+    """Run a rule over every file its pattern occurs in, and check what it would create
+    (module docstring)."""
     out = RuleCheck()
+    parsed = yaml.safe_load(rule) or {}
+    out.surface = on_surface(
+        Rule(str(parsed.get("id", "")), DRAFT, "", "", {}, list(parsed.get("emit") or [])),
+        clues=True,
+    )
     files: dict[str, str] = {}
     repo_of: dict[str, int] = {}
     for repo_id, repo_name, path in _occurrence_files(session, pattern):
@@ -209,3 +232,18 @@ def _taken(session: Session, names: dict[str, set[int]]) -> list[dict[str, str]]
         out.append({"name": name, "by": f"{by} {canonical}",
                     "repository": repos.get(repo_id, "?") if repo_id else "?"})  # fmt: skip
     return out
+
+
+def git_host_reader(session: Session) -> Callable[[str, str], str]:
+    """Read a repository's file from the git host at the commit Steno ingested."""
+
+    def read(repository: str, path: str) -> str:
+        repo = session.scalar(select(Repository).where(Repository.name == repository))
+        if repo is None or not repo.last_ingested_sha:
+            raise ValueError(f"no ingested repository {repository!r}")
+        connector = session.get_one(Connector, repo.connector_id)
+        return read_file(
+            repo.clone_url, connector.kind, connector.credentials_ref, repo.last_ingested_sha, path
+        )
+
+    return read

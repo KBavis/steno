@@ -427,7 +427,7 @@ def test_ignoring_unread_files_covers_only_the_names_the_drafter_examined():
 
 
 def test_a_rule_the_checks_flag_goes_back_to_the_drafter_once(session):
-    from steno.curation.checks import RuleCheck
+    from steno.rule_packs.check import RuleCheck
 
     p = _pattern(session, "unknown_hook:com.acme.test.Revise")
     fake = Fake(

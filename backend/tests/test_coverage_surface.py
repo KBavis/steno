@@ -8,7 +8,6 @@ from steno.config import get_settings
 from steno.coverage.collect import (
     Item,
     _dropped,
-    _on_surface,
     _quiet,
     _silent_witnesses,
     collect,
@@ -19,6 +18,7 @@ from steno.graph.build import Context, build
 from steno.graph.structure import detect
 from steno.ingestion.local import run_folder
 from steno.rule_packs.packs import Pack, Rule, is_enabled, load_packs
+from steno.rule_packs.surface import on_surface
 
 APP = """
     import acme_orders
@@ -146,7 +146,7 @@ def test_unread_settings_are_quiet_unless_they_name_a_connection():
 def test_a_drop_is_an_item_only_when_the_rule_states_a_surface_fact():
     topic = _rule("send", [{"edge": "PRODUCES", "from": "@function", "to": {"KafkaTopic": {}}}])
     detail = _rule("label", [{"clue": "property", "key": "$K"}])
-    assert _on_surface(topic) and not _on_surface(detail)
+    assert on_surface(topic) and not on_surface(detail)
     x = Extraction()
     x.dropped += [(Origin("send", "p", "a.py", 3), "where: couldn't tell"),
                   (Origin("label", "p", "a.py", 9), "where: couldn't tell")]  # fmt: skip

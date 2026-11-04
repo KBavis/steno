@@ -15,7 +15,7 @@ from sqlalchemy import select
 
 from steno.api.deps import SessionDep
 from steno.coverage.joins import one_sided
-from steno.coverage.patterns import TRIAGE, WEIGHT, frameworks, triage
+from steno.coverage.patterns import TRIAGE, WEIGHT, frameworks, occurrences, triage
 from steno.db.models import CoverageKind, CoveragePattern, PatternState
 from steno.graph.driver import database, get_driver
 
@@ -62,6 +62,16 @@ def patterns(
         ],
         "more": max(len(groups) - limit, 0),
     }
+
+
+@router.get("/occurrences")
+def pattern_occurrences(session: SessionDep, fingerprint: str, limit: int = 50) -> dict[str, Any]:
+    """Where a pattern occurs now, with links to the code at the ingested commit, and its
+    samples: what the rule author reads before writing a rule (D147)."""
+    try:
+        return occurrences(session, fingerprint, limit)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 @router.put("/triage")

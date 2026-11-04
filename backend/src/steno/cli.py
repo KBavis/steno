@@ -13,8 +13,13 @@ db_app = typer.Typer(no_args_is_help=True, help="Postgres schema.")
 graph_app = typer.Typer(no_args_is_help=True, help="Neo4j schema and projections.")
 job_app = typer.Typer(no_args_is_help=True, help="Ingestion jobs.")
 rules_app = typer.Typer(no_args_is_help=True, help="Rule packs.")
+coverage_app = typer.Typer(
+    no_args_is_help=True,
+    help="The coverage report's patterns: the rule author's worklist (D146, D147).",
+)
 app.add_typer(db_app, name="db")
 app.add_typer(rules_app, name="rules")
+app.add_typer(coverage_app, name="coverage")
 app.add_typer(graph_app, name="graph")
 app.add_typer(job_app, name="job")
 
@@ -282,6 +287,151 @@ def rules_test(
                         typer.echo(f"        unexpected {section[:-1]}: {item}")
     typer.echo(f"\n{total - failed}/{total} cases passed")
     if failed:
+        raise typer.Exit(1)
+
+
+@rules_app.command("check")
+def rules_check(
+    rule_file: str = typer.Argument(..., help="The rule's YAML, inside its pack's rules/ folder"),
+    pattern: list[str] = typer.Option(..., "--pattern", "-p", help="Fingerprints it explains"),
+    as_json: bool = typer.Option(False, "--json", help="Print the result as JSON"),
+) -> None:
+    """Run a rule over every file its patterns occur in, read from the git host at the ingested
+    commit: recall, whether it states a surface fact, and the application names it would
+    create (rule-curation §6). Exits 1 when the rule must not be proposed."""
+    import json
+    from pathlib import Path
+
+    import yaml
+    from sqlalchemy import select
+
+    from steno.db.models import CoveragePattern
+    from steno.db.session import session_scope
+    from steno.rule_packs.check import check_rule, git_host_reader
+    from steno.rule_packs.packs import load_all_packs
+
+    path = Path(rule_file)
+    rule = path.read_text()
+    pack_yaml = path.parent.parent / "pack.yaml"
+    pack = yaml.safe_load(pack_yaml.read_text()) if pack_yaml.exists() else None
+    rule_id = (yaml.safe_load(rule) or {}).get("id")
+    # The rule's own pack, if it's loaded already, is left out so the rule isn't counted twice
+    others = [
+        p for p in load_all_packs() if not (pack and p.name == pack.get("name"))
+    ] if rule_id else None  # fmt: skip
+    results = {}
+    blocking = False
+    with session_scope() as session:
+        read = git_host_reader(session)
+        for fp in pattern:
+            p = session.scalar(select(CoveragePattern).where(CoveragePattern.fingerprint == fp))
+            if p is None:
+                raise typer.BadParameter(f"no pattern {fp!r}: see `steno coverage patterns`")
+            result = check_rule(session, p, rule, pack, read, others)
+            results[fp] = {**result.to_json(), "problems": result.problems()}
+            blocking = blocking or result.blocking()
+    if as_json:
+        typer.echo(json.dumps(results, indent=2))
+    else:
+        for fp, r in results.items():
+            typer.echo(f"{fp}")
+            typer.echo(f"  surface fact: {'yes' if r['surface'] else 'no'}")
+            typer.echo(f"  recall: explains {len(r['explained'])} of {r['files']} files")
+            for f in r["missed"][:10]:
+                typer.echo(f"    missed {f}")
+            if r["names"]:
+                typer.echo(f"  application names: {', '.join(r['names'])}")
+            for e in r["errors"]:
+                typer.echo(f"  error: {e}")
+            for problem in r["problems"]:
+                typer.echo(typer.style(f"  problem: {problem}", fg="red"))
+    if blocking:
+        raise typer.Exit(1)
+
+
+@coverage_app.command("patterns")
+def coverage_patterns(
+    state: str = typer.Option("open", help="open, ignored, expected, proposed, covered"),
+    limit: int = typer.Option(20, help="How many frameworks or lone patterns"),
+    quiet: bool = typer.Option(False, "--quiet", help="Include unread files and rule health"),
+    as_json: bool = typer.Option(False, "--json", help="Print the result as JSON"),
+) -> None:
+    """Patterns in a state, as frameworks ranked by score: the report's order (D146)."""
+    import json
+
+    from steno.api.routes.patterns import patterns
+    from steno.db.models import PatternState
+    from steno.db.session import session_scope
+
+    with session_scope() as session:
+        out = patterns(session, PatternState(state), limit, quiet)
+    if as_json:
+        typer.echo(json.dumps(out, indent=2))
+        return
+    for g in out["frameworks"]:
+        owner = g["owner"] or "(the application's own code)"
+        typer.echo(f"{g['score']:10.1f}  {owner}")
+        for p in g["patterns"]:
+            reach = (
+                f"{p['repositories']} repos, {p['applications']} apps, {p['occurrences']} places"
+            )
+            typer.echo(f"            {p['fingerprint']}\n              {p['label']} · {reach}")
+    if out["more"]:
+        typer.echo(f"\n{out['more']} more; raise --limit")
+
+
+@coverage_app.command("show")
+def coverage_show(
+    fingerprint: str = typer.Argument(..., help="A pattern's fingerprint, `signal:target`"),
+    limit: int = typer.Option(20, help="How many places"),
+    as_json: bool = typer.Option(False, "--json", help="Print the result as JSON"),
+) -> None:
+    """Where a pattern occurs, with links to the code at the ingested commit, and samples."""
+    import json
+
+    from steno.coverage.patterns import occurrences
+    from steno.db.session import session_scope
+
+    with session_scope() as session:
+        try:
+            out = occurrences(session, fingerprint, limit)
+        except LookupError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+    if as_json:
+        typer.echo(json.dumps(out, indent=2))
+        return
+    typer.echo(f"{out['label']}  [{out['state']}]  owner: {out['owner'] or '-'}")
+    for place in out["places"]:
+        typer.echo(f"  {place['repository']}/{place['file']}  {place['symbol']}")
+        if place["url"]:
+            typer.echo(f"    {place['url']}")
+    for smp in out["samples"][:10]:
+        line = f":{smp['line']}" if smp.get("line") else ""
+        typer.echo(
+            f"  sample {smp['repository']}/{smp.get('file')}{line}  {smp.get('detail') or ''}"
+        )
+    if out["more"]:
+        typer.echo(f"  {out['more']} more places; raise --limit")
+
+
+@coverage_app.command("mark")
+def coverage_mark(
+    fingerprints: list[str] = typer.Argument(..., help="Patterns' fingerprints"),
+    state: str = typer.Option(..., help="ignored, expected, proposed, or open"),
+    note: str = typer.Option(..., help="Why: harmless because…, outside the organization…, a PR"),
+) -> None:
+    """Set patterns' state, everywhere they occur and in later runs (D147)."""
+    from steno.coverage.patterns import TRIAGE, triage
+    from steno.db.models import PatternState
+    from steno.db.session import session_scope
+
+    wanted = PatternState(state)
+    if wanted not in TRIAGE:
+        raise typer.BadParameter(f"state is one of {sorted(s.value for s in TRIAGE)}")
+    with session_scope() as session:
+        changed = triage(session, fingerprints, wanted, note)
+    typer.echo(f"{changed} of {len(set(fingerprints))} patterns marked {state}")
+    if changed < len(set(fingerprints)):
         raise typer.Exit(1)
 
 

@@ -31,7 +31,6 @@ from steno.connectors.source import read_file
 from steno.coverage.patterns import frameworks
 from steno.coverage.runs import latest_runs
 from steno.curation import kit
-from steno.curation.checks import RuleCheck, check_rule, draft_origins, run_draft
 from steno.curation.drafters import (
     Drafter,
     DrafterUnavailable,
@@ -54,6 +53,7 @@ from steno.db.models import (
     RuleProposal,
     StageName,
 )
+from steno.rule_packs.check import RuleCheck, check_rule, draft_origins, run_draft
 
 log = logging.getLogger(__name__)
 
