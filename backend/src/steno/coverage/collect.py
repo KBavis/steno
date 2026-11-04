@@ -180,7 +180,7 @@ def collect(
     rules = {(r.pack, r.id): r for p in all_packs for r in p.rules}
     with timed("entries"):
         _unknown_hosts(plan, resolver, item)
-        _inferred(plan, item)
+        _inferred(plan, resolver, item)
         _kindless(plan, item)
         _unreachable(plan, resolver, item)
         dropped = _dropped(x, item, rules)
@@ -193,7 +193,7 @@ def collect(
             _library_gaps(ledger, resolver, all_packs, item, internal_prefixes or [])
     with timed("hooks_config_libraries"):
         _hooks(plan, item)
-        _config(x, item)
+        _config(x, item, items)
         if resolver:
             _libraries(resolver, all_packs, items, item)
         _versions(enabled or [], deps or [], item)
@@ -342,13 +342,21 @@ def _kindless(plan: GraphPlan, item: Any) -> None:
         )  # fmt: skip
 
 
-def _inferred(plan: GraphPlan, item: Any) -> None:
+def _inferred(plan: GraphPlan, r: Resolvers | None, item: Any) -> None:
     """Flows Steno started itself because nothing in the code starts them (D74): a worker loop,
-    a CLI command, a framework callback. Each is a flow already; naming its trigger takes a
-    rule (an entry point), which also makes the flow certain instead of inferred."""
+    a CLI command, a function called through a table of functions. Each is a flow already;
+    naming its trigger takes a rule (an entry point), which also makes the flow certain.
+
+    One item per class or module, not per function (D146): eleven methods of one registry are
+    one thing to look at. A function a framework calls through an unknown hook (a CLI command,
+    an MCP tool) is left out: the hook's own item already counts it."""
+    hooked = set(plan.ledger.callback_entries()) if plan.ledger else set()
     for u in plan.stats.get("inferred_entries", []):
-        short = ".".join(u["function"].replace("#", ".").split("(")[0].split(".")[-2:])
-        it = item("unreachable", "inferred_entry", u["function"], f"No known trigger · {short}")
+        if u["function"] in hooked:
+            continue
+        fn = _function(r, u["function"])
+        owner = fn.container if fn else _container(u["function"])
+        it = item("unreachable", "inferred_entry", owner, "")
         it.add(
             {
                 "file": u.get("file"),
@@ -357,6 +365,16 @@ def _inferred(plan: GraphPlan, item: Any) -> None:
                 "detail": "started by something outside the code; flow inferred",
             }
         )
+        n = len(it.keys)
+        short = ".".join(owner.split(".")[-2:]) if "#" not in owner else owner.rsplit(".", 1)[-1]
+        it.label = f"No known trigger · {short}" + (f" ({n} functions)" if n > 1 else "")
+
+
+def _container(symbol: str) -> str:
+    """`com.x.A#run()` → `com.x.A`; `app.cli.api` → `app.cli`."""
+    if "#" in symbol:
+        return symbol.split("#", 1)[0]
+    return symbol.rsplit(".", 1)[0] if "." in symbol else symbol
 
 
 def _unreachable(plan: GraphPlan, r: Resolvers | None, item: Any) -> None:
@@ -415,9 +433,10 @@ def _external_calls(
     ledger: Any = None,
 ) -> dict[str, Any]:
     """Library calls that can do I/O (declared by core lists and packs, D101) that no rule
-    explains, grouped by the library function called (`com.x.Publisher#send`). Explained: a
-    rule matched on the call's lines, or the library's pack recorded something in the same
-    function (`stmt = select(Job)` is the read; `session.execute(stmt)` runs it)."""
+    explains, one item per library (D146): its methods are listed inside, so six `neo4j`
+    methods are one thing to look at, and one pack fixes them. Explained: a rule matched on the
+    call's lines, or the library's pack recorded something in the same function
+    (`stmt = select(Job)` is the read; `session.execute(stmt)` runs it)."""
     ledger = ledger or Ledger(x, r, packs)
     total = covered = 0
     by_app: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "explained": 0})
@@ -430,13 +449,25 @@ def _external_calls(
             covered += 1
             counts["explained"] += 1
             continue
-        # Local files are still a gap, ranked below the network, messaging, and databases
-        signal = "file_call" if any(_within(call.symbol, f) for f in FILE_IO) else "external_call"
-        item("external_call", signal, call.symbol, call.symbol).add(
-            {"file": rel, "line": call.line, "function": call.function.symbol,
-             "library": call.library}
-        )  # fmt: skip
+        # Local files are their own signal, ranked below the network, messaging, and databases
+        file = any(_within(call.symbol, f) for f in FILE_IO)
+        signal = "file_call" if file else "external_call"
+        library = _file_library(call.symbol) if file else call.library
+        it = item("external_call", signal, library, "")
+        it.add({"file": rel, "line": call.line, "function": call.function.symbol,
+                "library": call.library, "detail": call.symbol})  # fmt: skip
+        it.values.add(call.symbol)
+        n = len(it.values)
+        what = "Unexplained file I/O" if file else "Unexplained I/O calls"
+        it.label = f"{what} · {library}" + (f" ({n} methods)" if n > 1 else "")
     return {"total": total, "explained": covered, "by_app": dict(by_app)}
+
+
+def _file_library(symbol: str) -> str:
+    """The file library a call is grouped under: the FILE_IO entry it's within, without a
+    method (`java.nio.file.Files#write` → `java.nio.file.Files`, `builtins.open` → itself)."""
+    best = max((f for f in FILE_IO if _within(symbol, f)), key=len)
+    return best.split("#", 1)[0]
 
 
 def _hooks(plan: GraphPlan, item: Any) -> None:
@@ -456,18 +487,29 @@ def _hooks(plan: GraphPlan, item: Any) -> None:
             it.evidence.add("can_start_work")
 
 
-def _config(x: Extraction, item: Any) -> None:
+def _config(x: Extraction, item: Any, items: dict[Any, Item]) -> None:
     """Config keys a fact needs that no config file in the repository sets (D101): set where
-    the app runs. The fact keeps the key; its value isn't known."""
+    the app runs. The fact keeps the key; its value isn't known. A key an unknown host's URL
+    is built from is already on that item (D100), so it isn't listed again (D146)."""
+    on_hosts = {
+        key
+        for i in items.values()
+        if i.signal == "unknown_host"
+        for s in i.samples
+        for key in re.findall(r"\$\{([^}]+)\}", str(s.get("detail") or ""))
+    }
     for origin, key in x.unset_config:
+        if key in on_hosts:
+            continue
         item("config", "config_unset", key, f"Config set outside the repository · {key}").add(
             {"file": origin.file, "line": origin.line, "detail": f"read by rule {origin.rule}"}
         )
 
 
 def _libraries(r: Resolvers, packs: list[Pack], items: dict[Any, Item], item: Any) -> None:
-    """Libraries the code imports that no rule pack covers, when they're I/O libraries or
-    have unexplained I/O calls: each is a pack (or an org rule) worth writing."""
+    """I/O libraries the code imports that no rule pack covers and whose calls aren't listed
+    already: the calls' own items say it when there are any (D146), so this is the library
+    whose use Steno can't see at all (only chains through its types, or no calls found)."""
     covered = set().union(*(_libs(p) for p in packs)) if packs else set()
     with_calls = {
         i.samples[0].get("library") or i.target.split(".")[0]
@@ -479,11 +521,15 @@ def _libraries(r: Resolvers, packs: list[Pack], items: dict[Any, Item], item: An
         for lib, found in resolver.imported_libraries().items():
             files[lib].extend(found)
     for lib, where in sorted(files.items()):
-        if _covers(covered, _norm(lib)) or (lib not in IO_PACKAGES and lib not in with_calls):
+        if _covers(covered, _norm(lib)) or lib not in IO_PACKAGES or _has_calls(lib, with_calls):
             continue
         it = item("library", "library", lib, lib)
         for f in sorted(where):
             it.add({"file": f, "detail": f"imports {lib}"})
+
+
+def _has_calls(lib: str, with_calls: set[str]) -> bool:
+    return any(c == lib or c.startswith(lib + ".") or lib.startswith(c + ".") for c in with_calls)
 
 
 def _library_gaps(
@@ -606,10 +652,15 @@ def _silent_repository(
 
 
 def _quiet(items: dict[Any, Item]) -> None:
-    """Mark what's kept as a pattern but left out of the report (D146)."""
+    """Mark what's kept as a pattern but left out of the report (D146). Local file I/O is
+    quiet unless the same file library is used by more than one application in the
+    repository (code outside every application counts as one): a model a training script
+    saves and a service loads is a hand-off; a service's own temporary files aren't."""
     for it in items.values():
         if it.signal in QUIET:
             it.quiet = True
+        elif it.signal == "file_call":
+            it.quiet = len({app for _, _, app in it.keys}) < 2
         elif it.signal == "unread_config":
             keys = [str(s.get("function") or "") for s in it.samples] + [it.target]
             keys += [sym for _, sym, _ in it.keys]
@@ -699,8 +750,13 @@ def _unread_config(
         key = clue.fields.get("key") if clue.kind == "property" else None
         if not isinstance(key, str) or key in used or _under(key, noise):
             continue
+        # A settings class's field (pydantic's `DATABASE_URL: str = ...`) is code the app
+        # reads as `settings.X`, not a config file nothing reads (D146)
+        if PurePosixPath(clue.origin.file).suffix in CODE_SUFFIXES:
+            continue
         prefix = config_prefix(key)
-        it = item("config", "unread_config", prefix, f"Config no rule read · {prefix}.*")
+        label = f"Config no rule read · {prefix}" + (".*" if prefix != key else "")
+        it = item("config", "unread_config", prefix, label)
         it.add({"file": clue.origin.file, "function": key, "line": clue.origin.line,
                 "detail": key, "application": where(clue.origin.file)})  # fmt: skip
         value = clue.fields.get("value")

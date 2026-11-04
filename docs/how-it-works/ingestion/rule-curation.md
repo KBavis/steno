@@ -76,7 +76,7 @@ A developer asks the skill to work the coverage report ("work the top 10 coverag
 | 3 | **Learn** | Read the library: its ingested repository, a local clone, or the public library's source. Check `steno rules list` for a rule to extend |
 | 4 | **Write** | The rule and its test cases, positive and negative, from real samples |
 | 5 | **Prove** | `steno rules test <pack>`, then `steno rules check <rule> --pattern <fingerprint>` (§6) |
-| 6 | **Open the pull request** | One per destination (§4), as the developer, with each rule's check output in the description |
+| 6 | **Open the pull request** | One per destination (§4), as the developer, with each rule's check output in the description. The destination is the repository holding the pack: the Steno checkout's `origin` for a core pack (an organization's fork, if it forked Steno), the `STENO_RULE_PACK_DIRS` folder's `origin` for an organization pack. The skill names it explicitly (`gh pr create --repo`) and confirms it with the person |
 | 7 | **Mark** | The patterns `proposed` (with the pull request), `ignored`, or `expected`, with why (`PUT /api/patterns/triage`) |
 
 **Unattended drafting**, if an organization needs it later, runs the same skill headless on a schedule, so there's one drafter to keep right.

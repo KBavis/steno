@@ -277,9 +277,9 @@ def test_coverage_accounts_for_io_calls_and_hooks(engine, repo: Path) -> None:  
     plan = _flow(engine, repo)["plan"]
     report = collect(engine.out, engine.resolver, plan, [PACK])
     calls = [i for i in report.items if i.signal == "external_call"]
-    assert [i.target for i in calls] == [
-        "org.springframework.web.reactive.function.client.WebClient#post"
-    ]
+    # One item per library (D146), with the method inside
+    assert [i.target for i in calls] == ["org.springframework.web"]
+    assert calls[0].values == {"org.springframework.web.reactive.function.client.WebClient#post"}
     assert not [i for i in report.items if i.signal == "unresolved_type"]
     assert report.metrics["unresolved_library_calls"] >= 2
 
