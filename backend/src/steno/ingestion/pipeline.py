@@ -466,7 +466,9 @@ def _previous_triage(ctx: JobContext) -> dict[tuple[str, str], CoverageStatus]:
 
 
 def cards(ctx: JobContext) -> dict[str, Any]:
-    """Generate LLM purposes and narratives. In a dry run: count tokens and project cost only."""
+    """LLM summaries for applications, spaces, and the organization (D143; flows get a
+    deterministic digest in the build instead). In a dry run: count tokens and project cost
+    only."""
     raise Skip("not built yet")
 
 

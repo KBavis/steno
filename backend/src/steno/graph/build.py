@@ -35,6 +35,7 @@ from steno.extraction.facts import (
 )
 from steno.graph import ids
 from steno.graph import trace as trace_codec
+from steno.graph.digest import write_digests
 from steno.graph.structure import Module, Structure
 from steno.resolvers.base import Function, Invocation, Resolvers, UnresolvedCall, looks_like_io
 from steno.rule_packs.packs import HttpSystem
@@ -259,6 +260,7 @@ class _Builder:
         self._flows()
         self._kinds()
         self._file_nodes()
+        write_digests(self.plan)  # D143: what routing and keyword search read
         self.plan.stats["unmet_joins"] = self.unmet
         return self.plan
 

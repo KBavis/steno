@@ -4,12 +4,12 @@ How agents get context out of Steno quickly and accurately: the MCP tools, searc
 
 > **In one minute**
 > - **Round trips dominate latency**, so tools are shaped to answer typical questions in ≤ 3 calls: precomputed cards, server-side fan-out, batch tools, token budgets.
-> - **Built (POC):** `search` (full-text over names, plus flows whose traces contain a matching function), `get_node`, `get_flow` (outlines), `view_flow_code`, `find_dependents`. Every call is logged.
+> - **Built (POC):** `search` (full-text over names and flow digests, plus flows whose traces contain a matching function), `get_node`, `get_flow` (outlines), `view_flow_code`, `find_dependents`. Every call is logged.
 > - **Every result carries citations** and lists the scopes searched, and a **completeness block** says what Steno couldn't see.
 > - **How the tools work together** ([§5](#how-the-tools-work-together-built)): top-down, `search` → `where` → `scope` → `get_node` → `get_flow` → `view_flow_code`, reading `completeness` and `agreement` before claiming anything is complete. The server sends this to agents as its MCP instructions when they connect.
 > - **No file contents are stored:** code is read from the git host at the ingested commit; code search goes through the git host's search API.
 > - **Breadth, not depth** ([§4](#breadth-and-depth-decided-d119)): Steno answers *what and where* and serves the code; the consuming agent reasons, and clones only when a task needs it. Every answer that cites code says which `sources` to fetch. What Steno stores stops at five layers: placement, surface, reach, search text, pointers (D136).
-> - **Later:** LLM-written flow cards and vector search (after the cost dry run), and Jev as a navigator for routing and verification (`v2`). The routing design below describes that end state.
+> - **Next:** LLM-written summaries for applications, spaces, and the organization, and the `routing` block in `search` (D142, D143). Flows get a deterministic digest, not an LLM purpose. **Later:** vector search (after the cost dry run). The routing design below describes the end state.
 
 ```mermaid
 flowchart LR
@@ -60,7 +60,7 @@ Rough costs:
 
 ## 2. Search top-down, over data built bottom-up
 
-> **Status:** this section is the end-state design. Jev routing, verification, and ranking are `v2`; vector search over cards comes after the cost dry run (stage D). **Today `search` is full-text over the names of searchable nodes plus function names in traces** (§5).
+> **Status:** this section is the end-state design. Jev routing, verification, and ranking are `v2`; vector search over cards comes after the cost dry run (stage D). **Today `search` is full-text over the names of searchable nodes and each flow's digest, plus function names in traces** (§5).
 
 **Jev is the navigator.** Every navigation step that would normally cost an LLM call (which space, which app, which kind of question, is this the right flow) is a Jev decision instead: typed, calibrated, and done in milliseconds. That's the core of Steno's speed.
 
@@ -124,13 +124,12 @@ This is structural retrieval, which embeddings alone can't do. Combined with Jev
 
 | Node | Card contents | Written by |
 |---|---|---|
-| **Flow** | Trigger, purpose, narrative steps, what it touches, what it leads to, business context (later), source. See the [flow card](./graph-reference.md#flow-levels-and-the-flow-card-decided). | Deterministic signature + **LLM purpose and narrative for every flow** at initial ingestion |
+| **Flow** | The **digest** (D143): trigger, what it writes, reads, calls, and produces, the entities it uses, its function names, its application. See the [flow digest](./graph-reference.md#the-flow-digest-built-d143). | **Deterministic, no LLM** (built). A purpose written lazily, the first time a flow is a candidate and its digest isn't enough, is Proposed (D143) |
 | **Application, Space, Organization** | Purpose, key flows and interfaces, ins and outs | LLM (few nodes, high value, and routing depends on them) |
 | **Interface, Entity, Table, Module** | Facts and neighbors | Deterministic template |
 
-- **Why every flow gets an LLM purpose:** declared summaries are often missing or vague, and without a real purpose semantic search has nothing meaningful to match.
-- **Keeping it affordable at scale:** a small model by default, the Batch API, and **prompt caching** (flows in one app share a cached prefix: the app card, entities, conventions).
-- **On re-ingestion:** deterministic parts are rebuilt for free. **Jev I5** decides from the old purpose and narrative plus the fact diff whether they're still accurate; the LLM regenerates them only if not.
+- **Why flows get no LLM purpose up front (D143):** an organization has thousands of flows, so an LLM purpose for each would make cost follow the number of flows rather than the questions asked. The digest is free, rebuilt on every run, and enough for keyword search and Jev's Q4; the LLM writes the few summaries routing reads first (applications, spaces, the organization).
+- **Keeping summaries affordable:** they're rewritten only when their inputs change (a hash of them), and a dry run counts tokens before any spend.
 - **Cards are written for two readers:** embeddings and Jev (short, precise, bounded in size), and agents (sources and next steps). Their bounded size keeps **Jev's input bounded** for huge flows (see [Jev §4](../plan/later/jev.md#4-what-jev-sees-state-design)).
 
 ### How embeddings are stored and searched (Decided)
@@ -214,7 +213,7 @@ Steno computes `sources` from the answer's citations (built: `Tools.sources`, at
 
 Transport: **MCP over Streamable HTTP**. Every tool accepts `max_tokens`. Every result carries **confidence**, **citations** (below), and hints for the next call.
 
-**Built (2026-10-07):** `search` (full-text over names, plus flows whose traces contain a matching function), `get_node`, `get_flow`, `view_flow_code` (reads from the git host at the ingested commit; GitHub, GitLab, Bitbucket), `find_dependents` (`via`: `http`, `messaging`, `data`), and `route_request` (2026-10-28, D132), in `backend/src/steno/mcp/`. A result over its `max_tokens` loses items from its longest lists and says so in `truncated`. Every call is logged in `tool_call`. Confidence levels aren't built yet (Open).
+**Built (2026-10-07):** `search` (full-text over names and, since 2026-11-03, flow digests, plus flows whose traces contain a matching function), `get_node`, `get_flow`, `view_flow_code` (reads from the git host at the ingested commit; GitHub, GitLab, Bitbucket), `find_dependents` (`via`: `http`, `messaging`, `data`), and `route_request` (2026-10-28, D132), in `backend/src/steno/mcp/`. A result over its `max_tokens` loses items from its longest lists and says so in `truncated`. Every call is logged in `tool_call`. Confidence levels aren't built yet (Open).
 
 ### How the tools work together (built)
 
@@ -307,7 +306,7 @@ Built: `search`, `get_node`. Not built: `glossary`.
 
 | Tool | Purpose | Returns | Serves use cases |
 |---|---|---|---|
-| `search(query, scope?, limit?, max_tokens?)` | **Built:** full-text over the names of searchable nodes (flows, applications, spaces, organization, interfaces, entities, tables, data stores, external systems; D104), plus function names in flow traces (a hit returns the flow). A query is split the way names are (`budgeting-app` → `budgeting`, `app`), and exact words rank first. **Top-down (D2):** the answer starts with `where`, every space and application with matches and how many, so nothing is hidden by the page size; `results` then takes each application's best hit in turn, so one application with many matches can't crowd the others out; `more` points back at `where` and `scope`. A flow found by a function's module path shows the function's full name, so the reason for the match is visible. Steps, schedules, and code nodes aren't searched; open them with `get_node`. **End state:** the routed entry point. Jev classifies the question, then Steno searches one scope or fans out across spaces in parallel. Passing `scope` skips routing. | Ranked cards, anchors, the routing decision and its confidence | All |
+| `search(query, scope?, limit?, max_tokens?)` | **Built:** full-text over the names of searchable nodes (flows, applications, spaces, organization, interfaces, entities, tables, data stores, external systems; D104) and each flow's digest (D143; a flow found by its digest says which part matched in `matched`, e.g. `digest: WRITES git_commit (insert)`), plus function names in flow traces (a hit returns the flow). A query is split the way names are (`budgeting-app` → `budgeting`, `app`), and exact words rank first. **Top-down (D2):** the answer starts with `where`, every space and application with matches and how many, so nothing is hidden by the page size; `results` then takes each application's best hit in turn, so one application with many matches can't crowd the others out; `more` points back at `where` and `scope`. A flow found by a function's module path shows the function's full name, so the reason for the match is visible. Steps, schedules, and code nodes aren't searched; open them with `get_node`. **End state:** the routed entry point. Jev classifies the question, then Steno searches one scope or fans out across spaces in parallel. Passing `scope` skips routing. | Ranked cards, anchors, the routing decision and its confidence | All |
 | `get_node(id \| name, claims?)` | Progressive disclosure: a node's card plus **a view that depends on its layer** (below). `claims=true` adds the raw statements other witnesses make about it (deploy and ACL files, manifests), each cited. `organization` is the organization node, whatever it's named; a name several nodes share is answered with the most specific one plus `also_named`, listing the others | Card + layer view + next-step hints | Onboarding, planning |
 | `glossary(term, space?)` | Look up a term, nickname, or standard | Definition + where it's used | Onboarding |
 

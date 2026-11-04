@@ -1,7 +1,7 @@
 """Search top-down (D2): where the matches are comes first, and each application's best hit
 takes its turn, so one application with many matches can't crowd the others off the page."""
 
-from steno.mcp.tools import _interleave, _matched, _where_summary
+from steno.mcp.tools import _digest_matched, _interleave, _matched, _where_summary
 
 
 def _flow(app: str, n: int) -> dict:
@@ -42,3 +42,24 @@ def test_a_match_in_the_module_path_shows_the_full_name():
     assert _matched(f, ["ingest"]) == "function app.ingestible.Base._write_file in POST /x"
     g = {"label": "ingest_data", "symbol": "app.providers.ingest_data", "flow": "POST /y"}
     assert _matched(g, ["ingest"]) == "function ingest_data in POST /y"
+
+
+def test_a_flow_found_by_its_digest_says_which_part_matched():
+    digest = (
+        "POST /jobs · backend\n"
+        "TRIGGER   http POST /jobs\n"
+        "WRITES    embed_task (insert), job (insert)\n"
+        "ENTITIES  EmbedTask, Job\n"
+        "FUNCTIONS Task.run, JobService.create (+40 more)"
+    )
+    hit = {"label": "POST /jobs", "digest": digest}
+    assert _digest_matched(hit, ["embed", "task"]) == (
+        "digest: WRITES embed_task (insert); ENTITIES EmbedTask"
+    )
+    # No item has every word: those with some, with "(+N more)" left off
+    assert _digest_matched(hit, ["create", "run"]) == (
+        "digest: FUNCTIONS Task.run, JobService.create"
+    )
+    # Its name already says why
+    assert _digest_matched(hit, ["jobs"]) is None
+    assert _digest_matched({"label": "x"}, ["job"]) is None
