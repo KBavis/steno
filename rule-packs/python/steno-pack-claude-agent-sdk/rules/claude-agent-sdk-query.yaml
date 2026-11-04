@@ -1,0 +1,23 @@
+id: claude-agent-sdk-query
+description: A prompt sent to Claude with the Claude Agent SDK, e.g. async for message in query(prompt=prompt, options=options)
+match:
+  rule:
+    kind: call
+    all:
+      - has:
+          field: function
+          regex: "^(claude_agent_sdk\\.)?query$"
+      - inside:
+          kind: module
+          stopBy: end
+          has:
+            stopBy: end
+            any:
+              - kind: import_from_statement
+                has: { field: module_name, regex: "^claude_agent_sdk$" }
+              - kind: import_statement
+                regex: "import claude_agent_sdk"
+emit:
+  - edge: CALLS
+    from: "@function"
+    to: { ExternalSystem: { host: api.anthropic.com, name: Anthropic } }
