@@ -1,0 +1,28 @@
+id: sqlalchemy-engine
+description: The application's database, from the URL a SQLAlchemy engine is created with, e.g. create_engine(settings.DATABASE_URL) or create_async_engine("postgresql+asyncpg://db/orders") - its tables live here. A URL read from settings or the environment keeps its key.
+match:
+  rule:
+    kind: call
+    all:
+      - has:
+          field: function
+          regex: "^(sqlalchemy\\.(ext\\.asyncio\\.)?)?(create_engine|create_async_engine)$"
+      - has:
+          field: arguments
+          has:
+            nthChild: 1
+            pattern: $URL
+            not: { kind: keyword_argument }
+      - inside:
+          kind: module
+          stopBy: end
+          has:
+            stopBy: end
+            any:
+              - kind: import_from_statement
+                has: { field: module_name, regex: "^sqlalchemy(\\.ext\\.asyncio)?$" }
+              - kind: import_statement
+                regex: "import sqlalchemy"
+emit:
+  - node: [DataStore, Relational]
+    url: $URL

@@ -1,8 +1,10 @@
 id: sqlalchemy-session-get
-description: Loading one row by primary key, e.g. await session.get(Job, job_id)
+description: Loading one row by primary key, e.g. await session.get(Job, job_id) or session.get_one(Space, space_id)
 match:
   rule:
-    pattern: $SESSION.get($MODEL, $$$)
+    pattern: $SESSION.$METHOD($MODEL, $$$)
+  constraints:
+    METHOD: { regex: "^(get|get_one)$" }
 where:
   $SESSION: { type: [sqlalchemy.orm.Session, sqlalchemy.ext.asyncio.AsyncSession] }
 emit:
