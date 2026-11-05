@@ -62,6 +62,7 @@ Each row gives the mechanism, an example, what sees it today, its status, and th
 | gRPC servers | Java: `extends UserServiceGrpc.UserServiceImplBase` | `grpc-java` | Built | `unknown_hook` |
 | Message listeners | Java: `@KafkaListener`, `@RabbitListener`, `@JmsListener`, `consumer.subscribe` | `spring-kafka`, `kafka-clients`, `spring-amqp`, `spring-jms` | Built | `unknown_hook` |
 | Other servers | Java: GraphQL `@QueryMapping`, WebSocket and SSE handlers | No rules | Partial | `unknown_hook` (framework annotations and types) |
+| Commands and tools a person or agent invokes | Python: a Typer `@app.command()`, an MCP `@mcp.tool()` | The hooks ledger, as unknown hooks; no entry point type names them | Silent · needs design | `unknown_hook`. Naming them needs a new kind of entry point (an open question) |
 | Schedules in code | Java: `@Scheduled(cron = …)` | `spring-boot` | Built | `unknown_hook` |
 | Schedules outside the code | Kubernetes CronJob, an enterprise scheduler | `schedule` claims (stored, not compared) | Partial | `no_trigger_application`, `inferred_entry` |
 | Framework callbacks | Java: `@EventListener`, listeners registered in config. Python: `@mcp.tool()` | The hooks ledger (D101) | Built | `unknown_hook` |
@@ -162,4 +163,7 @@ Fixing the instance without the signal leaves the next one silent.
 In [the decision log](../../plan/decisions.md#open-questions):
 - Shared keys for caches and object stores (a Redis key, an S3 prefix): §2.3.
 - Change data capture: how "this table becomes this topic" is stated: §2.3.
+- Commands and tools as ways in (CLI commands, MCP tools): §2.1.
+- Local files as stores, so a file one application writes and another reads joins them: §2.3.
+- Whether a graph query reads or writes (Neo4j's `Session.run`), which only its query text says: §2.3.
 - The coverage report's final signal list, and the library and silent-repository items: [coverage report §6](./coverage-report.md#6-focusing-the-report-on-the-surface-decided-d146).

@@ -270,7 +270,9 @@ rule-packs/
 └─ org/                         org-specific packs, any language
 ```
 
-**Where an organization's packs live (built 2026-10-16).** Org packs can sit in `rule-packs/org/`, or anywhere else: `STENO_RULE_PACK_DIRS` lists extra folders (comma-separated), loaded with the core packs, typically a clone of the organization's own packs repository, so its rules never live in Steno's. An extra folder can use the same layout (ecosystem → pack) or hold packs directly; its packs are `source: org` unless they say otherwise. A pack name found twice is an error, never a silent override. `steno rules list` shows where each pack came from. Steno pulling a packs repository itself, through a connector, is `v1`; until then, update the clone with `git pull`.
+**Org-only mode (D148).** To keep every rule in the organization's repository, set `STENO_RULE_PACK_DIRS` to a clone of it (for example `steno-org-rule-pack`) and `STENO_RULES_ORG_ONLY=true`. Nothing is committed to Steno; see [rule curation §4](./rule-curation.md#4-frameworks-rules-that-belong-together-decided-d123).
+
+**Where an organization's packs live (built 2026-10-16). Org packs can sit in `rule-packs/org/`, or anywhere else: `STENO_RULE_PACK_DIRS` lists extra folders (comma-separated), loaded with the core packs, typically a clone of the organization's own packs repository, so its rules never live in Steno's. An extra folder can use the same layout (ecosystem → pack) or hold packs directly; its packs are `source: org` unless they say otherwise. A pack name found twice is an error, never a silent override. `steno rules list` shows where each pack came from. Steno pulling a packs repository itself, through a connector, is `v1`; until then, update the clone with `git pull`.
 
 Each pack:
 

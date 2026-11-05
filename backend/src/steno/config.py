@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     # STENO_DISABLED_PACKS: pack names separated by commas
     disabled_packs: Annotated[list[str], NoDecode] = []
 
+    # Every rule goes to the organization's pack repository (STENO_RULE_PACK_DIRS), never to
+    # Steno's own rule-packs/ (D148). A miss in a public library is listed for a person to
+    # report, not committed. STENO_RULES_ORG_ONLY
+    rules_org_only: bool = False
+
     # The organization's own code, for the coverage report's library gaps (D146): Java packages
     # (`com.acme`), coordinates (`com.acme:*`), or Python packages (`acme_`). A library under
     # one is internal; the repository's own package roots count too, so it can stay empty.

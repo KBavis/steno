@@ -349,6 +349,33 @@ def rules_test(
         raise typer.Exit(1)
 
 
+@rules_app.command("destinations")
+def rules_destinations() -> None:
+    """Where the rule author's rules go: the repository for each kind of rule (D129, D148)."""
+    import subprocess
+    from pathlib import Path
+
+    def origin(folder: Path) -> str:
+        found = subprocess.run(
+            ["git", "-C", str(folder), "remote", "get-url", "origin"],
+            capture_output=True, text=True,
+        )  # fmt: skip
+        return found.stdout.strip() or "no git remote"
+
+    s = get_settings()
+    if s.rule_pack_dirs:
+        for folder in s.rule_pack_dirs:
+            typer.echo(f"organization rules: {folder} -> {origin(folder)}")
+    else:
+        typer.echo("organization rules: no folder configured (set STENO_RULE_PACK_DIRS)")
+    if s.rules_org_only:
+        typer.echo(
+            "public-library rules: not committed (STENO_RULES_ORG_ONLY): list them to report"
+        )
+    else:
+        typer.echo(f"public-library rules: {s.rule_packs_dir} -> {origin(s.rule_packs_dir)}")
+
+
 @rules_app.command("check")
 def rules_check(
     rule_file: str = typer.Argument(..., help="The rule's YAML, inside its pack's rules/ folder"),
