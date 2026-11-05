@@ -9,7 +9,7 @@ from steno.decisions.base import (
     Noul,
 )
 from steno.decisions.standin import StandInBackend
-from steno.routing.route import _keep, band, route
+from steno.routing.route import _keep, _scope_of, band, route
 
 
 class _Driver:
@@ -52,6 +52,12 @@ ROWS = {
         {"id": "flow:b:POST /charges", "name": "POST /charges", "application": "billing",
          "application_id": "app:billing", "space": "Shop", "aliases": [],
          "digest": "POST /charges · billing\nDOC       Charges a card."},
+    ],
+    "WHERE n:Table": [
+        {"id": "table:orders", "name": "orders", "labels": ["Table"], "writers": ["POST /orders"],
+         "readers": ["GET /orders"]},
+        {"id": "topic:order-events", "name": "order-events", "labels": ["Interface", "KafkaTopic"],
+         "writers": ["POST /orders"], "readers": []},
     ],
     "MATCH (s:Space)": [{"id": "space:1", "name": "Shop", "line": "Selling things."},
                         {"id": "space:2", "name": "People", "line": "Staff."}],
@@ -128,6 +134,9 @@ class _Jev:
         self.scores = scores
 
     def decide(self, decision, state, questions):
+        if decision == "E1":
+            return [Answer(True, self.scores.get(q.key.removeprefix("entity "), 0.1))
+                    for q in questions]  # fmt: skip
         if decision == "Q4":
             return [Answer(True, self.scores.get(q.key.split(" do what")[0][5:], 0.1))
                     for q in questions]  # fmt: skip
@@ -166,7 +175,63 @@ def test_the_trace_shows_every_candidate_and_why():
     trace = []
     route(_Driver(ROWS), "neo4j", "cancel", ["cancel"], [], [], decider=_Jev({}), trace=trace)
     assert trace[0]["step"] == "proposed" and trace[0]["candidates"] == 3
-    assert "read every flow" in trace[1]["why"][0]
+    flows = [step for step in trace if "flow" in step]
+    assert "read every flow" in flows[0]["why"][0]
+    assert any("entity" in step for step in trace)
+
+
+def test_a_named_application_comes_first_and_the_rest_stay():
+    scores = {"POST /charges": 0.9, "GET /orders": 0.6}
+    r = route(_Driver(ROWS), "neo4j", "how does orders list things", ["orders"], [], [],
+              decider=_Jev(scores))  # fmt: skip
+    assert [f["name"] for f in r["flows"]] == ["GET /orders", "POST /charges"]
+    assert r["named_in_question"] == ["orders"]
+    assert [a["name"] for a in r["applications"]] == ["billing", "orders"]
+
+
+def test_a_named_scope_with_no_fitting_flow_doesnt_outrank_one_that_fits():
+    scores = {"POST /charges": 0.9, "GET /orders": 0.2}
+    r = route(_Driver(ROWS), "neo4j", "orders and refunds", ["orders"], [], [],
+              decider=_Jev(scores))  # fmt: skip
+    assert r["flows"][0]["name"] == "POST /charges"
+
+
+def test_a_common_word_isnt_a_fact_about_an_entity():
+    r = route(_Driver(ROWS), "neo4j", "how are orders stored", ["orders"], [], [],
+              decider=_Jev({"GET /orders": 0.8, "table:orders": 0.3}))  # fmt: skip
+    assert "entities" not in r
+
+
+def test_a_name_only_counts_as_whole_words():
+    rows = {"application": "orders", "aliases": ["shop-orders"], "space": "Shop"}
+    assert _scope_of(rows, "what about shop orders") == "application"
+    assert _scope_of(rows, "reorders stock") is None
+    assert _scope_of(rows, "something in the shop") == "space"
+    assert _scope_of({"application": "api"}, "the api") is None
+
+
+def test_topics_and_tables_are_found_like_flows():
+    scores = {"GET /orders": 0.8, "topic:order-events": 0.7}
+    r = _route(hits=[], decider=_Jev(scores))
+    assert [(e["name"], e["kind"]) for e in r["entities"]][0][0] == "order-events"
+    assert r["entities"][0]["confidence"] == 0.7
+    assert all(e["name"] != "orders" for e in r["entities"])
+
+
+def test_an_entity_named_in_the_question_is_a_fact():
+    r = route(_Driver(ROWS), "neo4j", "who writes order-events", ["order"], [], [],
+              decider=_Jev({"GET /orders": 0.8}))  # fmt: skip
+    assert r["entities"][0]["name"] == "order-events" and r["entities"][0]["confidence"] == 1.0
+
+
+def test_a_fitting_entity_means_something_fits():
+    r = _route(hits=[], decider=_Jev({"table:orders": 0.8}))
+    assert r["flows"] == [] and "nothing_fits" not in r
+    assert r["entities"][0]["name"] == "orders"
+
+
+def test_the_stand_in_reads_no_entities():
+    assert "entities" not in _route()
 
 
 def test_the_stand_in_answers_from_signals():
