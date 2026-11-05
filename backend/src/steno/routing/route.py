@@ -1,6 +1,7 @@
 """Build the `routing` block of a `search` answer (D142). See `steno.routing`."""
 
 import logging
+import re
 import time
 from collections import Counter
 from collections.abc import Callable
@@ -24,6 +25,7 @@ from steno.decisions.base import (
 from steno.decisions.jev import JevBackend
 from steno.decisions.standin import StandInBackend
 from steno.graph.query import forms
+from steno.graph.views import kind_of
 from steno.routing.semantic import EmbeddingsUnavailable, similar_flows
 
 log = logging.getLogger(__name__)
@@ -60,6 +62,21 @@ FLOW_QUESTION = (
 )
 SHORTLIST = 25  # flows in a shortlist, at most
 SHORTLIST_JUDGED = 10  # the same, when they're ranked by what Jev read
+ALL_ENTITIES = 500  # at or below this many topics, tables, and systems, Jev reads them all
+CHOSEN_ENTITIES = 5
+SCOPE_EXTRA = 3  # flows a named application or space may add beyond those scored highest
+ENTITY_QUESTION = "Is this the thing the user's question is talking about?"
+ENTITIES = (
+    "MATCH (n) WHERE n:Table OR n:KafkaTopic OR n:Queue OR n:DataStore OR n:ExternalSystem "
+    "OPTIONAL MATCH (w:Flow)-[:WRITES_TO|PRODUCES]->(n) "
+    "WITH n, collect(DISTINCT w.name)[..4] AS writers "
+    "OPTIONAL MATCH (r:Flow)-[:READS_FROM|CONSUMES|CALLS]->(n) "
+    "WITH n, writers, collect(DISTINCT r.name)[..4] AS readers "
+    "OPTIONAL MATCH (n)-[:STARTS]->(c:Flow) "
+    "WITH n, writers, readers, collect(DISTINCT c.name)[..4] AS started "
+    "RETURN n.id AS id, n.name AS name, labels(n) AS labels, writers, "
+    "readers + started AS readers"
+)
 MIN_NAME = 4  # a shorter name isn't taken as named in a question ("api")
 DOES_CHARS = 110  # each shortlisted flow's "does", at most
 CANDIDATES = 8  # flows the stand-in ranks, at most: it can't read, so more only adds noise
@@ -196,23 +213,48 @@ def route(
             key=lambda f: -f["confidence"],
         )  # fmt: skip
     judged = decisions.decider.name == "jev"  # it may have just become the stand-in
+    # What the question names comes first among what fits; the rest stays, since a question can
+    # name one application and be about what it calls
+    lowered = question.lower()
+    in_scope = {f["id"] for f in flow_scores if _scope_of(f, lowered)}
+    entities = _judge_entities(decisions, read, question, hits) if judged else []
+    judged = decisions.decider.name == "jev"
     if trace is not None:
         trace.append({"step": "proposed", "semantic": semantic, "candidates": len(candidates)})
+        trace += [
+            {"entity": e["name"], "kind": e["kind"], "score": round(e["confidence"], 3),
+             "why": e["why"]}
+            for e in entities[:20]
+        ]  # fmt: skip
         trace += [
             {"flow": f["name"], "application": f["application"],
              "score": round(f["confidence"], 3), "why": f["why"]}
             for f in flow_scores
         ]  # fmt: skip
     chosen_flows = _keep(flow_scores, threshold=FITS, at_most=CHOSEN)
+    if in_scope:  # the named scope's flows lead and may add to the answer, never crowd it out
+        kept = {f["id"] for f in chosen_flows}
+        extra = [
+            f
+            for f in flow_scores
+            if f["id"] in in_scope and f["id"] not in kept and f["confidence"] >= FITS
+        ]
+        chosen_flows = sorted(
+            chosen_flows + extra[:SCOPE_EXTRA], key=lambda f: f["id"] not in in_scope
+        )
     nothing_fits = None
-    if judged and flow_scores and flow_scores[0]["confidence"] < FITS:
+    chosen_entities = [e for e in entities if e["confidence"] >= FITS][:CHOSEN_ENTITIES]
+    best_flow = max((f["confidence"] for f in flow_scores), default=0.0)
+    if judged and flow_scores and best_flow < FITS:
         chosen_flows = []
+    if judged and flow_scores and best_flow < FITS and not chosen_entities:
         nothing_fits = {
             "why": "no flow reads as what was asked, so this may not be in what Steno has "
             "ingested, or it may be worded differently",
             "suggest": "rephrase with what the flow does, or ask the user",
             "closest": [{"name": f["name"], "application": f["application"],
-                         "confidence": round(f["confidence"], 2)} for f in flow_scores[:3]],
+                         "confidence": round(f["confidence"], 2)}
+                        for f in sorted(flow_scores, key=lambda f: -f["confidence"])[:3]],
         }  # fmt: skip
 
     # Applications and spaces follow from the flows
@@ -275,6 +317,10 @@ def route(
             shortlist = _shortlist(read, chosen_apps[0]["id"], words)
 
     banded = calibrated and not decisions.unavailable
+    named_scope = sorted(
+        {f["application"] if _scope_of(f, lowered) == "application" else f["space"]
+         for f in flow_scores if f["id"] in in_scope}
+    )  # fmt: skip
 
     def show(items: list[dict[str, Any]], chosen: list[dict[str, Any]], keys: tuple[str, ...]):
         ids = {c["id"] for c in chosen}
@@ -288,7 +334,10 @@ def route(
 
     spaces_out, spaces_alt = show(space_scores, chosen_spaces, ("name",))
     apps_out, apps_alt = show(app_scores, chosen_apps, ("id", "name", "space"))
-    flows_out, flows_alt = show(flow_scores, chosen_flows, ("id", "name", "application"))
+    # In the order chosen: a named scope's flows lead, whatever they scored
+    picked = {f["id"] for f in chosen_flows}
+    ranked = chosen_flows + [f for f in flow_scores if f["id"] not in picked]
+    flows_out, flows_alt = show(ranked, chosen_flows, ("id", "name", "application"))
     return {
         "backend": decisions.decider.name,
         "confidence": "calibrated" if banded else "uncalibrated",
@@ -302,6 +351,9 @@ def route(
         "flows": flows_out,
         "alternatives": {k: v for k, v in {"spaces": spaces_alt, "applications": apps_alt,
                                            "flows": flows_alt}.items() if v},
+        **({"entities": [{k: round(v, 2) if k == "confidence" else v for k, v in e.items()}
+                         for e in chosen_entities]} if chosen_entities else {}),
+        **({"named_in_question": named_scope} if in_scope else {}),
         **({"nothing_fits": nothing_fits} if nothing_fits else {}),
         **({"disambiguation": disambiguation} if disambiguation else {}),
         **({"shortlist": shortlist} if shortlist else {}),
@@ -346,10 +398,10 @@ def _propose(
         add(flow, f"keyword search #{rank + 1}")
     semantic = "off"
     if judged:
-        for r in rows:  # an application named in the question: all of its flows
-            names = [r["application"] or "", *(r.get("aliases") or [])]
-            if any(len(n) >= MIN_NAME and n.lower() in text for n in names):
-                add(r["id"], "its application is named in the question")
+        # An application or space named in the question: every flow in it is read first
+        for r in rows:
+            if _scope_of(r, text):
+                add(r["id"], f"its {_scope_of(r, text)} is named in the question")
         if get_settings().embeddings_enabled:
             try:
                 for rank, flow in enumerate(similar_flows(driver, database, question, SEMANTIC)):
@@ -363,7 +415,11 @@ def _propose(
                 add(r["id"], "the graph is small enough to read every flow")
     limit = JUDGED if judged else CANDIDATES
     keyword_ranks = {flow: rank for rank, flow in enumerate(keyword)}
-    ordered = list(reasons)[:limit]
+    # What the question names is read first, so the cut can't drop it
+    ordered = sorted(
+        reasons, key=lambda f: not any("named in the question" in w for w in reasons[f])
+    )
+    ordered = ordered[:limit]
     return (
         [
             {**by_id[flow], "why": reasons[flow], "keyword_rank": keyword_ranks.get(flow)}
@@ -371,6 +427,68 @@ def _propose(
         ],
         semantic,
     )
+
+
+def _names_in(name: str | None, text: str) -> bool:
+    """A name appears in the question as whole words, however it's hyphenated."""
+    if not name or len(name) < MIN_NAME:
+        return False
+    plain = re.sub(r"[-_.]+", " ", name.lower())
+    return (
+        re.search(rf"(?<![\w]){re.escape(plain)}(?![\w])", re.sub(r"[-_.]+", " ", text)) is not None
+    )
+
+
+def _named_exactly(name: str | None, text: str) -> bool:
+    """A name specific enough to be a fact: `git_commit`, not `category`, an ordinary word."""
+    return bool(name) and bool(re.search(r"[-_.]", name)) and _names_in(name, text)
+
+
+def _scope_of(row: dict[str, Any], text: str) -> str | None:
+    """Whether a flow's application or space is named in the question."""
+    if any(_names_in(n, text) for n in (row.get("application"), *(row.get("aliases") or []))):
+        return "application"
+    return "space" if _names_in(row.get("space"), text) else None
+
+
+def _judge_entities(
+    decisions: _Log, read: Callable[..., list[dict[str, Any]]], question: str,
+    hits: list[dict[str, Any]],
+) -> list[dict[str, Any]]:  # fmt: skip
+    """The topics, tables, data stores, and outside systems the question may mean, found the same
+    way as flows: each read on its own, from what it's called and what uses it. Exact names are
+    facts. Past `ALL_ENTITIES`, only those keyword search proposes are read."""
+    rows = read(ENTITIES)
+    text = question.lower()
+    keyword = {h["id"] for h in hits}
+    if len(rows) > ALL_ENTITIES:
+        rows = [r for r in rows if r["id"] in keyword or _names_in(r["name"], text)][:JUDGED]
+    if not rows:
+        return []
+    answers = decisions.decide(
+        "E1",
+        {"text": f"Question: {question}\nCandidates: " + ", ".join(r["name"] for r in rows),
+         "question": question},
+        [Noul(ENTITY_QUESTION, _entity_card(r), f"entity {r['id']}") for r in rows],
+    )  # fmt: skip
+    scored = [
+        {"id": r["id"], "kind": kind_of(r["labels"]), "name": r["name"],
+         "confidence": 1.0 if _named_exactly(r["name"], text) else a.confidence,
+         "why": "named in the question" if _named_exactly(r["name"], text)
+         else "read as what was asked"}
+        for r, a in zip(rows, answers, strict=True)
+    ]  # fmt: skip
+    return sorted(scored, key=lambda e: -e["confidence"])
+
+
+def _entity_card(row: dict[str, Any]) -> str:
+    """What a topic or table is, in the words its users supply: there's no digest to read."""
+    parts = [f"{kind_of(row['labels'])} {row['name']}"]
+    for label, names in (("written or produced by", row["writers"]),
+                         ("read or consumed by", row["readers"])):  # fmt: skip
+        if names:
+            parts.append(f"{label}: {', '.join(names)}")
+    return "; ".join(parts)
 
 
 def _roll_up(flows: list[dict[str, Any]], name: str, key: str) -> list[dict[str, Any]]:
