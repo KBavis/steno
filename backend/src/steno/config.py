@@ -146,6 +146,13 @@ class Settings(BaseSettings):
     # then do answers carry bands
     jev_calibrated: bool = False
 
+    # Semantic search over flow digests, with a local model (optional: pip install '.[semantic]')
+    embeddings_enabled: bool = False
+    embeddings_model: str = "BAAI/bge-small-en-v1.5"
+    embeddings_cache_dir: Path | None = (
+        None  # where the model is, for a machine that can't fetch it
+    )
+
     api_host: str = "127.0.0.1"
     api_port: int = 8000
     cors_origins: list[str] = ["http://localhost:5173"]

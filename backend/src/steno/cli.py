@@ -200,6 +200,34 @@ def jev_check() -> None:
     typer.echo(f"answered: {answer.confidence:.2f}, using {jev.input_tokens} input tokens")
 
 
+@graph_app.command("embed")
+def graph_embed() -> None:
+    """Embed flow digests for semantic search, with a local model. Only what changed."""
+    from steno.graph.driver import database, get_driver
+    from steno.routing.semantic import EmbeddingsUnavailable, embed_flows
+
+    try:
+        typer.echo(f"embedded {embed_flows(get_driver(), database())} flow digests")
+    except EmbeddingsUnavailable as exc:
+        typer.echo(f"not embedded: {exc}")
+        raise typer.Exit(1) from exc
+
+
+@app.command("route")
+def route_question(question: str) -> None:
+    """Show how routing reached its answer: every candidate, why it was proposed, and its score."""
+    import json
+
+    from steno.graph.driver import database, get_driver
+    from steno.routing import route
+
+    trace: list[dict] = []
+    answer = route(get_driver(), database(), question, question.split(), [], [], trace=trace)
+    for step in trace:
+        typer.echo(json.dumps(step))
+    typer.echo(json.dumps(answer, indent=1))
+
+
 @graph_app.command("summaries")
 def graph_summaries(
     repo: str = typer.Option(None, help="Only this repository's applications (and their spaces)"),

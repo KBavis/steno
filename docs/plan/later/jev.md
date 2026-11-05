@@ -2,7 +2,7 @@
 
 How Steno would use [Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) (TypeSafe's "System One" decision model) to make typed, calibrated decisions during ingestion and retrieval. Part of [Later](./README.md).
 
-> **Status: query-time routing is in the POC (D142, 2026-11-03):** Q0, Q1, Q2, Q4, and N4, with a `routing` block and its confidence in every `search` answer, reading space and application summaries and flow digests (D143). The rest below, including every ingestion decision, stays `v2`. **Earlier status: parked for `v2` (D94).** Jev isn't available to the project yet, so the POC uses stand-ins: deterministic defaults (link every candidate, marked `ambiguous`), global search with ranking by score, and naming-based heuristics (the coverage report's "looks like I/O"). The design below is kept so nothing built now blocks it; the `Decision` interface in `backend/src/steno/decisions/` keeps Jev replaceable. Individual decisions below were **Decided** as the design for when Jev arrives, unless marked deferred.
+> **Status: query-time routing is in the POC (D142, 2026-11-03), now flows first ([routing design](../routing-design.md)), so Q1 and Q2 no longer run:** Q0, Q4, and N4, with a `routing` block and its confidence in every `search` answer, reading space and application summaries and flow digests (D143). The rest below, including every ingestion decision, stays `v2`. **Earlier status: parked for `v2` (D94).** Jev isn't available to the project yet, so the POC uses stand-ins: deterministic defaults (link every candidate, marked `ambiguous`), global search with ranking by score, and naming-based heuristics (the coverage report's "looks like I/O"). The design below is kept so nothing built now blocks it; the `Decision` interface in `backend/src/steno/decisions/` keeps Jev replaceable. Individual decisions below were **Decided** as the design for when Jev arrives, unless marked deferred.
 >
 > **In one minute:** Jev answers typed questions (yes/no, a choice among up to 255 options, a score) with calibrated probabilities in 70–500 ms. Steno would use it wherever a rule can't decide: which implementation DI injects, whether a function is an entry point, which spaces a question is about, whether a candidate flow does what was asked. It never sees raw code, only bounded digests, and it never decides alone.
 
@@ -21,7 +21,7 @@ How Steno would use [Jev](https://typesafe.ai/blog/introducing-system-one-models
 
 `steno jev-check` asks one short question and shows the answer or why it failed. **If Jev can't answer, a search still routes from the stand-in and says why** (`unavailable` in the routing block). Answers carry no bands until `STENO_JEV_CALIBRATED=true`, set once its probabilities are checked on the organization's questions.
 
-**Keep the stand-in as the default until routing goes flows first.** Measured on our graph, Jev behind the top-down path got the right flow first for 7 of 15 direct questions and 0 of 11 vague ones, against 14 and 8 when it judged every flow ([routing design](../routing-design.md)). A summary line picks the wrong application before Jev reads the right flow.
+**The wording of a question matters.** "Does this do what was asked?" got the right flow first for 10 of 15 direct questions, and said nothing fit for 4 that had an answer. "Is this flow part of what the user's question is about?" got 14 of 15. Test a change in wording on the question set before relying on it.
 
 ## 1. Why Jev is central
 

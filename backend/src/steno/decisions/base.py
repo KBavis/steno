@@ -19,6 +19,7 @@ class Noul:
 
     question: str
     candidate: str | None = None
+    key: str | None = None  # tells apart questions worded the same, for a backend without text
 
 
 @dataclass(frozen=True)

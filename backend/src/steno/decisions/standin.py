@@ -24,7 +24,7 @@ class StandInBackend:
         out = []
         for q in questions:
             if isinstance(q, Noul):
-                p = float(signals.get(q.question, 0.0))
+                p = float(signals.get(q.key or q.question, 0.0))
                 out.append(Answer(value=p >= 0.5, confidence=p))
             elif isinstance(q, Choice):
                 scores = signals.get(q.question) or {}
