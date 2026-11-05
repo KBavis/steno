@@ -55,6 +55,7 @@ JDK_JAVAX = {
     "javax.tools", "javax.xml",
 }  # fmt: skip
 _PROPERTY = re.compile(r"\$\{([^}:]+)(?::([^}]*))?\}")
+_PROPERTY_DEPTH = 10  # how many keys a value may lead through, so a cycle ends
 _DOMAINS = {"com", "org", "io", "net", "dev", "de", "uk", "co", "me", "ch", "fr", "nl", "app"}
 
 
@@ -369,23 +370,27 @@ class JavaResolver:
         return out if isinstance(out, str) and re.sub(r"\{[^{}]*\}", "", out) else None
 
     def _fill(self, text: str, placeholders: bool = False) -> Any:
-        """Spring's `${key}` and `${key:default}` from config (the property map, D70). A key
-        config doesn't set and no default for: the value is unknown, or a `{key}` placeholder."""
-        missing = False
+        """Spring's `${key}` and `${key:default}` from config (the property map, D70), followed
+        through values that name other keys (`${orders.endpoint}` → `${orders.url}/items`). A
+        key config doesn't set and no default for, or keys that only name each other: the value
+        is unknown, or a `{key}` placeholder."""
 
         def sub(m: re.Match[str]) -> str:
-            nonlocal missing
             key, default = m.group(1), m.group(2)
             if key in self.properties and isinstance(self.properties[key], (str, int, float)):
                 return str(self.properties[key])
             if default is not None:
                 return default
-            missing = True
             # Kept as written, so whoever reads the URL sees which setting holds the value
             return "${" + key + "}"
 
-        out = _PROPERTY.sub(sub, text)
-        return UNRESOLVED if missing and not placeholders else out
+        out = text
+        for _ in range(_PROPERTY_DEPTH):
+            filled = _PROPERTY.sub(sub, out)
+            if filled == out:
+                break
+            out = filled
+        return UNRESOLVED if _PROPERTY.search(out) and not placeholders else out
 
     def is_subclass(self, qualname: str | None, targets: list[str]) -> bool:
         if not qualname:

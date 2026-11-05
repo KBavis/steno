@@ -558,6 +558,9 @@ class _Builder:
             target = self._app_target(host, ref.method, path)
             if target is not None:
                 return target
+            if "{" in host:  # one service across environments, however its namespace is set
+                service = route_target(host)
+                return self._external(host, service, prov, key=service)
             return self._external(host, host, prov)
         fn = self.functions.get(caller or "")
         owner = fn.container if fn else caller or self.ctx.repo
