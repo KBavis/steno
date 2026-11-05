@@ -186,11 +186,17 @@ class Extraction:
     errors: list[str] = field(default_factory=list)
 
 
+# A Kubernetes service host with a fixed service name; the namespace may hold placeholders
+_CLUSTER_HOST = re.compile(r"^[a-z0-9-]+\.[^/]+\.svc(\.cluster\.local)?(:\d+)?$", re.IGNORECASE)
+
+
 def split_url(value: Any) -> tuple[str | None, str]:
     """A URL, or a URL template, split into its host (None when unknown) and path:
     `https://{domain}/rest/api/content/{id}` → (None, `/rest/api/content/{id}`);
     `{base_url}/rest/api/2/search` → (None, `/rest/api/2/search`);
-    `${suggestion.base-url}suggestion` (a base URL from config) → (None, `/suggestion`)."""
+    `${suggestion.base-url}suggestion` (a base URL from config) → (None, `/suggestion`).
+    A cluster service name whose namespace is set per environment keeps its host, because the
+    service is named: `http://orders.${ENV}-shop.svc.cluster.local:8080/x`."""
     if not isinstance(value, str) or value == UNRESOLVED_TEXT:
         return None, ""
     if "://" in value:
@@ -205,7 +211,8 @@ def split_url(value: Any) -> tuple[str | None, str]:
         host, _, path = value.partition("/")
         path = "/" + path
     host = host.rsplit("@", 1)[-1]
-    return (host if host and "{" not in host else None), path
+    known = host and ("{" not in host or _CLUSTER_HOST.match(host))
+    return (host if known else None), path
 
 
 CONFIG_KEY = re.compile(r"\$\{([^}:]+)(?::[^}]*)?\}")

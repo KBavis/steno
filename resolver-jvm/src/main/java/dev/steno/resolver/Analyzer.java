@@ -1998,8 +1998,61 @@ final class Analyzer {
         return null;
     }
 
+    /**
+     * The URL a Spring {@code UriComponentsBuilder} chain builds: where it starts, plus its
+     * {@code path} and {@code pathSegment} calls. Query parameters aren't part of the path.
+     */
+    private String uriBuilderUrl(MethodCallExpr m, int depth, boolean template) {
+        String path = "";
+        Expression current = m;
+        while (current instanceof MethodCallExpr call) {
+            String name = call.getNameAsString();
+            Expression scope = call.getScope().orElse(null);
+            NodeList<Expression> args = call.getArguments();
+            if (scope instanceof NameExpr n && n.getNameAsString().equals("UriComponentsBuilder")) {
+                boolean start = name.equals("fromUriString") || name.equals("fromHttpUrl") || name.equals("fromUri");
+                if (!start || args.size() != 1) {
+                    return null;
+                }
+                String base = urlPart(args.get(0), depth, template);
+                return base == null ? null : base + path;
+            }
+            if (name.equals("path") && args.size() == 1) {
+                String part = urlPart(args.get(0), depth, template);
+                if (part == null) {
+                    return null;
+                }
+                path = part + path;
+            } else if (name.equals("pathSegment")) {
+                String parts = "";
+                for (Expression arg : args) {
+                    String part = urlPart(arg, depth, template);
+                    if (part == null) {
+                        return null;
+                    }
+                    parts += "/" + part;
+                }
+                path = parts + path;
+            }
+            current = scope;
+        }
+        return null;
+    }
+
+    private String urlPart(Expression e, int depth, boolean template) {
+        if (!template) {
+            return asText(valueOf(e, depth + 1));
+        }
+        String part = templateOf(e, depth + 1);
+        return part != null ? part : "{" + placeholder(e) + "}";
+    }
+
     /** `String.format(fmt, args)`, `fmt.formatted(args)`, `a.concat(b)`. */
     private Object formatted(MethodCallExpr m, int depth, boolean template) {
+        String built = uriBuilderUrl(m, depth, template);
+        if (built != null) {
+            return built;
+        }
         String name = m.getNameAsString();
         Expression scope = m.getScope().orElse(null);
         NodeList<Expression> args = m.getArguments();

@@ -1,10 +1,13 @@
 """The graph plan: architecture nodes, code nodes, and each flow's trace and steps (D60, D63)."""
 
+import shutil
 from pathlib import Path
 from textwrap import dedent
 
+import pytest
+
 from steno.config import get_settings
-from steno.extraction.facts import Extraction, NodeFact, Origin
+from steno.extraction.facts import Extraction, NodeFact, Origin, split_url
 from steno.graph.build import Context, build
 from steno.graph.structure import detect
 from steno.graph.trace import decode as decode_trace
@@ -302,3 +305,150 @@ def test_a_bare_host_that_names_no_known_module_still_becomes_an_external_system
     plan = _plan(tmp_path)
     externals = [n for n in plan.nodes.values() if "ExternalSystem" in n.labels]
     assert any(n.props.get("host") == "totally-unrelated-service" for n in externals)
+
+
+needs_java = pytest.mark.skipif(
+    not (get_settings().resolver_jvm_dir / "lib").is_dir() or shutil.which("java") is None,
+    reason="the JVM helper isn't built (make resolver)",
+)
+
+
+def _java_service(root: Path, name: str, java: str, config: str = "") -> None:
+    """A Spring service in its own Gradle project, with config outside `src/main/resources`."""
+    source = root / name / "src/main/java/demo" / name.replace("-", "")
+    source.mkdir(parents=True)
+    (source / "App.java").write_text(java)
+    (root / name / "build.gradle").write_text(
+        "plugins { id 'org.springframework.boot' version '3.2.0' }\n"
+        "dependencies { implementation 'org.springframework.boot:spring-boot-starter-web' }\n"
+    )
+    settings = root / name / "src/main/config/runtime/common/app"
+    settings.mkdir(parents=True)
+    (settings / "application.yml").write_text(config)
+
+
+def _caller() -> str:
+    return dedent(
+        """
+        package demo.caller;
+        import org.springframework.beans.factory.annotation.Value;
+        import org.springframework.boot.autoconfigure.SpringBootApplication;
+        import org.springframework.web.bind.annotation.*;
+        import org.springframework.web.client.RestTemplate;
+
+        @SpringBootApplication
+        @RestController
+        public class App {
+            private final RestTemplate rest = new RestTemplate();
+            @Value("${target.endpoint.items}") private String url;
+
+            @PostMapping("/orders")
+            public String order() { return rest.getForObject(url, String.class); }
+        }
+        """
+    ).lstrip()
+
+
+CLUSTER_URL = "http://{}.${{ENVIRONMENT}}-shop-${{ROLE}}${{SUFFIX}}.svc.cluster.local:8080"
+TARGET = dedent(
+    """
+    package demo.inventory;
+    import org.springframework.boot.autoconfigure.SpringBootApplication;
+    import org.springframework.web.bind.annotation.*;
+
+    @SpringBootApplication
+    @RestController
+    public class App {
+        @GetMapping("/items")
+        public String items() { return "x"; }
+    }
+    """
+).lstrip()
+
+
+def _config(service: str) -> str:
+    return (
+        f"target.rest.url: {CLUSTER_URL.format(service)}\n"
+        "target.endpoint.items: ${target.rest.url}/items\n"
+    )
+
+
+@needs_java
+def test_a_call_through_nested_config_to_a_cluster_host_joins_the_services_endpoint(tmp_path: Path):
+    _java_service(tmp_path, "caller", _caller(), _config("demo-inventory"))
+    _java_service(tmp_path, "inventory", TARGET)
+    plan = _plan(tmp_path)
+    edges = {(e.type, e.src, e.dst) for e in plan.edges.values()}
+    assert ("CALLS", "flow:demo-caller:POST /orders", "endpoint:demo-inventory:GET:/items") in edges
+
+
+@needs_java
+def test_a_cluster_host_outside_the_repository_is_one_system_per_service(tmp_path: Path):
+    _java_service(tmp_path, "caller", _caller(), _config("other-service"))
+    plan = _plan(tmp_path)
+    node = plan.nodes["external:other-service"]
+    assert node.props["name"] == "other-service"
+    assert "${ENVIRONMENT}" in node.props["host"]
+    assert not node.props.get("stub")
+
+
+@needs_java
+def test_config_keys_that_only_name_each_other_are_left_unknown(tmp_path: Path):
+    cycle = "target.endpoint.items: ${a}\na: ${b}\nb: ${a}\n"
+    _java_service(tmp_path, "caller", _caller(), cycle)
+    plan = _plan(tmp_path)
+    assert any(n.startswith("external:unresolved") for n in plan.nodes)
+
+
+@needs_java
+def test_a_url_built_with_uri_components_builder_joins_the_services_endpoint(tmp_path: Path):
+    """Constructor `@Value`, a builder chain, and a local URI, the shape real clients take."""
+    client = dedent(
+        """
+        package demo.caller;
+        import java.net.URI;
+        import org.springframework.beans.factory.annotation.Value;
+        import org.springframework.boot.autoconfigure.SpringBootApplication;
+        import org.springframework.core.ParameterizedTypeReference;
+        import org.springframework.http.*;
+        import org.springframework.web.bind.annotation.*;
+        import org.springframework.web.client.RestTemplate;
+        import org.springframework.web.util.UriComponentsBuilder;
+
+        @SpringBootApplication
+        @RestController
+        public class App {
+            private final RestTemplate rest;
+            private final String base;
+
+            public App(RestTemplate rest, @Value("${target.endpoint.items}") String base) {
+                this.rest = rest;
+                this.base = base;
+            }
+
+            @PostMapping("/orders")
+            public String order(String id) {
+                URI uri = UriComponentsBuilder.fromUriString(base)
+                    .queryParam("id", id).build().encode().toUri();
+                return rest.exchange(uri, HttpMethod.GET, HttpEntity.EMPTY,
+                    new ParameterizedTypeReference<String>() {}).getBody();
+            }
+        }
+        """
+    ).lstrip()
+    _java_service(tmp_path, "caller", client, _config("demo-inventory"))
+    _java_service(tmp_path, "inventory", TARGET)
+    plan = _plan(tmp_path)
+    edges = {(e.type, e.src, e.dst) for e in plan.edges.values()}
+    assert ("CALLS", "flow:demo-caller:POST /orders", "endpoint:demo-inventory:GET:/items") in edges
+
+
+def test_only_a_fixed_cluster_service_name_keeps_a_templated_host():
+    assert split_url("http://orders.${ENV}-shop.svc.cluster.local:8080/items") == (
+        "orders.${ENV}-shop.svc.cluster.local:8080",
+        "/items",
+    )
+    assert split_url("http://orders.{env}.svc/items") == ("orders.{env}.svc", "/items")
+    assert split_url("https://{domain}/rest/api/2/search")[0] is None
+    assert split_url("http://{service}.shop.svc.cluster.local/items")[0] is None
+    assert split_url("https://api.${REGION}.example.com/items")[0] is None
