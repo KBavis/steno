@@ -6,8 +6,9 @@ unchanged inputs are never paid for twice (D36). In a dry run, nothing is genera
 are token-counted (estimated) and cost is projected. The model is still Open
 (docs/plan/decisions.md, open questions), decided from the dry run's numbers.
 
-`providers.py`: who writes the text (the Claude Agent SDK for development; an organization's
-gateway later). `text.py`: `generate`, the cache, and the log.
+`providers.py`: who writes the text (LiteLLM for whatever the organization runs; the Claude Agent
+SDK for development). `choice.py`: the organization's choice. `text.py`: `generate`, the cache,
+and the log.
 """
 
 from steno.llm.providers import Completion, LlmUnavailable, Provider, get_provider

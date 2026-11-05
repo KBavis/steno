@@ -28,6 +28,8 @@ class OrganizationOut(_Orm):
 class LlmChoice(BaseModel):
     provider: str = Field(min_length=1)
     model: str = Field(min_length=1)
+    base_url: str | None = None  # a gateway's address
+    api_key_ref: str | None = None  # env:NAME, never the key
 
 
 class LlmModelOption(BaseModel):
@@ -39,7 +41,8 @@ class LlmProviderOption(BaseModel):
     id: str
     label: str
     hint: str
-    models: list[LlmModelOption]
+    models: list[LlmModelOption]  # empty: the organization names its own
+    connection: bool = False  # it takes an address and a key reference
 
 
 class OrganizationSettingsIn(BaseModel):
@@ -50,8 +53,13 @@ class OrganizationSettingsOut(BaseModel):
     """What the organization chose, and what it can choose from. `llm.source`: `organization`
     when it chose, `default` when the deployment's defaults apply (STENO_LLM_*)."""
 
-    llm: dict[str, str]
+    llm: dict[str, str | None]
     llm_options: list[LlmProviderOption]
+
+
+class LlmCheckOut(BaseModel):
+    ok: bool
+    detail: str
 
 
 # --- Spaces -----------------------------------------------------------------
