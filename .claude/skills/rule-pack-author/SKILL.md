@@ -168,7 +168,17 @@ uv run steno rules check <path/to/rules/rule-id.yaml> -p <fingerprint> [-p <fing
 
 `steno rules check` runs the rule over every file the pattern occurs in (read from the git host at the ingested commit). It exits 1 when the rule states no surface fact, explains none of the pattern, or would create a generic or already-taken application name. Fix it, or change the triage. Misses are fine when you can explain them; say so in the pull request.
 
-**5. Open the pull request** as the developer, one per destination: rules for public libraries to the core packs in `rule-packs/`, rules for the organization's frameworks to its pack repository (`STENO_RULE_PACK_DIRS`; D129). Put each rule's `steno rules check` output, its facet, and its use-case question in the description. Follow the repository's own branch and PR conventions.
+**5. Open the pull request** as the developer, one per destination (D129):
+
+| The rule's pack is in | The pull request goes to |
+|---|---|
+| `rule-packs/` (a core pack: a public library) | The repository of the Steno checkout you're running: `git -C <steno checkout> remote get-url origin`. For an organization that forked Steno, that's its fork |
+| A folder in `STENO_RULE_PACK_DIRS` (the organization's own frameworks) | That folder's repository: `git -C <that folder> remote get-url origin` |
+
+- **Name the repository explicitly:** `gh pr create --repo <owner>/<name> --base <its default branch> …`. In a fork, `gh` otherwise opens the pull request against the upstream project, not the fork.
+- **Confirm the destination with the person** before the first pull request of a session ("Open it on `acme/steno`, base `main`?"). Never push to a repository the person didn't name or confirm.
+- Work on a new branch (`rules/<framework>`), never the default branch.
+- Put each rule's `steno rules check` output, its facet, and its use-case question in the description. Follow the repository's own branch and PR conventions.
 
 **6. Mark the patterns** the pull request explains: `steno coverage mark <fp>… --state proposed --note "<PR URL>"`. Once it merges and the next ingestion runs, they become `covered` on their own; any that still occur reopen.
 

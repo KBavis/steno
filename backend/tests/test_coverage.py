@@ -84,10 +84,11 @@ def test_each_gap_is_an_item(tmp_path):
     items, _ = _report(tmp_path)
     assert set(items) == {
         ("unknown_host", "app.Tenants"),
-        ("external_call", "redis.Redis.publish"),
-        ("library", "redis"),
-        # Nothing in the code starts it, but it does real work: a flow, flagged (D74)
-        ("inferred_entry", "app.nightly_cleanup"),
+        # One item per library; the library item isn't repeated beside its calls (D146)
+        ("external_call", "redis"),
+        # Nothing in the code starts it, but it does real work: a flow, flagged (D74), one
+        # item per module
+        ("inferred_entry", "app"),
     }
 
 

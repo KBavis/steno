@@ -57,8 +57,8 @@ def test_an_internal_wrapper_and_an_unknown_sdk_are_library_gaps(tmp_path):
     assert internal.samples[0]["detail"].startswith("acme_orders.")
     assert ("external_library", "stripe") in items
     # A local file is still a gap, below the network, messaging, and databases
-    assert ("file_call", "builtins.open") in items
-    assert not any(s == "external_call" and t == "builtins.open" for s, t in items)
+    assert ("file_call", "builtins") in items
+    assert not any(s == "external_call" and t == "builtins" for s, t in items)
 
 
 def test_without_prefixes_the_organizations_library_is_external(tmp_path):

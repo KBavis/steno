@@ -60,6 +60,8 @@ HARMLESS = {
     "javax.validation.ConstraintValidator#initialize",
     "jakarta.transaction.Transactional", "javax.transaction.Transactional",
     "torch.nn", "pandas.core", "sklearn",
+    # Asking the machine its own name isn't a call to anything
+    "socket.gethostname", "socket.getfqdn",
 }  # fmt: skip
 
 

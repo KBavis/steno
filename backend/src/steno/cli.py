@@ -463,6 +463,35 @@ def coverage_show(
         typer.echo(f"  {out['more']} more places; raise --limit")
 
 
+@coverage_app.command("reset")
+def coverage_reset(
+    yes: bool = typer.Option(False, "--yes", help="Don't ask; for scripts"),
+) -> None:
+    """Forget the coverage report: every item, pattern, occurrence, and triage decision
+    (ignored, expected, proposed). The next ingestion of each repository builds it again.
+    The graph, jobs, and everything else in Postgres are kept."""
+    from sqlalchemy import delete, func, select
+
+    from steno.db.models import CoverageItem, CoverageOccurrence, CoveragePattern, IgnoredFile
+    from steno.db.session import session_scope
+
+    tables = (CoverageOccurrence, CoverageItem, CoveragePattern, IgnoredFile)
+    with session_scope() as session:
+        counts = {
+            t.__tablename__: session.scalar(select(func.count()).select_from(t)) for t in tables
+        }
+        decided = session.scalar(
+            select(func.count()).select_from(CoveragePattern).where(CoveragePattern.state != "open")
+        )
+        typer.echo("  " + ", ".join(f"{n} {t}" for t, n in counts.items()))
+        typer.echo(f"  {decided} patterns have a triage decision, which is lost")
+        if not yes and not typer.confirm("Forget the coverage report?"):
+            raise typer.Exit(1)
+        for t in tables:
+            session.execute(delete(t))
+    typer.echo("coverage reset: re-ingest repositories to build it again")
+
+
 @coverage_app.command("mark")
 def coverage_mark(
     fingerprints: list[str] = typer.Argument(..., help="Patterns' fingerprints"),
