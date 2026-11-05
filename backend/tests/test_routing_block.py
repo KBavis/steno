@@ -1,7 +1,7 @@
 """The routing block (D142) with the stand-in: which spaces, applications, and flows, from
 search's signals; uncalibrated, so no bands; a shortlist when the flows can't be told apart."""
 
-from steno.decisions.base import Choice, DisabledBackend, Noul
+from steno.decisions.base import Choice, DecisionUnavailable, DisabledBackend, Noul
 from steno.decisions.standin import StandInBackend
 from steno.routing.route import _keep, band, route
 
@@ -106,3 +106,16 @@ def test_the_stand_in_answers_from_signals():
     )
     assert yes.value is True and yes.confidence == 0.8
     assert pick.value == "a" and pick.distribution == {"a": 0.75, "b": 0.25}
+
+
+def test_when_jev_cant_answer_the_search_still_routes_and_says_why():
+    class Down:
+        name = "jev"
+
+        def decide(self, decision, state, questions):
+            raise DecisionUnavailable("can't reach it")
+
+    r = _route(decider=Down())
+    assert r["backend"] == "stand_in" and r["confidence"] == "uncalibrated"
+    assert r["unavailable"] == "jev: can't reach it"
+    assert r["applications"]
