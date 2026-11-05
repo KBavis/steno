@@ -21,6 +21,7 @@ from sqlalchemy import select
 
 from steno.api.deps import SessionDep
 from steno.api.links import source_url
+from steno.connectors.pull_requests import url_in
 from steno.coverage.joins import one_sided
 from steno.coverage.patterns import triage as pattern_triage
 from steno.coverage.runs import GROUP_OF, GROUPS, SIGNAL_RANK, latest_runs
@@ -205,7 +206,7 @@ def _items(
             {
                 "kind": it.kind.value,
                 "signal": it.signal,
-                "group": GROUP_OF.get(it.signal, "ways_out"),
+                "group": _group(it.signal, it.quiet),
                 "quiet": it.quiet,
                 "target": it.target_symbol,
                 "label": it.label or it.target_symbol,
@@ -239,12 +240,29 @@ def _items(
             )
         statuses[key].append(it.status.value)
 
+    proposed = {
+        p.fingerprint: url_in(p.note)
+        for p in session.scalars(
+            select(CoveragePattern).where(CoveragePattern.state == PatternState.PROPOSED)
+        )
+    }
     out = []
     for key, g in grouped.items():
         g["status"] = _overall(statuses[key])
+        fingerprint = f"{g['signal']}:{g['target']}"
+        if fingerprint in proposed:
+            g["pull_request"] = {"url": proposed[fingerprint]}
         g["spaces"] = len({a["space"] for a in g["applications"]})
         out.append(g)
     return out
+
+
+def _group(signal: str, quiet: bool) -> str:
+    """The report's section. An unread file that's shown has evidence it may be a witness no
+    pack reads, or code in a language no pack reads: it's with repositories and witnesses."""
+    if signal == "unread_file" and not quiet:
+        return "repositories"
+    return GROUP_OF.get(signal, "ways_out")
 
 
 def _rank(g: dict[str, Any]) -> tuple[Any, ...]:

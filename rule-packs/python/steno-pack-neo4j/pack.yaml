@@ -1,0 +1,12 @@
+name: steno-pack-neo4j
+version: 0.1.0
+language: python
+source: core
+description: Neo4j, the graph database - the store an application connects to with the official driver
+facets: [Data]
+# The library versions these rules are written and tested for (coverage reports others)
+versions:
+  neo4j: ">=5, <7"
+enabled_when:
+  dependencies: [neo4j]
+  imports: [neo4j]

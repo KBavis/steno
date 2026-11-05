@@ -345,6 +345,18 @@ export function CoveragePage() {
                           <div className="list-title mono coverage-label" title={i.target}>{i.label}</div>
                           <div className="list-sub">{reach}</div>
                         </div>
+                        {i.pull_request && (
+                          <a
+                            className="badge badge-ok"
+                            href={i.pull_request.url ?? undefined}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            title="A rule for this is in a pull request. It goes away after the rule merges and this repository is ingested again."
+                          >
+                            PR open <ArrowUpRight size={11} />
+                          </a>
+                        )}
                         <span className={STATUS_BADGE[i.status]}>{STATUS_LABEL[i.status]}</span>
                         <div className="list-actions" onClick={(e) => e.stopPropagation()}>
                           {i.status === 'unexplained' ? (

@@ -26,6 +26,7 @@ from steno.config import get_settings
 from steno.connectors.git import clone as git_clone
 from steno.coverage.collect import collect as collect_coverage
 from steno.coverage.patterns import record as record_patterns
+from steno.coverage.patterns import refresh_proposed
 from steno.db.models import (
     ChangeKind,
     Connector,
@@ -366,6 +367,9 @@ def coverage(ctx: JobContext) -> dict[str, Any]:
         repository=ctx.repository.name,
         library_modules=sum(1 for m in ctx.state["structure"].modules if "Library" in m.roles),
     )
+    # What became of the rule author's pull requests (D148), before this run's statuses are set
+    pull_requests = refresh_proposed(ctx.session, ctx.repository.id)
+    ctx.session.flush()
     previous = _previous_triage(ctx)
     statuses: dict[str, CoverageStatus] = {}
     for it in report.items:
@@ -396,7 +400,8 @@ def coverage(ctx: JobContext) -> dict[str, Any]:
         **report.metrics.get("timings", {}),
         "patterns": round(time.perf_counter() - started, 2),
     }
-    return {**report.metrics, "timings": timings, "patterns": patterns}
+    return {**report.metrics, "timings": timings, "patterns": patterns,
+            "pull_requests": pull_requests}  # fmt: skip
 
 
 def _in_library(ctx: JobContext) -> Any:

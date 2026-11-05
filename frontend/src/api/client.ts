@@ -138,6 +138,8 @@ export interface CoverageItem {
   group: CoverageGroup
   /** Kept, but left out of the report unless asked for */
   quiet: boolean
+  /** A rule's pull request is open for this item (the rule author's mark) */
+  pull_request?: { url: string | null }
   target: string
   label: string
   /** In the current scope */

@@ -61,6 +61,8 @@ noise:
     - ".mvn/**"
     - ".circleci/**"
     - "gradle/wrapper/**"
+    # Rule packs are about other code: a pack's tests name topics and tables on purpose
+    - "rule-packs/**"
   config:
     - logging
     - management

@@ -193,3 +193,50 @@ def test_a_quiet_item_makes_a_quiet_pattern(session):
         select(CoveragePattern).where(CoveragePattern.fingerprint == "unread_file:.xyz@flows/")
     )
     assert p.quiet is True
+
+
+def test_a_declined_pull_request_ignores_its_pattern_with_why(session):
+    """D148: a person decided against the rule, so it stays out of the report."""
+    from steno.coverage.patterns import refresh_proposed, triage
+
+    a = _repo(session, "pattern-test-declined")
+    record(session, a.id, 1, [_hook(("A.java", "A#on()"))])
+    url = "https://bitbucket.acme.com/projects/P/repos/rules/pull-requests/7"
+    triage(session, ["unknown_hook:com.acme.test.AcmeHandler"], PatternState.PROPOSED, url)
+    assert refresh_proposed(session, a.id, lambda u: "declined")["declined"] == 1
+    p = _pattern(session)
+    assert (p.state, p.note) == (PatternState.IGNORED, f"pull request declined: {url}")
+    # It stays out in later runs
+    record(session, a.id, 2, [_hook(("A.java", "A#on()"))])
+    assert _pattern(session).state == PatternState.IGNORED
+
+
+def test_a_merged_pull_request_covers_what_it_explains_and_reopens_what_it_missed(session):
+    from steno.coverage.patterns import refresh_proposed, triage
+
+    a = _repo(session, "pattern-test-merged")
+    fp = "unknown_hook:com.acme.test.AcmeHandler"
+    record(session, a.id, 1, [_hook(("A.java", "A#on()"))])
+    triage(session, [fp], PatternState.PROPOSED, "https://github.com/x/y/pull/1")
+    refresh_proposed(session, a.id, lambda u: "merged")
+    assert _pattern(session).state == PatternState.COVERED
+    # This run still sees it: the rule missed these, so it's open again
+    record(session, a.id, 2, [_hook(("A.java", "A#on()"))])
+    assert _pattern(session).state == PatternState.OPEN
+
+    triage(session, [fp], PatternState.PROPOSED, "https://github.com/x/y/pull/2")
+    refresh_proposed(session, a.id, lambda u: "merged")
+    record(session, a.id, 3, [])  # this run doesn't: the rule explains it
+    assert _pattern(session).state == PatternState.COVERED
+
+
+def test_an_open_or_unreadable_pull_request_changes_nothing(session):
+    from steno.coverage.patterns import refresh_proposed, triage
+
+    a = _repo(session, "pattern-test-open")
+    record(session, a.id, 1, [_hook(("A.java", "A#on()"))])
+    url = "https://github.com/x/y/pull/3"
+    triage(session, ["unknown_hook:com.acme.test.AcmeHandler"], PatternState.PROPOSED, url)
+    for answer in ("open", "unknown"):
+        refresh_proposed(session, a.id, lambda u, a=answer: a)
+        assert _pattern(session).state == PatternState.PROPOSED
