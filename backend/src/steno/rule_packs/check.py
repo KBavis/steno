@@ -68,6 +68,11 @@ class RuleCheck:
     def problems(self) -> list[str]:
         """What a reviewer must know, each in one line; empty when the rule is clean."""
         out = []
+        if not self.files:
+            out.append(
+                "nothing checked: the pattern occurs in no file Steno could read. Check a rule "
+                "before an ingestion runs it: once it explains a pattern, no occurrences remain"
+            )
         if not self.surface:
             out.append(
                 "surface: the rule states no surface fact (an entry point, a table, topic, or "
@@ -90,11 +95,12 @@ class RuleCheck:
         return out
 
     def blocking(self) -> bool:
-        """Problems a reviewer shouldn't be asked to approve: no surface fact, explaining none of
-        its pattern, or an identity clash."""
+        """Problems a reviewer shouldn't be asked to approve: nothing checked, no surface fact,
+        explaining none of its pattern, or an identity clash."""
         return bool(
-            not self.surface
-            or (self.files and not self.explained and not self.incomplete)
+            not self.files
+            or not self.surface
+            or (not self.explained and not self.incomplete)
             or self.generic
             or self.taken
         )

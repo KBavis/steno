@@ -79,3 +79,10 @@ def test_a_clue_that_completes_a_surface_fact_counts_as_surface():
     label = Rule("l", "p", "java", "code", {}, [{"clue": "label", "name": "$X"}])
     assert on_surface(table, clues=True) and not on_surface(table)
     assert not on_surface(label, clues=True)
+
+
+def test_nothing_to_check_is_refused_not_passed():
+    """A pattern a rule already explains has no occurrences: "0 of 0" isn't a proof."""
+    nothing = RuleCheck()
+    assert nothing.blocking()
+    assert nothing.problems()[0].startswith("nothing checked:")

@@ -1,0 +1,19 @@
+name: steno-pack-claude-agent-sdk
+version: 0.1.0
+language: python
+source: core
+description: The Claude Agent SDK - prompts sent to Anthropic's Claude
+facets: [Interfaces]
+versions:
+  claude-agent-sdk: ">=0.1, <1"
+enabled_when:
+  dependencies: [claude-agent-sdk]
+  imports: [claude_agent_sdk]
+library:
+  # Building options and reading the messages that come back: part of the query, not calls of their own
+  harmless:
+    - claude_agent_sdk.ClaudeAgentOptions
+    - claude_agent_sdk.AssistantMessage
+    - claude_agent_sdk.ResultMessage
+    - claude_agent_sdk.TextBlock
+    - claude_agent_sdk.RateLimitEvent

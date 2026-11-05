@@ -1,0 +1,5 @@
+nodes:
+  - DataStore:
+      vendor: neo4j
+      host: graph.local:7687
+      database: ""
