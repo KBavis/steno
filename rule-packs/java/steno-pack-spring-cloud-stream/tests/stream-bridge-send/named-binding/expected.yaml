@@ -1,0 +1,2 @@
+edges:
+  - PRODUCES: { from: "com.x.Publisher#publish(java.lang.String)", to: { KafkaTopic: { name: order-events } } }

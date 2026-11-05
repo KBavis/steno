@@ -1,0 +1,2 @@
+spring.cloud.stream.bindings.enrich-in-0.destination: raw-orders
+spring.cloud.stream.bindings.enrich-out-0.destination: rich-orders

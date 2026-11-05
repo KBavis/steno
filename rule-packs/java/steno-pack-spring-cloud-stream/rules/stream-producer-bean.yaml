@@ -1,0 +1,19 @@
+id: stream-producer-bean
+description: A functional bean that produces to the topic its binding names, e.g. @Bean Function<A, B> enrich() with spring.cloud.stream.bindings.enrich-out-0.destination
+match:
+  rule:
+    kind: method_declaration
+    all:
+      - has: { kind: modifiers, has: { regex: "^@Bean\\b" } }
+      - has: { field: type, regex: "^(java\\.util\\.function\\.)?(Function|Supplier)\\b" }
+      - has: { field: name, pattern: $NAME }
+  transform:
+    TOPIC:
+      replace:
+        source: $NAME
+        replace: "^(.*)$"
+        by: "$${spring.cloud.stream.bindings.$1-out-0.destination}"
+emit:
+  - edge: PRODUCES
+    from: "@function"
+    to: { KafkaTopic: { name: $TOPIC } }

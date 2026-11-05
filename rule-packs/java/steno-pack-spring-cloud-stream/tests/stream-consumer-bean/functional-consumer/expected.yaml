@@ -1,0 +1,5 @@
+# The binding's destination names the topic, through another config value
+nodes:
+  - KafkaTopic: { name: shop-orders }
+entry_points:
+  - { trigger: { KafkaTopic: { name: shop-orders } }, function: "com.x.Handlers#onOrder()" }
