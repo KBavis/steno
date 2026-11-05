@@ -609,9 +609,8 @@ class _Builder:
         `self.plan` by the time edges run (`run()` does every node, then every edge), so a
         miss means no handler at that exact method and path, not a target still to come.
 
-        Cross-repository service names (each microservice its own git repository) aren't
-        resolved here: that needs identity read across ingestions, like Routing's claims
-        (reconcile), not this in-memory single-repository build. Left as None, same as today."""
+        Cross-repository service names (each microservice its own git repository) are joined
+        by reconcile, which reads identity across ingestions (`reconcile/links.py`)."""
         name = route_target(host)
         if name is None or name not in self.app_by_name:
             return None

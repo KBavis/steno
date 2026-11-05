@@ -214,7 +214,7 @@ For questions, connect a client to `http://localhost:8000/mcp`, or call the API.
 - **Reported as a gap:** missed, but it says so on the coverage report.
 - **Silently missed or wrong:** the result that matters most. Write down what the code looks like, sanitized.
 
-Then add 2–3 nearby repositories, including one from another space, and repeat. **Links between repositories over HTTP aren't built yet,** so expect those as gaps for now. Topics join across repositories by name.
+Then add 2–3 nearby repositories, including one from another space, and repeat. Topics join across repositories by name. HTTP calls join when the host names the other application by its canonical name or an exact alias, such as `rootProject.name`. Other hosts stay as named systems or gaps.
 
 **What the result means:**
 
