@@ -22,7 +22,7 @@ A rule is an ast-grep `match` (where the pattern is) plus a Steno `emit` (what i
 
 ### 0. Confirm where the code is
 
-Rules are learned from real code, so first establish **which local folder holds the code to learn from** (for example a clone of Contextualized). If the request doesn't name one, **ask**. Don't search the disk for it, and don't assume the current repository: that's Steno itself, not the code the rule is for. If the person doesn't have a local copy, ask them to clone it.
+Rules are learned from real code, so first establish **where the code to learn from is**. When you're working the coverage report, it comes from the item (step 3 of that section). For a plain request, use the folder or repository the person names; if they name none, **ask**. Don't search the disk for it, and don't assume the current repository: that's Steno itself, not the code the rule is for. With no local copy, use a scratch clone (`scratch_clone.py`, below).
 
 ### 1. Restate the request as a fact
 
@@ -153,9 +153,17 @@ Patterns sharing an owner (a library, a package root) are one framework: learn i
 By signal: `internal_library` and `unknown_hook` on an organization type are usually an **internal framework** (a sender and a receiver, D61); `external_library` is usually harmless or a core-pack rule; `silent_repository` and `silent_witness` usually need a PLATFORM or DECLARED pack for files no pack reads; `one_sided` means the other end's rule is missing in the application that holds it, or it's expected.
 
 **3. Learn what the code does.** Don't guess from names. In order:
-- The library's own repository, when it's ingested: `steno coverage show` links its code at the ingested commit.
-- A local clone. Sparse-clone only what you need into a scratch folder with the person's own credentials (`git clone --depth 1 --filter=blob:none --sparse <url>`, then `git sparse-checkout set <folders>`), and delete it afterwards.
-- The public library's source or documentation, for an external library.
+- **The code where the gap occurs:** `steno coverage show <fingerprint>` lists each place, with its repository and a link at the ingested commit.
+- **The library's own repository.** Steno doesn't know who publishes an internal library yet (Artifacts A1), so find it from what the person told you or their git host's search, and if you can't, **ask them which repository it is**. Don't guess.
+- **A scratch clone,** for anything not on this machine. The helper uses the person's own git credentials, takes only the folders you name, and deletes what it made:
+
+  ```sh
+  python3 .claude/skills/rule-pack-author/scripts/scratch_clone.py clone <url> [folder ...]   # prints its path
+  python3 .claude/skills/rule-pack-author/scripts/scratch_clone.py clean <path>               # when you're done
+  ```
+
+  Always run `clean` before you finish. Anything left behind is deleted by a later clone after a day.
+- **The public library's source or documentation,** for an external library.
 
 Then write the rule and its tests as in the workflow above (steps 2–7), using the samples from `steno coverage show` and the clone as the code to learn from.
 
@@ -174,17 +182,27 @@ uv run steno rules check <path/to/rules/rule-id.yaml> -p <fingerprint> [-p <fing
 
 | The rule's pack is in | The pull request goes to |
 |---|---|
-| `rule-packs/` (a core pack: a public library) | The repository of the Steno checkout you're running: `git -C <steno checkout> remote get-url origin`. For an organization that forked Steno, that's its fork |
-| A folder in `STENO_RULE_PACK_DIRS` (the organization's own frameworks) | That folder's repository: `git -C <that folder> remote get-url origin` |
+| A folder in `STENO_RULE_PACK_DIRS` (the organization's own frameworks) | That folder's repository, for example `steno-org-rule-pack` |
+| `rule-packs/` (a core pack: a public library) | The repository of the Steno checkout you're running. For an organization that forked Steno, that's its fork |
 
-- **Name the repository explicitly:** `gh pr create --repo <owner>/<name> --base <its default branch> …`. In a fork, `gh` otherwise opens the pull request against the upstream project, not the fork.
-- **Confirm the destination with the person** before the first pull request of a session ("Open it on `acme/steno`, base `main`?"). Never push to a repository the person didn't name or confirm.
+`uv run steno rules destinations` prints both. **With `STENO_RULES_ORG_ONLY` set, nothing is committed to Steno:** write organization rules to the organization's repository, and **list each generic miss instead of writing a rule for it** (below).
+
+- **Open it with the helper,** which reads `origin` and handles GitHub (through `gh`, naming the repository, since a fork's default is its upstream), Bitbucket Cloud, and Bitbucket Server. Bitbucket needs `BITBUCKET_TOKEN`. Push the branch first:
+
+  ```sh
+  python3 .claude/skills/rule-pack-author/scripts/open_pr.py --dir <checkout> --head rules/<framework> --base <default branch> --title "..." --body-file <file> --dry-run
+  ```
+
+  Drop `--dry-run` once the person agrees.
+- **Confirm the destination with the person** before the first pull request of a session (the dry run says where it goes). Never push to a repository the person didn't name or confirm.
 - Work on a new branch (`rules/<framework>`), never the default branch.
 - Put each rule's `steno rules check` output, its facet, and its use-case question in the description. Follow the repository's own branch and PR conventions.
 
-**6. Mark the patterns** the pull request explains: `steno coverage mark <fp>… --state proposed --note "<PR URL>"`. Once it merges and the next ingestion runs, they become `covered` on their own; any that still occur reopen.
+**6. Mark the patterns** the pull request explains: `steno coverage mark <fp>… --state proposed --note "<PR URL>"`. The report shows "PR open" with the link. Nobody has to resolve anything by hand: at the next ingestion of that repository, a merged pull request's patterns become `covered`, what the rule missed reopens, and a declined one is marked `ignored` with its link and stays out of the report. (A merge doesn't trigger that ingestion yet: it happens when the repository next runs.)
 
-Report back as in step 8, plus what you marked harmless or expected and why.
+**Generic misses (`STENO_RULES_ORG_ONLY`).** A gap in a public library (Spring, Kafka clients, a vendor SDK) belongs in Steno's core packs, but nothing leaves this organization by commit. Leave the pattern open and give the person a short list to send on, one line each: the library and version, the signal, and what's missing, with at most a **synthetic** snippet. **No organization names, code, hosts, or topics:** the person may photograph this list. If they want the gap closed here in the meantime, ask first, then write it as an organization pack.
+
+Report back as in step 8, plus what you marked harmless or expected and why, and the generic misses.
 
 ## Guardrails
 

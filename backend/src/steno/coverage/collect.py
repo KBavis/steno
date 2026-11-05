@@ -58,6 +58,11 @@ EXPECTED_DROPS = ("table_of: not a mapped entity", "@function outside a function
 # input for a rule author who asks for them; untested or unknown library versions belong to
 # rule health. Everything else in the report points at the surface.
 QUIET = {"unread_file", "version_untested", "version_unknown"}
+# Files that configure something, where a witness or a framework's wiring would live
+CONFIG_SHAPED = {
+    ".yaml", ".yml", ".xml", ".conf", ".toml", ".properties", ".tf", ".hcl", ".tpl", ".ini",
+    ".cfg", ".env",
+}  # fmt: skip
 # A config key that names a connection: unread under any prefix, it's still an item (D146)
 COMMUNICATION_KEY = re.compile(
     r"(^|[.\-_])(urls?|uris?|hosts?|endpoints?|base-?url|topics?|queues?|exchanges?|channels?"
@@ -646,13 +651,25 @@ def _silent_repository(
             if holds else "holds no files Steno reads"})  # fmt: skip
 
 
+def _may_be_missed(it: Item) -> bool:
+    """An unread file worth showing (D148). Code in a language no pack reads is a service Steno
+    can't see. A config-shaped file the code refers to, or that names things in the graph,
+    may be a witness no pack reads: a compose file, an nginx config, an internal framework's
+    wiring. Other unread files stay quiet, whatever they mention."""
+    if it.target.endswith("@*"):
+        return True
+    return bool(it.evidence) and it.target.split("@", 1)[0] in CONFIG_SHAPED
+
+
 def _quiet(items: dict[Any, Item]) -> None:
     """Mark what's kept as a pattern but left out of the report (D146). Local file I/O is
     quiet unless the same file library is used by more than one application in the
     repository (code outside every application counts as one): a model a training script
     saves and a service loads is a hand-off; a service's own temporary files aren't."""
     for it in items.values():
-        if it.signal in QUIET:
+        if it.signal == "unread_file":
+            it.quiet = not _may_be_missed(it)
+        elif it.signal in QUIET:
             it.quiet = True
         elif it.signal == "file_call":
             it.quiet = len({app for _, _, app in it.keys}) < 2

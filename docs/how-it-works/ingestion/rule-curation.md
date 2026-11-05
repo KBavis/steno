@@ -26,7 +26,7 @@ flowchart LR
 | Principle | What it means |
 |---|---|
 | **An LLM drafts rules, never facts** | The graph is built only by deterministic rules |
-| **Steno finds and checks; the skill learns and writes** | Learning needs cloning, searching, and public library source, which a local agent has and Steno's worker shouldn't. Steno's worker never downloads libraries and never runs an agent |
+| **Steno finds and checks; the skill learns and writes** | Learning needs cloning, searching, and public library source, which a local agent has and Steno's worker shouldn't. The skill runs in the developer's agent; GitHub documents Copilot CLI as reading `SKILL.md` skills too (not yet tried). Steno's worker never downloads libraries and never runs an agent |
 | **Proof before review** | A rule whose tests fail, or whose check finds it explains nothing or misses most of its pattern, never reaches a pull request |
 | **A person approves every rule** | On the pull request, with the check's output in its description |
 | **Rules stay YAML in git** | Postgres holds only state *about* rules: patterns, their triage states, rule health |
@@ -44,10 +44,20 @@ A **pattern** is one kind of thing no rule explains, named by what it is, never 
 | `open` | Not dealt with yet | Steno, when it first appears or comes back |
 | `ignored` | Harmless: not on the surface (a logging helper, a utility library) | The skill or a person, with why |
 | `expected` | A real gap that's legitimately outside the organization (an endpoint only external clients call) | The skill or a person, with why |
-| `proposed` | A rule's pull request is open; the note links it | The skill |
+| `proposed` | A rule's pull request is open; the note links it, and the report shows "PR open" | The skill |
 | `covered` | No occurrences left: a rule explains it, or the code is gone | Steno |
 
 An ignored or expected pattern stays that way across runs and repositories; it reopens only when a person reopens it.
+
+**Nobody resolves an item by hand (D148).** Each ingestion of a repository asks the git host about its `proposed` patterns' pull requests:
+
+| The pull request is | Then |
+|---|---|
+| Open, or the host can't say | Nothing changes |
+| Merged | `covered`. If this run still sees it, it's `open` again, so a partial rule leaves what it missed visible |
+| Declined | `ignored`, with the link as its reason. A person decided against the rule, so it stays out of the report |
+
+A merge doesn't start an ingestion yet: the item goes away when its repository next runs ([open question](../../plan/decisions.md#open-questions)).
 
 ## 3. What's worth a rule (Decided, D122, D139)
 
@@ -63,7 +73,14 @@ An internal framework shows up as many patterns sharing an owner: `com.acme.mess
 
 **A framework becomes a pack.** The organization's pack repository holds one pack per internal framework (`acme-messaging/`), with a `framework` block in `pack.yaml` (name, description, library coordinates, source repository). See [rules and packs §6](./rules-and-packs.md#6-packs-and-layout-decided).
 
-**Where a rule goes (D129).** A rule for an organization's own library goes to the organization's pack repository. A rule for a public library (Spring, Kafka clients) goes to that ecosystem's core pack in Steno's `rule-packs/`, so every organization benefits; inside an organization whose code mustn't leave it, it goes to the organization's repository as a core extension marked for upstreaming.
+**Where a rule goes (D129, D148).** `steno rules destinations` prints it.
+
+| The rule is for | By default | In org-only mode (`STENO_RULES_ORG_ONLY`) |
+|---|---|---|
+| The organization's own library or framework | The organization's pack repository (a folder in `STENO_RULE_PACK_DIRS`, for example a clone of `steno-org-rule-pack`) | The same |
+| A public library (Spring, Kafka clients) | That ecosystem's core pack in `rule-packs/`, in the repository of the Steno checkout: the organization's fork, if it forked Steno | **Not committed.** The skill lists it as a generic miss, in words and synthetic snippets with no organization code, for a person to report. If they ask, it can be written as an organization pack in the meantime |
+
+**The plan.** In the POC, an organization commits only to its own pack repository and reports generic misses by hand. Later, organizations open pull requests to their pack repository for their own frameworks, and to Steno for public libraries, so every organization benefits.
 
 ## 5. Working the report (Decided, D147)
 
@@ -76,7 +93,7 @@ A developer asks the skill to work the coverage report ("work the top 10 coverag
 | 3 | **Learn** | Read the library: its ingested repository, a local clone, or the public library's source. Check `steno rules list` for a rule to extend |
 | 4 | **Write** | The rule and its test cases, positive and negative, from real samples |
 | 5 | **Prove** | `steno rules test <pack>`, then `steno rules check <rule> --pattern <fingerprint>` (§6) |
-| 6 | **Open the pull request** | One per destination (§4), as the developer, with each rule's check output in the description. The destination is the repository holding the pack: the Steno checkout's `origin` for a core pack (an organization's fork, if it forked Steno), the `STENO_RULE_PACK_DIRS` folder's `origin` for an organization pack. The skill names it explicitly (`gh pr create --repo`) and confirms it with the person |
+| 6 | **Open the pull request** | One per destination (§4), as the developer, with each rule's check output in the description, on GitHub or Bitbucket. The skill confirms the destination with the person first |
 | 7 | **Mark** | The patterns `proposed` (with the pull request), `ignored`, or `expected`, with why (`PUT /api/patterns/triage`) |
 
 **Unattended drafting**, if an organization needs it later, runs the same skill headless on a schedule, so there's one drafter to keep right.

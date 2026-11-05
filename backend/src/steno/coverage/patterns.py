@@ -9,14 +9,20 @@ occurrences a run saw first. Everything here is deterministic; no LLM is involve
 
 import math
 from collections import defaultdict
+from collections.abc import Callable
 from typing import Any
+from urllib.parse import urlsplit
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from steno.connectors.git import CloneError, resolve_secret
+from steno.connectors.pull_requests import DECLINED, MERGED, UNKNOWN, url_in
+from steno.connectors.pull_requests import state_of as pull_request_state
 from steno.coverage.collect import Item
 from steno.coverage.runs import latest_runs
 from steno.db.models import (
+    Connector,
     CoverageItem,
     CoverageKind,
     CoverageOccurrence,
@@ -300,6 +306,56 @@ def triage(
         ):
             it.status = status
     return len(patterns)
+
+
+def refresh_proposed(
+    session: Session, repository_id: int, state_of: Callable[[str], str] | None = None
+) -> dict[str, int]:
+    """Ask the git host what became of the pull requests behind this repository's `proposed`
+    patterns (D148). Declined: a person decided against the rule, so the pattern is ignored,
+    with why, and stays out of the report. Merged: it's `covered`, and this run decides: if it
+    still occurs here it reopens (`_recount`), so a partial rule leaves what it missed visible.
+    Open or unknown: nothing changes. Run before this run's items are written, so the decision
+    carries into them."""
+    lookup = state_of or _pull_request_state(session)
+    rows = list(
+        session.scalars(
+            select(CoveragePattern)
+            .join(CoverageOccurrence, CoverageOccurrence.pattern_id == CoveragePattern.id)
+            .where(
+                CoverageOccurrence.repository_id == repository_id,
+                CoveragePattern.state == PatternState.PROPOSED,
+            )
+            .distinct()
+        )
+    )
+    declined = merged = 0
+    for p in rows:
+        url = url_in(p.note)
+        answer = lookup(url) if url else UNKNOWN
+        if answer == DECLINED:
+            triage(session, [p.fingerprint], PatternState.IGNORED, f"pull request declined: {url}")
+            declined += 1
+        elif answer == MERGED:
+            p.state, p.note = PatternState.COVERED, f"pull request merged: {url}"
+            merged += 1
+    return {"proposed_checked": len(rows), "declined": declined, "merged": merged}
+
+
+def _pull_request_state(session: Session) -> Callable[[str], str]:
+    """Reads a pull request's state with the credentials of the connector on its host."""
+    tokens: dict[str, str | None] = {}
+    for c in session.scalars(select(Connector)):
+        host = urlsplit(c.base_url).netloc.rsplit("@", 1)[-1]
+        try:
+            tokens[host] = resolve_secret(c.credentials_ref)
+        except CloneError:
+            tokens[host] = None
+
+    def lookup(url: str) -> str:
+        return pull_request_state(url, tokens.get(urlsplit(url).netloc.rsplit("@", 1)[-1]))
+
+    return lookup
 
 
 def occurrences(session: Session, fingerprint: str, limit: int = 50) -> dict[str, Any]:
