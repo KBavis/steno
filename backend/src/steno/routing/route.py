@@ -1,5 +1,6 @@
 """Build the `routing` block of a `search` answer (D142). See `steno.routing`."""
 
+import logging
 import time
 from collections import Counter
 from collections.abc import Callable
@@ -10,9 +11,20 @@ from sqlalchemy.orm import Session
 
 from steno.config import get_settings
 from steno.db.models import JevDecision
-from steno.decisions.base import Answer, Choice, DecisionBackend, DisabledBackend, Noul, Question
+from steno.decisions.base import (
+    Answer,
+    Choice,
+    DecisionBackend,
+    DecisionUnavailable,
+    DisabledBackend,
+    Noul,
+    Question,
+)
+from steno.decisions.jev import JevBackend
 from steno.decisions.standin import StandInBackend
 from steno.graph.query import forms
+
+log = logging.getLogger(__name__)
 
 # Q0: what kind of question it is, and the words that suggest each (the stand-in's signal)
 INTENTS = {
@@ -31,6 +43,13 @@ NEXT = {
     "how do I call X": "get_flow(id) for its trigger and payload, then view_flow_code",
     "how are A and B connected": "get_node on each, then find_dependents between them",
 }
+# What an uncalibrated answer's confidence is, in the answer itself
+NOTES = {
+    "stand_in": "the stand-in ranks by search matches; its confidences are rankings, not "
+    "probabilities: treat every choice as medium (proceed, and say it's unverified)",
+    "jev": "Jev read each candidate, but its probabilities aren't yet checked on this "
+    "organization's questions: treat every choice as medium (proceed, and say it's unverified)",
+}
 SHORTLIST = 25  # flows in a shortlist, at most
 DOES_CHARS = 110  # each shortlisted flow's "does", at most
 CANDIDATES = 8  # flows Q4 checks, at most
@@ -43,7 +62,9 @@ def backend() -> DecisionBackend:
         return DisabledBackend()
     if name == "stand_in":
         return StandInBackend()
-    raise ValueError(f"decision backend {name!r} isn't built: stand_in | disabled")
+    if name == "jev":
+        return JevBackend()
+    raise ValueError(f"decision backend {name!r} isn't built: stand_in | jev | disabled")
 
 
 def band(confidence: float, calibrated: bool) -> str | None:
@@ -58,12 +79,19 @@ class _Log:
 
     def __init__(self, session: Session | None, request_id: str | None, decider: DecisionBackend):
         self.session, self.request_id, self.decider = session, request_id, decider
+        self.unavailable: str | None = None  # why the backend was given up on, this request
 
     def decide(
         self, decision: str, state: dict[str, Any], questions: list[Question]
     ) -> list[Answer]:
         started = time.perf_counter()
-        answers = self.decider.decide(decision, state, questions)
+        try:
+            answers = self.decider.decide(decision, state, questions)
+        except DecisionUnavailable as exc:  # a search still answers: from search's own signals
+            log.warning("%s unavailable for %s: %s", self.decider.name, decision, exc)
+            self.unavailable = f"{self.decider.name}: {exc}"
+            self.decider = StandInBackend()
+            answers = self.decider.decide(decision, state, questions)
         if self.session is not None:
             self.session.add(
                 JevDecision(
@@ -100,17 +128,22 @@ def route(
 ) -> dict[str, Any]:
     decider = decider or backend()
     calibrated = bool(getattr(decider, "calibrated", decider.name == "jev"))
-    log = _Log(session, request_id, decider)
+    decisions = _Log(session, request_id, decider)
     read = _reader(driver, database)
     question = query.strip()
+    judged = decider.name == "jev"  # read the text, so its score means something, even unchecked
 
     # Q0: what kind of question
     intents = list(INTENTS)
     signal = {i: 1.0 + sum(w in INTENTS[i] for w in question.lower().split()) for i in intents}
     signal["find a flow"] += 0.5  # the most common kind, ahead on a tie
-    [q0] = log.decide(
+    [q0] = decisions.decide(
         "Q0",
-        {"text": f"Question: {question}", "signals": {"kind of question": signal}},
+        {
+            "text": f"Question: {question}",
+            "question": question,
+            "signals": {"kind of question": signal},
+        },
         [Choice("kind of question", tuple(intents))],
     )
     intent = str(q0.value or "find a flow")
@@ -122,17 +155,18 @@ def route(
     )
     by_space = Counter(h.get("space") for h in hits if h.get("space"))
     most = max(by_space.values(), default=0)
-    q1 = log.decide(
+    q1 = decisions.decide(
         "Q1",
         {
             "text": f"Question: {question}\n"
             + "\n".join(f"- {s['name']}: {s['line']}" for s in spaces),
+            "question": question,
             "signals": {
                 f"Is it about {s['name']}?": by_space.get(s["name"], 0) / most if most else 0.0
                 for s in spaces
             },
         },  # fmt: skip
-        [Noul(f"Is it about {s['name']}?") for s in spaces],
+        [Noul(f"Is it about {s['name']}?", f"{s['name']}: {s['line']}") for s in spaces],
     )
     space_scores = sorted(
         (
@@ -156,16 +190,21 @@ def route(
     app_scores: list[dict[str, Any]] = []
     if apps:
         options = tuple(a["name"] for a in apps)
-        [q2] = log.decide(
+        [q2] = decisions.decide(
             "Q2",
             {
                 "text": f"Question: {question}\n"
                 + "\n".join(f"- {a['name']}: {a['line']}" for a in apps),
+                "question": question,
                 "signals": {
                     "Which application?": {a["name"]: float(by_app.get(a["name"], 0)) for a in apps}
                 },
             },  # fmt: skip
-            [Choice("Which application?", options)],
+            [
+                Choice(
+                    "Which application?", options, {a["name"]: a["line"] for a in apps if a["line"]}
+                )
+            ],
         )
         app_scores = sorted(
             ({"id": a["id"], "name": a["name"], "space": a["space"],
@@ -179,13 +218,14 @@ def route(
     disambiguation = None
     if len(named) > 1:
         options = tuple(a["name"] for a in named)
-        [n4] = log.decide(
+        [n4] = decisions.decide(
             "N4",
             {"text": f"Question: {question}\n"
                      + "\n".join(f"- {a['name']}: {a['line']}" for a in named),
+             "question": question,
              "signals": {"Which one is meant?": {a["name"]: float(by_app.get(a["name"], 0))
                                                  for a in named}}},
-            [Choice("Which one is meant?", options)],
+            [Choice("Which one is meant?", options, _lines(named))],
         )  # fmt: skip
         disambiguation = {
             "options": [{"name": a["name"], "line": a["line"],
@@ -201,17 +241,21 @@ def route(
     digests = _digests(read, [c["id"] for c in candidates])
     flow_scores = []
     if candidates:
-        q4 = log.decide(
+        q4 = decisions.decide(
             "Q4",
             {
                 "text": f"Question: {question}\n\n"
                 + "\n\n".join(digests.get(c["id"], c["name"]) for c in candidates),
+                "question": question,
                 "signals": {
                     f"Does {c['name']} do what was asked?": 1.0 / (1 + i)
                     for i, c in enumerate(candidates)
                 },
             },  # fmt: skip
-            [Noul(f"Does {c['name']} do what was asked?") for c in candidates],
+            [
+                Noul(f"Does {c['name']} do what was asked?", digests.get(c["id"], c["name"]))
+                for c in candidates
+            ],
         )
         flow_scores = sorted(
             ({"id": c["id"], "name": c["name"], "application": c.get("application"),
@@ -231,15 +275,17 @@ def route(
         not chosen_flows
         or bool(dropped)
         or "close spelling" in str(best.get("matched", ""))
-        or (calibrated and chosen_flows[0]["confidence"] < 0.9)
+        or (judged and chosen_flows[0]["confidence"] < 0.9)
     )
     shortlist = _shortlist(read, chosen_apps[0]["id"], words) if weak and chosen_apps else None
+
+    banded = calibrated and not decisions.unavailable
 
     def show(items: list[dict[str, Any]], chosen: list[dict[str, Any]], keys: tuple[str, ...]):
         ids = {c["id"] for c in chosen}
         return (
             [{**{k: i[k] for k in keys if i.get(k)}, "confidence": round(i["confidence"], 2),
-              **({"band": b} if (b := band(i["confidence"], calibrated)) else {})}
+              **({"band": b} if (b := band(i["confidence"], banded)) else {})}
              for i in items if i["id"] in ids],
             [{k: i[k] for k in keys if i.get(k)} | {"confidence": round(i["confidence"], 2)}
              for i in items if i["id"] not in ids][:5],
@@ -249,11 +295,11 @@ def route(
     apps_out, apps_alt = show(app_scores, chosen_apps, ("id", "name", "space"))
     flows_out, flows_alt = show(flow_scores, chosen_flows, ("id", "name", "application"))
     return {
-        "backend": decider.name,
-        "confidence": "calibrated" if calibrated else "uncalibrated",
-        **({"note": "the stand-in ranks by search matches; its confidences are rankings, not "
-                    "probabilities: treat every choice as medium (proceed, and say it's "
-                    "unverified)"} if not calibrated else {}),
+        "backend": decisions.decider.name,
+        "confidence": "calibrated" if banded else "uncalibrated",
+        **({"note": NOTES[decisions.decider.name]} if decisions.decider.name in NOTES
+           and not banded else {}),
+        **({"unavailable": decisions.unavailable} if decisions.unavailable else {}),
         "question_kind": {"kind": intent, "confidence": round(q0.confidence, 2),
                           "next": NEXT[intent]},
         "spaces": spaces_out,
@@ -264,6 +310,10 @@ def route(
         **({"disambiguation": disambiguation} if disambiguation else {}),
         **({"shortlist": shortlist} if shortlist else {}),
     }  # fmt: skip
+
+
+def _lines(apps: list[dict[str, Any]]) -> dict[str, str]:
+    return {a["name"]: a["line"] for a in apps if a["line"]}
 
 
 def _keep(

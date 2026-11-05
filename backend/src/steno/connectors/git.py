@@ -6,6 +6,8 @@ import subprocess
 from pathlib import Path
 from urllib.parse import quote, urlsplit, urlunsplit
 
+from dotenv import dotenv_values
+
 from steno.db.models import ConnectorKind
 
 log = logging.getLogger(__name__)
@@ -23,13 +25,14 @@ class CloneError(RuntimeError):
 
 
 def resolve_secret(credentials_ref: str | None) -> str | None:
-    """Look up a credentials reference. Only `env:NAME` exists so far; secrets are never stored."""
+    """Look up a credentials reference. Only `env:NAME` exists so far: the environment, else the
+    `.env` file settings are read from. Secrets are never stored."""
     if not credentials_ref:
         return None
     scheme, _, name = credentials_ref.partition(":")
     if scheme != "env":
         raise CloneError(f"unsupported credentials reference {credentials_ref!r} (use env:NAME)")
-    value = os.environ.get(name)
+    value = os.environ.get(name) or dotenv_values(".env").get(name)
     if not value:
         raise CloneError(
             f"credentials reference {credentials_ref!r}: environment variable {name} isn't set"

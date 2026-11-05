@@ -8,6 +8,21 @@ How Steno would use [Jev](https://typesafe.ai/blog/introducing-system-one-models
 
 ---
 
+## Reaching Jev (built)
+
+`STENO_DECISION_BACKEND=jev` (`backend/src/steno/decisions/jev.py`). The same backend reaches TypeSafe directly or an organization's gateway. Only `.env` differs:
+
+| Setting | Directly from TypeSafe | Through a gateway |
+|---|---|---|
+| `STENO_JEV_BASE_URL` | Default: `https://api.typesafe.ai/v1` | The gateway's address; Steno adds `/systemone` |
+| `STENO_JEV_API_KEY_REF` | Default: `env:JEV_API_KEY` | Any `env:NAME` |
+| `STENO_JEV_AUTH_HEADER`, `STENO_JEV_AUTH_SCHEME` | Default: `Authorization`, `Bearer` | For example `api-key`, and an empty scheme |
+| `STENO_JEV_MODEL` | Default: pinned `jev-1.14.0` | A model the gateway serves |
+
+`steno jev-check` asks one short question and shows the answer or why it failed. **If Jev can't answer, a search still routes from the stand-in and says why** (`unavailable` in the routing block). Answers carry no bands until `STENO_JEV_CALIBRATED=true`, set once its probabilities are checked on the organization's questions.
+
+**Keep the stand-in as the default until routing goes flows first.** Measured on our graph, Jev behind the top-down path got the right flow first for 7 of 15 direct questions and 0 of 11 vague ones, against 14 and 8 when it judged every flow ([routing design](../routing-design.md)). A summary line picks the wrong application before Jev reads the right flow.
+
 ## 1. Why Jev is central
 
 Navigating an organization's architecture is mostly **a series of choices made with uncertainty**: which space, which app, which flow, is this candidate really what was asked, which implementation does this call reach. With an LLM, each choice is a slow, expensive generation call whose confidence you can't trust. With Jev, each choice is:
