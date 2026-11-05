@@ -1,5 +1,5 @@
 import { Activity, Check, ChevronRight, Loader2, X } from 'lucide-react'
-import { useCallback, useState } from 'react'
+import { type MouseEvent, useCallback, useState } from 'react'
 import { api, type Job, type JobStatus, type Stage, type StageName } from '../api/client'
 import { usePoll } from '../hooks/usePoll'
 import { duration, timeAgo } from '../lib/time'
@@ -13,19 +13,56 @@ const STATUS_BADGE: Record<JobStatus, string> = {
   running: 'badge badge-warn',
   succeeded: 'badge badge-ok',
   failed: 'badge badge-fail',
+  canceled: 'badge',
 }
 
 const MODE_LABEL = { dry_run: 'Dry run', full: 'Full' }
+// A running job's worker normally answers a cancel within seconds; past this, it may be gone
+const CANCEL_UNANSWERED_MS = 60_000
+
+/** Stops a queued or running job. Offers to force it when its worker hasn't answered. */
+function CancelButton({ job, onError }: { job: Job; onError: (message?: string) => void }) {
+  const [busy, setBusy] = useState(false)
+  const asked = job.cancel_requested_at
+  const waiting = asked ? Date.now() - new Date(asked).getTime() < CANCEL_UNANSWERED_MS : false
+  const label = !asked ? 'Cancel' : waiting ? 'Canceling…' : 'Force cancel'
+
+  async function cancel(event: MouseEvent) {
+    event.stopPropagation()
+    setBusy(true)
+    onError(undefined)
+    try {
+      await api.cancelJob(job.id)
+    } catch (e) {
+      onError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      className="btn btn-secondary btn-sm"
+      disabled={busy || waiting}
+      title={asked && !waiting ? "Its worker didn't answer: mark the job canceled" : undefined}
+      onClick={cancel}
+    >
+      {label}
+    </button>
+  )
+}
 
 export function Jobs({ jobs, error, repoName }: { jobs?: Job[]; error?: string; repoName: (id: number) => string }) {
   const [open, setOpen] = useState<number>()
+  const [cancelError, setCancelError] = useState<string>()
 
   return (
     <>
       <div className="section-title">
         <h2>Recent jobs</h2>
       </div>
-      <ErrorAlert message={error} />
+      <ErrorAlert message={error ?? cancelError} />
       <div className="card">
         {jobs?.length === 0 ? (
           <EmptyState icon={Activity} title="No jobs yet">
@@ -55,6 +92,9 @@ export function Jobs({ jobs, error, repoName }: { jobs?: Job[]; error?: string; 
                     </div>
                   </div>
                   <span className="muted small">{duration(j.started_at, j.finished_at) ?? ''}</span>
+                  {(j.status === 'queued' || j.status === 'running') && (
+                    <CancelButton job={j} onError={setCancelError} />
+                  )}
                 </div>
                 {open === j.id && <JobDetail id={j.id} />}
               </li>

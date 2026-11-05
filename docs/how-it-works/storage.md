@@ -111,7 +111,7 @@ erDiagram
 | `glossary_term` | `id`, `space_id`, `term`, `target_node_id`, `definition` |
 | `rule_pack` | `id`, `name`, `version`, `source` (core / org) |
 | `repository_rule_pack` | `repository_id`, `rule_pack_id`, `enabled`, `reason` (auto / manual) |
-| `ingestion_job` | `id`, `repository_id`, `trigger` (initial / nightly / manual), `mode` (full / dry_run), `from_sha`, `to_sha`, `status` (queued / running / succeeded / failed), `queued_at`, `started_at`, `finished_at`, `error`, `stats` (json), `host` and `memory_reserved_mb` (the machine running it and what it reserved there, D128) |
+| `ingestion_job` | `id`, `repository_id`, `trigger` (initial / nightly / manual), `mode` (full / dry_run), `from_sha`, `to_sha`, `status` (queued / running / succeeded / failed), `queued_at`, `started_at`, `finished_at`, `error`, `stats` (json), `host` and `memory_reserved_mb` (the machine running it and what it reserved there, D128) A job can be canceled from the UI: a queued one at once, a running one within seconds, including the helper it waits on (`cancel_requested_at`). |
 | `ingestion_stage` | `id`, `job_id`, `stage` (clone / deps / parse / extract / assemble / identify / flows / write / reconcile / coverage / cards), `started_at`, `finished_at`, `status`, `metrics` (json), `llm_cost`, `jev_cost` |
 | `coverage_item` | `id`, `job_id`, `repository_id`, `kind` (external call / library / unreachable / unmet join / inconsistency / config), `target_symbol`, `occurrences`, `samples` (json), `status` (unexplained / ignored / explained / expected), `quiet` (left out of the report, D146) |
 | `fact_change` | `id`, `job_id`, `fact_id`, `fact_type`, `change` (added / removed / modified), `before` (json), `after` (json), `commit_sha` |

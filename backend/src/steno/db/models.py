@@ -109,6 +109,7 @@ class JobStatus(StrEnum):
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    CANCELED = "canceled"
 
 
 class StageName(StrEnum):
@@ -302,6 +303,7 @@ class IngestionJob(Base):
     )
     queued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=_now)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error: Mapped[str | None] = mapped_column(Text)
     stats: Mapped[dict[str, Any]] = mapped_column(default=dict)

@@ -1,6 +1,8 @@
 """The job queue (D35): one job per repository at a time, and a limit on jobs running at once.
 Runs against the dev Postgres inside a transaction that's rolled back; skipped without it."""
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
@@ -9,7 +11,10 @@ from steno.config import get_settings
 from steno.db.models import Connector, ConnectorKind, IngestionJob, JobMode, JobStatus, Repository
 from steno.db.session import _session_factory
 from steno.ingestion.queue import (
+    CANCEL_UNANSWERED_S,
+    JobFinished,
     RepositoryBusy,
+    cancel,
     claim_next,
     enqueue,
     recover_interrupted,
@@ -172,3 +177,39 @@ def test_recovering_jobs_marks_them_failed_but_leaves_the_disk_alone(session, tm
     assert (
         clone / "A.java"
     ).exists()  # only the CLI, at startup, removes what a stopped worker left
+
+
+def test_a_queued_job_cancels_now_and_frees_its_repository(session):
+    repo = _repo(session, "queue-test-cancel-a")
+    job = enqueue(session, repo.id, JobMode.DRY_RUN)
+    assert cancel(session, job.id).status == JobStatus.CANCELED
+    assert job.finished_at is not None
+    assert enqueue(session, repo.id, JobMode.DRY_RUN).id != job.id
+
+
+def test_a_running_job_is_asked_to_stop(session):
+    job = enqueue(session, _repo(session, "queue-test-cancel-b").id, JobMode.DRY_RUN)
+    job.status = JobStatus.RUNNING
+    session.flush()
+    assert cancel(session, job.id).status == JobStatus.RUNNING
+    first = job.cancel_requested_at
+    assert first is not None
+    assert cancel(session, job.id).status == JobStatus.RUNNING  # its worker has time to answer
+    assert job.cancel_requested_at == first
+
+
+def test_a_cancel_with_no_answer_can_be_forced(session):
+    job = enqueue(session, _repo(session, "queue-test-cancel-c").id, JobMode.DRY_RUN)
+    job.status = JobStatus.RUNNING
+    job.cancel_requested_at = datetime.now(UTC) - timedelta(seconds=CANCEL_UNANSWERED_S + 1)
+    session.flush()
+    assert cancel(session, job.id).status == JobStatus.CANCELED
+    assert "didn't answer" in job.error
+
+
+def test_a_finished_job_cant_be_canceled(session):
+    job = enqueue(session, _repo(session, "queue-test-cancel-d").id, JobMode.DRY_RUN)
+    job.status = JobStatus.SUCCEEDED
+    session.flush()
+    with pytest.raises(JobFinished):
+        cancel(session, job.id)
