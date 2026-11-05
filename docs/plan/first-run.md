@@ -4,7 +4,7 @@ A step-by-step guide to trying Steno on real repositories, on a Windows laptop w
 
 > **In one minute**
 > - Ingest one repository first, then a few nearby. Measure time, memory, and disk as you go.
-> - **No LLM or Jev is needed.** A `dry_run` job builds a real graph and skips LLM text, so no code or code-derived text leaves the laptop. Only the git host sees a clone.
+> - **No LLM or Jev is needed to start.** A `dry_run` job builds a real graph and skips LLM text, so no code or code-derived text leaves the laptop. Only the git host sees a clone.
 > - Before looking at any results, write down connections you know exist. Scoring those is the point of this run.
 > - Keep anything about your organization out of Steno's repository: its rules go in a separate pack repository.
 
@@ -227,24 +227,23 @@ Then add 2–3 nearby repositories, including one from another space, and repeat
 
 ## 8. Your organization's rules
 
-Keep them in their own repository, outside Steno. You can start with a local one, and add a remote on your organization's git host when you're ready.
+Keep them outside Steno's repository. **A plain local folder works:** Steno only reads the packs inside it. Git gives you history, and a remote is only needed if the skill should open pull requests, so you can add either later. Packs sit directly in the folder, or under an ecosystem folder as in `rule-packs/`.
 
 ```sh
-mkdir -p ~/steno-org-rule-pack && cd ~/steno-org-rule-pack && git init
+mkdir -p ~/steno-org-rule-pack && cd ~/steno-org-rule-pack && git init   # git is optional
 
 # Your organization's identity, for this repository only
 git config user.name "<your name>"
 git config user.email "<your work email>"
 ```
 
-Add these to `backend/.env`:
+Add this to `backend/.env`:
 
 ```sh
 STENO_RULE_PACK_DIRS=/home/<you>/steno-org-rule-pack
-STENO_RULES_ORG_ONLY=true
 ```
 
-These last two arrive with PR #28 (D148), so `git pull` once it merges. With `STENO_RULES_ORG_ONLY=true`, every rule goes to this repository and nothing is committed to Steno. When a rule is about a public framework, the skill lists it as a generic miss, with no organization code, for someone to bring back to Steno. `steno rules destinations` prints where rules will go.
+**After PR #28 merges,** `git pull` and add `STENO_RULES_ORG_ONLY=true`. Every rule then goes to this folder and nothing is committed to Steno. When a rule is about a public framework, the skill lists it as a generic miss, with no organization code, for someone to bring back to Steno. `steno rules destinations` prints where rules will go.
 
 **What goes where:**
 
@@ -261,11 +260,38 @@ These last two arrive with PR #28 (D148), so `git pull` once it merges. With `ST
 - Scores or notes from this run, unless they're sanitized.
 - Tokens: `backend/.env` is ignored by git, so keep them there or in your shell.
 
-## 10. Later, when approved
+## 10. How Steno matches a host to an application
 
-These send code-derived text (names, docstrings, digests) out of the laptop, so confirm your organization's policy first:
+Steno takes the service's name from a URL's **host**, then looks it up among every name each application goes by. It reads these for any organization, with nothing to configure:
 
-- **LLM summaries:** a `full` job with a provider, through your organization's gateway.
-- **Jev:** routing with real judgments.
+| Source | Example |
+|---|---|
+| Build file | Gradle `rootProject.name`, Maven `artifactId`, `pyproject` name |
+| Runtime name | `spring.application.name` |
+| Packs you add | A manifest's name, a deploy unit's name, your own config key |
 
-The first run doesn't need either.
+If a host doesn't match, look at what names the application has (`aliases` on its node, or its `name`). A convention of your own, such as a custom config key that holds the name, goes in your pack as a `name` claim.
+
+## 11. Next: LLM and Jev
+
+Your organization must allow code-derived text (names, docstrings, digests) to leave the laptop.
+
+**LLM summaries through a gateway** (after PR #31 merges; `git pull`, then `pip install -e .` again). In `backend/.env`:
+
+```sh
+STENO_SUMMARIES_ENABLED=true
+STENO_LLM_PROVIDER=litellm
+STENO_LLM_MODEL=openai/<a model your gateway offers>
+STENO_LLM_BASE_URL=https://<your-gateway>/v1
+STENO_LLM_API_KEY_REF=env:LLM_GATEWAY_KEY
+```
+
+```sh
+export LLM_GATEWAY_KEY=<your key>
+steno llm-check                         # one short prompt, shows the answer or why it failed
+steno job enqueue <repository-name> --mode full
+```
+
+An unreachable LLM never fails an ingestion: summaries are skipped, and the job says why.
+
+**Jev:** routing with real judgments isn't built yet. Until it is, `search` uses the stand-in, whose confidences are rankings rather than probabilities.
