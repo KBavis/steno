@@ -104,7 +104,7 @@ erDiagram
 
 | Table | Columns |
 |---|---|
-| `organization` | `id` (always 1), `name`, `description`, `onboarded_at`, `settings` (JSON: what the organization chooses for its deployment, e.g. `llm.provider` and `llm.model` for generated summaries) |
+| `organization` | `id` (always 1), `name`, `description`, `onboarded_at`, `settings` (JSON: what the organization chooses for its deployment, e.g. `llm.provider`, `llm.model`, `llm.base_url`, and `llm.api_key_ref`, a reference such as `env:NAME`, never a key) |
 | `connector` | `id`, `name`, `kind` (bitbucket / github / gitlab), `base_url`, `scope` (json: workspace, project, org), `credentials_ref` |
 | `repository` | `id`, `connector_id`, `space_id`, `name`, `clone_url`, `default_branch`, `selection` (included / discovered / excluded), `last_ingested_sha`, `status` |
 | `space` | `id`, `parent_id`, `name`, `description` |

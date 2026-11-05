@@ -133,6 +133,8 @@ class Settings(BaseSettings):
     # development), or fake (tests). An organization's gateway (Azure) comes later. The model
     # is still Open, decided from a dry run's token counts
     llm_provider: str = "claude_agent_sdk"
+    llm_base_url: str | None = None  # litellm: an organization's gateway
+    llm_api_key_ref: str | None = None  # litellm: env:NAME, never the key
     llm_model: str = "claude-sonnet-5-5"
     # Generate summaries in the job's cards stage (off: only `steno summaries` writes them)
     summaries_enabled: bool = True

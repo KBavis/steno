@@ -20,12 +20,18 @@ export type OrganizationInput = Pick<Organization, 'name' | 'description'>
 export interface LlmChoice {
   provider: string
   model: string
+  /** A gateway's address */
+  base_url?: string | null
+  /** env:NAME, never the key */
+  api_key_ref?: string | null
 }
 export interface LlmProviderOption {
   id: string
   label: string
   hint: string
   models: { id: string; label: string }[]
+  /** It takes an address and a key reference */
+  connection: boolean
 }
 /** What the organization chose (`source: 'default'` until it does) and what it can choose. */
 export interface OrganizationSettings {
@@ -374,6 +380,7 @@ export const api = {
     settings: () => request<OrganizationSettings>('/organization/settings'),
     putSettings: (body: { llm: LlmChoice }) =>
       request<OrganizationSettings>('/organization/settings', { method: 'PUT', body: JSON.stringify(body) }),
+    checkLlm: () => request<{ ok: boolean; detail: string }>('/organization/settings/llm/check', { method: 'POST' }),
   },
   spaces: crud<Space, SpaceInput>('/spaces'),
   connectors: crud<Connector, ConnectorInput>('/connectors'),

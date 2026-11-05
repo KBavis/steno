@@ -265,7 +265,7 @@ These last two arrive with PR #28 (D148), so `git pull` once it merges. With `ST
 
 These send code-derived text (names, docstrings, digests) out of the laptop, so confirm your organization's policy first:
 
-- **LLM summaries:** a `full` job with a provider, through your organization's gateway.
+- **LLM summaries:** a `full` job with your organization's LLM. In the UI's **Settings**, choose *Your organization's LLM*, give your gateway's address, a model (`openai/<model>` for a gateway that speaks the OpenAI API), and a key reference (`env:NAME`, with `NAME` set where the worker runs), then **Test connection** (or `steno llm-check`). If it can't be reached, summaries are skipped with the reason and the job still succeeds.
 - **Jev:** routing with real judgments.
 
 The first run doesn't need either.

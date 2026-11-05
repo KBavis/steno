@@ -85,7 +85,7 @@ flowchart LR
 | Code access at query time | Git host API at the ingested commit, in-memory cache. **No stored file contents.** | Code always matches the graph | Decided |
 | Code search at query time | **The git host's search API** when the graph has no lead | No stored index, consistent with no stored contents (D90) | Decided |
 | Decisions | Stand-ins in the POC; **Jev** later | Typed, calibrated, fast decisions | Jev: `v2` |
-| Text (cards) | LLM via **LiteLLM**; small model by default, Batch API, prompt caching; model chosen after the dry run | Flow purposes decide whether flows can be found | Proposed; **Open**: model |
+| Text (summaries) | The organization's chosen LLM, through **LiteLLM** (a gateway, Azure, Bedrock, a vendor's API); the Claude Agent SDK for development | Routing reads summaries to find the right space and application | Decided (D52, D149); **Open**: which model |
 | Rule drafting | The **`rule-pack-author` skill** in the developer's Claude Code; proof (`steno rules test`, `steno rules check`) and approval (a pull request) outside it | A local agent can clone, search, and read public source to work out unfamiliar frameworks; rules then run deterministically | Decided (D147) |
 | Embeddings | Stored in Neo4j's vector index | One store for vectors and traversal | Decided; **Open**: model |
 | Agent interface | **MCP** over Streamable HTTP | Claude Code, Copilot, custom agents | Decided |
