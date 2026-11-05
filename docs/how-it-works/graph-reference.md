@@ -306,7 +306,7 @@ Every relationship is either **extracted** (read directly from code or config by
 | `DEPENDS_ON` | Module → Module | `scope` | A **build dependency**, from `pom.xml` / `build.gradle`: `services/users` depends on `plugins/logging` | Extracted (build files) |
 | `EXPOSES` | Application → Interface; Application or Gateway → Route | | The app serves this endpoint or method; a gateway takes requests on this route (D132) | Extracted; routes by reconcile |
 | `FORWARDS_TO` | Route → Application | | Requests on the route go to this application, after the route's rewrite (D132); a stub application when the target names none | Reconcile |
-| `CALLS` | Step → Interface / ExternalSystem | `transport`, `confidence` | **A network call** to an endpoint or gRPC method | Extracted |
+| `CALLS` | Step → Interface / ExternalSystem | `transport`, `confidence`; `linked_by` and `certainty` (`confirmed` or `inferred`) on a call joined across repositories | **A network call** to an endpoint or gRPC method | Extracted |
 | `PRODUCES` / `CONSUMES` | Step → KafkaTopic / Queue / org-defined Interface | `consumer_group` | Async messaging. A consumer that's a flow's trigger is `STARTS`; `CONSUMES` is for a step that reads messages itself (polling). | Extracted |
 | `READS_FROM` / `WRITES_TO` | Step → Table / DataStore | `operation` | Data access. Table-level when known. | Extracted |
 | `STARTS` | Interface / Schedule → Flow | | **What starts a flow**: this endpoint, topic, or schedule kicks it off | Extracted |

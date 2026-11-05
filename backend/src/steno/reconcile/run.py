@@ -26,9 +26,18 @@ from sqlalchemy.orm import Session
 
 from steno.claims.store import active
 from steno.claims.types import channel_key, route_target
-from steno.db.models import Claim, Repository, UnmatchedName, UnmatchedStatus
+from steno.db.models import (
+    ApplicationAlias,
+    ApplicationIdentity,
+    Claim,
+    IdentityState,
+    Repository,
+    UnmatchedName,
+    UnmatchedStatus,
+)
 from steno.identity.registry import resolve
 from steno.reconcile.compare import ROLES, Result, Source, Use, compare
+from steno.reconcile.links import link_services
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +54,7 @@ class Summary:
     unmatched: list[dict[str, Any]] = field(default_factory=list)
     stubs: int = 0
     routes: int = 0
+    links: int = 0
 
     def counts(self) -> dict[str, Any]:
         by: dict[str, int] = {}
@@ -56,6 +66,7 @@ class Summary:
             "unmatched_names": sorted({u["name"] for u in self.unmatched}),
             "stub_applications": self.stubs,
             "routes": self.routes,
+            "links": self.links,
         }
 
 
@@ -85,6 +96,7 @@ def reconcile(
     run.deployables(names)
     summary.routes = run.routes(names)
     summary.stubs = run.tidy_stubs()
+    summary.links = link_services(driver, database, run.application_names(), OWNER)
     summary.unmatched = run.unmatched
     return summary
 
@@ -104,6 +116,23 @@ class _Run:
             s.run(query, **params).consume()
 
     # ------------------------------------------------------------- reading
+
+    def application_names(self) -> dict[str, set[str]]:
+        """Every name an active application goes by → the applications that go by it."""
+        names: dict[str, set[str]] = {}
+        active_ids = select(ApplicationIdentity.steno_id, ApplicationIdentity.canonical_name).where(
+            ApplicationIdentity.state == IdentityState.ACTIVE
+        )
+        for steno_id, name in self.s.execute(active_ids):
+            names.setdefault(name, set()).add(steno_id)
+        aliases = (
+            select(ApplicationAlias.steno_id, ApplicationAlias.name)
+            .join(ApplicationIdentity, ApplicationIdentity.steno_id == ApplicationAlias.steno_id)
+            .where(ApplicationIdentity.state == IdentityState.ACTIVE)
+        )
+        for steno_id, name in self.s.execute(aliases):
+            names.setdefault(name, set()).add(steno_id)
+        return names
 
     def channels_of(self, apps: list[str]) -> set[str]:
         """Channels the applications' flows produce to or are started by, plus channels

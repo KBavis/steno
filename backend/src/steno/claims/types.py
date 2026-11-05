@@ -128,5 +128,7 @@ def route_target(target: str) -> str | None:
     if scheme == "lb":
         return host
     if host.endswith((".svc", ".svc.cluster.local")):
-        return host.split(".", 1)[0]
+        # A placeholder may hold a dot (`${kafka.env}`), which doesn't end the service's name
+        masked = re.sub(r"\$?\{[^{}]*\}", lambda p: "#" * len(p[0]), host)
+        return host[: masked.index(".")]
     return host if "." not in host and host != "localhost" else None
