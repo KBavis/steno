@@ -279,11 +279,13 @@ def route(
     )
     shortlist = _shortlist(read, chosen_apps[0]["id"], words) if weak and chosen_apps else None
 
+    banded = calibrated and not decisions.unavailable
+
     def show(items: list[dict[str, Any]], chosen: list[dict[str, Any]], keys: tuple[str, ...]):
         ids = {c["id"] for c in chosen}
         return (
             [{**{k: i[k] for k in keys if i.get(k)}, "confidence": round(i["confidence"], 2),
-              **({"band": b} if (b := band(i["confidence"], calibrated and not decisions.unavailable)) else {})}
+              **({"band": b} if (b := band(i["confidence"], banded)) else {})}
              for i in items if i["id"] in ids],
             [{k: i[k] for k in keys if i.get(k)} | {"confidence": round(i["confidence"], 2)}
              for i in items if i["id"] not in ids][:5],
@@ -294,9 +296,9 @@ def route(
     flows_out, flows_alt = show(flow_scores, chosen_flows, ("id", "name", "application"))
     return {
         "backend": decisions.decider.name,
-        "confidence": "calibrated" if calibrated and not decisions.unavailable else "uncalibrated",
+        "confidence": "calibrated" if banded else "uncalibrated",
         **({"note": NOTES[decisions.decider.name]} if decisions.decider.name in NOTES
-           and not (calibrated and not decisions.unavailable) else {}),
+           and not banded else {}),
         **({"unavailable": decisions.unavailable} if decisions.unavailable else {}),
         "question_kind": {"kind": intent, "confidence": round(q0.confidence, 2),
                           "next": NEXT[intent]},
