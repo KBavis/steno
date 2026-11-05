@@ -24,6 +24,7 @@ flowchart LR
 |---|---|
 | [Roadmap](./roadmap.md) | The POC stages with scope and exit criteria, how accuracy is measured, v1, v2, and risks |
 | [Onboarding](./onboarding.md) | The nine-step flow every organization goes through, and what the UI is for |
+| [First run at an organization](./first-run.md) | Step by step: trying Steno on real repositories on WSL without `uv`, what to measure, and how to score it |
 | [Organization standards](./organization-standards.md) | **Proposed.** What Steno must learn about any organization's conventions, how far to trust each source, and where each standard lives |
 | [Routing design](./routing-design.md) | **Proposed.** Finding where to look across an organization: flows first, Jev's judgments, and how services connect |
 | [Decisions](./decisions.md) | Every numbered decision (D1–D131) and the open questions |
