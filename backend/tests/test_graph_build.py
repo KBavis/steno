@@ -452,3 +452,68 @@ def test_only_a_fixed_cluster_service_name_keeps_a_templated_host():
     assert split_url("https://{domain}/rest/api/2/search")[0] is None
     assert split_url("http://{service}.shop.svc.cluster.local/items")[0] is None
     assert split_url("https://api.${REGION}.example.com/items")[0] is None
+
+
+@needs_java
+def test_stream_bindings_join_a_producer_and_a_consumer_on_one_topic(tmp_path: Path):
+    """Spring Cloud Stream: `StreamBridge` in one service, a functional bean in another. Their
+    binding destinations name the same topic, so one flow leads to the other."""
+    for name in ("publisher", "listener"):
+        _java_service(tmp_path, name, "", "")
+        (tmp_path / name / "build.gradle").write_text(
+            "dependencies {\n"
+            "  implementation 'org.springframework.boot:spring-boot-starter-web:3.2.0'\n"
+            "  implementation 'org.springframework.cloud:spring-cloud-stream-binder-kafka:4.1.0'\n"
+            "}\n"
+        )
+    source = tmp_path / "publisher/src/main/java/demo/publisher/App.java"
+    source.write_text(
+        dedent(
+            """
+            package demo.publisher;
+            import org.springframework.boot.autoconfigure.SpringBootApplication;
+            import org.springframework.cloud.stream.function.StreamBridge;
+            import org.springframework.web.bind.annotation.*;
+
+            @SpringBootApplication
+            @RestController
+            public class App {
+                private final StreamBridge bridge;
+                App(StreamBridge bridge) { this.bridge = bridge; }
+
+                @PostMapping("/orders")
+                public void order(String event) { bridge.send("orders-out-0", event); }
+            }
+            """
+        ).lstrip()
+    )
+    source = tmp_path / "listener/src/main/java/demo/listener/App.java"
+    source.write_text(
+        dedent(
+            """
+            package demo.listener;
+            import java.util.function.Consumer;
+            import org.springframework.boot.autoconfigure.SpringBootApplication;
+            import org.springframework.context.annotation.Bean;
+
+            @SpringBootApplication
+            public class App {
+                @Bean
+                public Consumer<String> onOrder() { return event -> { }; }
+            }
+            """
+        ).lstrip()
+    )
+    config = "src/main/config/runtime/common/app/application.yml"
+    (tmp_path / "publisher" / config).write_text(
+        "spring.cloud.stream:\n  bindings:\n    orders-out-0:\n      destination: order-events\n"
+    )
+    (tmp_path / "listener" / config).write_text(
+        "spring.cloud.stream:\n  bindings:\n    onOrder-in-0:\n      destination: order-events\n"
+    )
+    plan = _plan(tmp_path)
+    topic = next(n for n, v in plan.nodes.items() if "KafkaTopic" in v.labels)
+    assert plan.nodes[topic].props["name"] == "order-events"
+    edges = {(e.type, e.src, e.dst) for e in plan.edges.values()}
+    assert ("PRODUCES", "flow:demo-publisher:POST /orders", topic) in edges
+    assert any(t == "STARTS" and s == topic and "demo-listener" in d for t, s, d in edges)

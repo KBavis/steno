@@ -1,0 +1,9 @@
+id: stream-binding-destination
+description: A topic a binding names in config, e.g. spring.cloud.stream.bindings.orders-in-0.destination, which exists even when no rule sees the code using it (pollable sources)
+kind: config
+files: ["**/application*.yml", "**/application*.yaml", "**/application*.properties"]
+match:
+  key: "spring.cloud.stream.bindings.{NAME}.destination"
+emit:
+  - node: [Interface, KafkaTopic]
+    name: $VALUE

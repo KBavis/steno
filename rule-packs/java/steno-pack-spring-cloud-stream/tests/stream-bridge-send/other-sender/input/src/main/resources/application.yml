@@ -1,0 +1,1 @@
+spring.cloud.stream.bindings.events-out-0.destination: order-events

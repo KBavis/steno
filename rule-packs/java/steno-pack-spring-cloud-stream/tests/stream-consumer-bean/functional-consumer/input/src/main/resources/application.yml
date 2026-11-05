@@ -1,0 +1,5 @@
+kafka.prefix: shop
+spring.cloud.stream:
+  bindings:
+    onOrder-in-0:
+      destination: ${kafka.prefix}-orders

@@ -1,0 +1,3 @@
+# A Function produces to its -out-0 binding (stream-consumer-bean covers its -in-0)
+edges:
+  - PRODUCES: { from: "com.x.Handlers#enrich()", to: { KafkaTopic: { name: rich-orders } } }

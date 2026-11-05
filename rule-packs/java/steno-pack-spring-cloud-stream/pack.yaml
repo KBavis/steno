@@ -1,0 +1,12 @@
+name: steno-pack-spring-cloud-stream
+version: 0.1.0
+language: java
+source: core
+description: Spring Cloud Stream on its Kafka binder (functional beans, StreamBridge, binding destinations)
+# The library versions these rules are written and tested for (coverage reports others)
+versions:
+  org.springframework.cloud: ">=3.1, <5"
+enabled_when:
+  dependencies:
+    - org.springframework.cloud:spring-cloud-stream-binder-kafka
+    - org.springframework.cloud:spring-cloud-starter-stream-kafka

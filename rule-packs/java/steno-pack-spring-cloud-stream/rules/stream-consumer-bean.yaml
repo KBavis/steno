@@ -1,0 +1,22 @@
+id: stream-consumer-bean
+description: A functional bean that consumes the topic its binding names, e.g. @Bean Consumer<Order> orders() with spring.cloud.stream.bindings.orders-in-0.destination
+match:
+  rule:
+    kind: method_declaration
+    all:
+      - has: { kind: modifiers, has: { regex: "^@Bean\\b" } }
+      - has: { field: type, regex: "^(java\\.util\\.function\\.)?(Consumer|Function)\\b" }
+      - has: { field: name, pattern: $NAME }
+  transform:
+    TOPIC:
+      replace:
+        source: $NAME
+        replace: "^(.*)$"
+        by: "$${spring.cloud.stream.bindings.$1-in-0.destination}"
+emit:
+  - node: [Interface, KafkaTopic]
+    as: topic
+    name: $TOPIC
+  - entry_point:
+      trigger: topic
+      function: "@function"
