@@ -1,6 +1,6 @@
 # Routing design: finding where to look across an organization
 
-**Status: Proposed, with four points agreed in discussion on 2026-11-04 (section 8). Nothing is in the decision log yet.** If accepted, it revises D100, D142, and D143 and answers the embeddings questions left open by D22 and D54. Scope is `POC` stage A unless a point says otherwise.
+**Status: flows-first routing is built for Flows; other candidate kinds and connected flows in answers are still ahead. Four points were agreed on 2026-11-04 (section 8), and none is in the decision log yet.** If accepted, it revises D100, D142, and D143 and answers the embeddings questions left open by D22 and D54. Scope is `POC` stage A unless a point says otherwise.
 
 > **In one minute:** Steno should take a vague question and return the applications, flows, and entities to look at, how they connect, and how sure it is. Today's design narrows top down: space summary, then application summary, then keyword candidates. A test on our 166 real flows suggests a different shape: **propose widely, let Jev judge each candidate on its digest, and work out the applications and spaces from the winners.** Jev found the right flow far more often than keyword search or embeddings, and it separated "no answer here" from real answers. The largest gap is elsewhere: **our graph has no links between flows today**, so Steno can't yet follow a process across applications. Links between applications need a directory of what each service is called, and every link must state its evidence, because reading code can't prove a call.
 
@@ -53,6 +53,18 @@ Run on 2026-11-04 against the dev graph: 4 applications, 166 flows, `jev-1.14.0`
 **How far to trust this:** it's a small test, one run, on 4 applications, with questions we wrote knowing the flows. 131 of the 166 flows have docstrings. There is no Kafka in this graph, so topics weren't tested. It shows a direction; **it says nothing about accuracy with hundreds of applications.** The LLM sentences were written by Haiku from digests alone, not from code.
 
 ---
+
+### Measured through real `search` (2026-11-04)
+
+Jev reading each proposed flow, on our graph. "In the answer" means named or in the shortlist:
+
+| | Right flow first | In the answer | Right applications all named |
+|---|---|---|---|
+| 15 direct questions | 14 | 15 | 15 |
+| 11 vague questions | 8 | 11 | 11 |
+| 3 cross-application questions | 2 | 3 | 3 |
+
+All 3 questions with no answer said nothing fits. With Jev limited to names, keyword search, and semantic search's top 40 of 168 flows, results were the same except 1 of 3 cross-application questions first. The stand-in stays as it was: 9 and 13 of the 15 direct questions, 13 applications first. The same small-set limits apply. Questions were written knowing the flows, and it hasn't run at scale.
 
 ## 2. The design
 

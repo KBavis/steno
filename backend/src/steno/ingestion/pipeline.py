@@ -475,10 +475,18 @@ def cards(ctx: JobContext) -> dict[str, Any]:
     """LLM summaries for applications, spaces, and the organization (D143; flows get a
     deterministic digest in the build instead). In a dry run: count tokens and project cost
     only. Each is written only when its inputs changed; the README is read from the clone."""
+    from neo4j.exceptions import Neo4jError
+
     from steno.llm import LlmUnavailable
     from steno.llm.choice import provider_for
+    from steno.routing.semantic import EmbeddingsUnavailable, embed_flows
     from steno.summaries import summarize
 
+    if get_settings().embeddings_enabled:  # local, so it doesn't wait on an LLM or a dry run
+        try:
+            log.info("embedded %d flow digests", embed_flows(get_driver(), database()))
+        except (EmbeddingsUnavailable, Neo4jError) as exc:
+            log.warning("flow digests not embedded: %s", exc)
     if not get_settings().summaries_enabled:
         raise Skip("summaries are turned off (STENO_SUMMARIES_ENABLED)")
     apps = sorted(

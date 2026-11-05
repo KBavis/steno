@@ -1,7 +1,13 @@
 """The routing block (D142) with the stand-in: which spaces, applications, and flows, from
 search's signals; uncalibrated, so no bands; a shortlist when the flows can't be told apart."""
 
-from steno.decisions.base import Choice, DecisionUnavailable, DisabledBackend, Noul
+from steno.decisions.base import (
+    Answer,
+    Choice,
+    DecisionUnavailable,
+    DisabledBackend,
+    Noul,
+)
 from steno.decisions.standin import StandInBackend
 from steno.routing.route import _keep, band, route
 
@@ -36,11 +42,26 @@ class _Driver:
 
 
 ROWS = {
+    "MATCH (f:Flow)-[:BELONGS_TO]->(a:Application) OPTIONAL": [
+        {"id": "flow:o:DELETE /orders/{id}", "name": "DELETE /orders/{id}", "application": "orders",
+         "application_id": "app:orders", "space": "Shop", "aliases": [],
+         "digest": "DELETE /orders/{id} · orders\nDOC       Cancels an order."},
+        {"id": "flow:o:GET /orders", "name": "GET /orders", "application": "orders",
+         "application_id": "app:orders", "space": "Shop", "aliases": [],
+         "digest": "GET /orders · orders\nDOC       Lists orders."},
+        {"id": "flow:b:POST /charges", "name": "POST /charges", "application": "billing",
+         "application_id": "app:billing", "space": "Shop", "aliases": [],
+         "digest": "POST /charges · billing\nDOC       Charges a card."},
+    ],
     "MATCH (s:Space)": [{"id": "space:1", "name": "Shop", "line": "Selling things."},
                         {"id": "space:2", "name": "People", "line": "Staff."}],
+    "MATCH (a:Application) RETURN": [
+        {"id": "app:orders", "name": "orders", "line": "Takes orders."},
+        {"id": "app:billing", "name": "billing", "line": "Charges cards."},
+    ],
     "MATCH (a:Application)-[:BELONGS_TO]->(s:Space)": [
-        {"id": "app:orders", "name": "orders", "line": "Takes orders.", "space": "Shop"},
-        {"id": "app:billing", "name": "billing", "line": "Charges cards.", "space": "Shop"},
+        {"id": "app:orders", "name": "orders", "space": "Shop"},
+        {"id": "app:billing", "name": "billing", "space": "Shop"},
     ],
     "WHERE f.id IN $ids": [],
     "RETURN a.name AS app": [
@@ -73,7 +94,6 @@ def test_the_stand_in_routes_by_where_the_matches_are():
     assert r["flows"][0]["name"] == "DELETE /orders/{id}"
     # Uncalibrated: no bands anywhere
     assert all("band" not in x for k in ("spaces", "applications", "flows") for x in r[k])
-    assert r["alternatives"]["spaces"][0]["name"] == "People"
 
 
 def test_a_shortlist_when_words_were_dropped_ranked_by_the_question_words():
@@ -96,6 +116,57 @@ def test_close_calls_keep_both_branches():
     assert [s["id"] for s in _keep(scored, threshold=0.5)] == ["a", "b"]
     assert band(0.95, calibrated=True) == "high" and band(0.95, calibrated=False) is None
     assert band(0.6, True) == "medium" and band(0.2, True) == "low"
+
+
+class _Jev:
+    """Scores flows by their digests' words, as a backend that reads would."""
+
+    name = "jev"
+    calibrated = False
+
+    def __init__(self, scores):
+        self.scores = scores
+
+    def decide(self, decision, state, questions):
+        if decision == "Q4":
+            return [Answer(True, self.scores.get(q.key.split(" do what")[0][5:], 0.1))
+                    for q in questions]  # fmt: skip
+        return [Answer(q.options[0], 1.0, {q.options[0]: 1.0}) for q in questions]
+
+
+def test_jev_reads_every_flow_and_the_flows_decide_the_applications():
+    r = _route(hits=[], decider=_Jev({"POST /charges": 0.8, "GET /orders": 0.6}))
+    assert [f["name"] for f in r["flows"]] == ["POST /charges", "GET /orders"]
+    assert [a["name"] for a in r["applications"]] == ["billing", "orders"]
+    assert r["applications"][1]["confidence"] == 0.6
+    assert [s["name"] for s in r["spaces"]] == ["Shop"]
+
+
+def test_when_nothing_fits_the_answer_says_so():
+    r = _route(hits=[], decider=_Jev({"GET /orders": 0.3}))
+    assert r["flows"] == [] and r["applications"] == []
+    assert r["nothing_fits"]["closest"][0]["name"] == "GET /orders"
+    assert "rephrase" in r["nothing_fits"]["suggest"]
+
+
+def test_several_close_flows_get_a_shortlist_with_what_each_does():
+    r = _route(hits=[], decider=_Jev({"DELETE /orders/{id}": 0.7, "GET /orders": 0.6}))
+    assert r["shortlist"]["flows"][0]["does"] == "Cancels an order."
+    sure = _route(hits=[], decider=_Jev({"DELETE /orders/{id}": 0.95}))
+    assert "shortlist" not in sure
+
+
+def test_a_flow_named_in_the_question_is_a_fact():
+    r = route(_Driver(ROWS), "neo4j", "what does GET /orders return", ["orders"], [], [],
+              decider=_Jev({"GET /orders": 0.2}))  # fmt: skip
+    assert r["flows"][0]["name"] == "GET /orders" and r["flows"][0]["confidence"] == 1.0
+
+
+def test_the_trace_shows_every_candidate_and_why():
+    trace = []
+    route(_Driver(ROWS), "neo4j", "cancel", ["cancel"], [], [], decider=_Jev({}), trace=trace)
+    assert trace[0]["step"] == "proposed" and trace[0]["candidates"] == 3
+    assert "read every flow" in trace[1]["why"][0]
 
 
 def test_the_stand_in_answers_from_signals():

@@ -22,6 +22,10 @@ dependencies = [
     "uvicorn[standard]>=0.54.0",
 ]
 
+[project.optional-dependencies]
+# Semantic search with a local model. Pinned: new releases wait two weeks
+semantic = ["fastembed==0.9.0"]
+
 [project.scripts]
 steno = "steno.cli:app"
 
