@@ -14,17 +14,21 @@ from typing import Any, Protocol
 
 @dataclass(frozen=True)
 class Noul:
-    """Yes/no. The answer is a probability of yes."""
+    """Yes/no. The answer is a probability of yes. `candidate`: the text of what's being judged,
+    when it's one of several, so it's read alone."""
 
     question: str
+    candidate: str | None = None
 
 
 @dataclass(frozen=True)
 class Choice:
-    """One of up to 255 options. The answer is a distribution."""
+    """One of up to 255 options. The answer is a distribution. `descriptions`: what an option
+    means, when its name doesn't say."""
 
     question: str
     options: tuple[str, ...]
+    descriptions: dict[str, str] = field(default_factory=dict, hash=False)
 
 
 @dataclass(frozen=True)
@@ -33,6 +37,7 @@ class Score:
 
     question: str
     levels: int = 5
+    criteria: tuple[str, ...] = ()  # what each level means, low to high
 
 
 Question = Noul | Choice | Score
@@ -62,6 +67,11 @@ def band(confidence: float) -> Band:
     if confidence >= 0.5:
         return Band.ACT_LOW_CONFIDENCE
     return Band.AMBIGUOUS
+
+
+class DecisionUnavailable(RuntimeError):
+    """The backend can't decide right now (unreachable, a bad key, a limit): routing falls back
+    instead of failing the search."""
 
 
 class DecisionBackend(Protocol):

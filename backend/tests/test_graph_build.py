@@ -451,6 +451,10 @@ def test_only_a_fixed_cluster_service_name_keeps_a_templated_host():
     assert split_url("http://orders.{env}.svc/items") == ("orders.{env}.svc", "/items")
     assert split_url("https://{domain}/rest/api/2/search")[0] is None
     assert split_url("http://{service}.shop.svc.cluster.local/items")[0] is None
+    assert (
+        split_url("http://shop-${ROLE}-orders.ns.svc:8080/items")[0]
+        == "shop-${ROLE}-orders.ns.svc:8080"
+    )
     assert split_url("https://api.${REGION}.example.com/items")[0] is None
 
 

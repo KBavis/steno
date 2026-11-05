@@ -139,8 +139,19 @@ class Settings(BaseSettings):
     # Generate summaries in the job's cards stage (off: only `steno summaries` writes them)
     summaries_enabled: bool = True
     # Who makes routing's decisions at query time (D142): stand_in (ranks by search matches,
-    # uncalibrated) until there are Jev credits; disabled switches every decision off
+    # uncalibrated), jev, or disabled, which switches every decision off
     decision_backend: str = "stand_in"
+    # Jev, directly from TypeSafe by default, or through an organization's gateway: its address
+    # (Steno adds /systemone), and how it wants the key sent. The key is a reference (env:NAME)
+    jev_base_url: str = "https://api.typesafe.ai/v1"
+    jev_api_key_ref: str | None = "env:JEV_API_KEY"
+    jev_auth_header: str = "Authorization"
+    jev_auth_scheme: str = "Bearer"  # empty for a header that takes the key alone (api-key)
+    jev_model: str = "jev-1.14.0"  # pinned: scores can shift between versions
+    jev_timeout_seconds: float = 10.0
+    # Turn on once its probabilities are checked on this organization's questions (D142): only
+    # then do answers carry bands
+    jev_calibrated: bool = False
 
     api_host: str = "127.0.0.1"
     api_port: int = 8000

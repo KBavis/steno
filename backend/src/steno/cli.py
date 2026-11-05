@@ -202,6 +202,22 @@ def llm_check() -> None:
     typer.echo(f"answered in {done.latency_ms} ms: {done.text[:80]}")
 
 
+@app.command("jev-check")
+def jev_check() -> None:
+    """Ask Jev one short question, directly or through a gateway, to see that it answers."""
+    from steno.decisions.base import DecisionUnavailable, Noul
+    from steno.decisions.jev import JevBackend
+
+    jev = JevBackend()
+    typer.echo(f"{jev.url} · {jev.model}")
+    try:
+        [answer] = jev.decide("check", {"question": "Is water wet?"}, [Noul("Is this true?")])
+    except DecisionUnavailable as exc:
+        typer.echo(f"not reachable: {exc}")
+        raise typer.Exit(1) from exc
+    typer.echo(f"answered: {answer.confidence:.2f}, using {jev.input_tokens} input tokens")
+
+
 @graph_app.command("summaries")
 def graph_summaries(
     repo: str = typer.Option(None, help="Only this repository's applications (and their spaces)"),
