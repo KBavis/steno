@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException
 
 from steno.api.deps import SessionDep, sync_graph
 from steno.api.schemas import (
+    LlmCheckOut,
     LlmModelOption,
     LlmProviderOption,
     OrganizationIn,
@@ -15,7 +16,8 @@ from steno.api.schemas import (
     OrganizationSettingsOut,
 )
 from steno.db.models import Organization
-from steno.llm.choice import PROVIDERS, check, llm_choice
+from steno.llm import LlmUnavailable
+from steno.llm.choice import PROVIDERS, check, llm_choice, provider_for
 
 router = APIRouter(prefix="/organization", tags=["organization"])
 
@@ -59,6 +61,7 @@ def get_settings_(session: SessionDep) -> OrganizationSettingsOut:
                 label=p["label"],
                 hint=p["hint"],
                 models=[LlmModelOption(id=m, label=label) for m, label in p["models"].items()],
+                connection=bool(p.get("connection")),
             )
             for pid, p in PROVIDERS.items()
         ],
@@ -67,13 +70,23 @@ def get_settings_(session: SessionDep) -> OrganizationSettingsOut:
 
 @router.put("/settings", response_model=OrganizationSettingsOut)
 def put_settings(body: OrganizationSettingsIn, session: SessionDep) -> OrganizationSettingsOut:
-    """Choose the provider and model that write summaries. Summaries already written stay
-    until their inputs change."""
+    """Choose the LLM the organization uses (D149). Summaries already written stay until their
+    inputs change."""
     org = get_organization(session)
     try:
-        check(body.llm.provider, body.llm.model)
+        check(body.llm.provider, body.llm.model, body.llm.base_url, body.llm.api_key_ref)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     org.settings = {**(org.settings or {}), "llm": body.llm.model_dump()}
     session.flush()
     return get_settings_(session)
+
+
+@router.post("/settings/llm/check", response_model=LlmCheckOut)
+def check_llm(session: SessionDep) -> LlmCheckOut:
+    """Send one short prompt to the chosen LLM, to see that it answers."""
+    try:
+        done = provider_for(session).complete("Answer in one word.", "Say ok.")
+    except LlmUnavailable as exc:
+        return LlmCheckOut(ok=False, detail=str(exc))
+    return LlmCheckOut(ok=True, detail=f"{done.model} answered in {done.latency_ms} ms")

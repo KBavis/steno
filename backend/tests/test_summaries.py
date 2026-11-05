@@ -96,7 +96,8 @@ def test_the_organizations_choice_wins_over_the_defaults(session, monkeypatch):
     org.settings = {}
     session.flush()
     assert llm_choice(session) == {
-        "provider": "claude_agent_sdk", "model": "claude-haiku-5-5", "source": "default",
+        "provider": "claude_agent_sdk", "model": "claude-haiku-5-5", "base_url": None,
+        "api_key_ref": None, "source": "default",
     }  # fmt: skip
     org.settings = {"llm": {"provider": "claude_agent_sdk", "model": "claude-sonnet-5-5"}}
     session.flush()

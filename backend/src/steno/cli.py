@@ -184,6 +184,24 @@ def graph_reset(
                     typer.echo(f"{repo.name}: already queued")
 
 
+@app.command("llm-check")
+def llm_check() -> None:
+    """Send one short prompt to the LLM the organization chose, to see that it answers."""
+    from steno.db.session import session_scope
+    from steno.llm import LlmUnavailable
+    from steno.llm.choice import llm_choice, provider_for
+
+    with session_scope() as session:
+        choice = llm_choice(session)
+        typer.echo(f"{choice['provider']} / {choice['model']} ({choice['source']})")
+        try:
+            done = provider_for(session).complete("Answer in one word.", "Say ok.")
+        except LlmUnavailable as exc:
+            typer.echo(f"not reachable: {exc}")
+            raise typer.Exit(1) from exc
+    typer.echo(f"answered in {done.latency_ms} ms: {done.text[:80]}")
+
+
 @app.command("jev-check")
 def jev_check() -> None:
     """Ask Jev one short question, directly or through a gateway, to see that it answers."""
@@ -233,7 +251,7 @@ def graph_summaries(
     repo: str = typer.Option(None, help="Only this repository's applications (and their spaces)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Count tokens; write nothing"),
     provider: str = typer.Option(
-        None, help="claude_agent_sdk | fake (default: the organization's Settings)"
+        None, help="litellm | claude_agent_sdk | fake (default: the organization's Settings)"
     ),
     model: str = typer.Option(None, help="The model (default: the organization's Settings)"),
 ) -> None:
@@ -243,8 +261,7 @@ def graph_summaries(
 
     from steno.db.session import session_scope
     from steno.graph.driver import database, get_driver
-    from steno.llm import get_provider
-    from steno.llm.choice import llm_choice
+    from steno.llm.choice import provider_for
     from steno.summaries import summarize
     from steno.summaries.run import host_reader
 
@@ -258,12 +275,11 @@ def graph_summaries(
         if not apps:
             raise typer.BadParameter(f"no applications from repository {repo!r} in the graph")
     with session_scope() as session:
-        chosen = llm_choice(session)
         report = summarize(
             driver,
             db,
             session,
-            get_provider(provider or chosen["provider"], model or chosen["model"]),
+            provider_for(session, provider, model),
             applications=apps,
             read=host_reader(session),
             dry_run=dry_run,
