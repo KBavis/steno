@@ -469,6 +469,7 @@ A person approves every rule, whether they write the YAML by hand or with an AI 
 | `steno-pack-jpa` | `@Entity` + `@Table(name, schema)`; `@Entity` alone (snake_case table, Spring Boot's default); `@Entity(name = …)` |
 | `steno-pack-spring-data` | repository reads (`find*`, `get*`, `exists*`, `count*`, …), saves, deletes, and custom updates, on the table of the entity the repository manages; MongoDB `@Document`; Spring Data JDBC / R2DBC `@Table` |
 | `steno-pack-spring-kafka`, `steno-pack-kafka-clients` | `@KafkaListener` (topics from `${…}` and arrays), class-level listeners with `@KafkaHandler`, `@SendTo`, `KafkaTemplate.send`, `new ProducerRecord<>(topic, …)`, `consumer.subscribe(…)` |
+| `steno-pack-spring-cloud-stream` | Spring Cloud Stream on its Kafka binder: functional `@Bean` consumers and producers joined to topics through `spring.cloud.stream.bindings.<name>-in-0` and `-out-0`, `StreamBridge.send` with a literal binding, and each binding's destination as a topic. Pollable sources get the topic, not yet who polls it. |
 | `steno-pack-spring-jms`, `steno-pack-spring-amqp` | `@JmsListener`, `JmsTemplate.convertAndSend`, `@RabbitListener`, `RabbitTemplate.convertAndSend(queue, msg)` |
 | `steno-pack-okhttp`, `steno-pack-apache-httpclient`, `steno-pack-java-stdlib` | `Request.Builder` chains, `new HttpPost(…)`, `java.net.http` requests; `CompletableFuture.runAsync(this::m)` / executors mark the call async |
 | `steno-pack-grpc-java` | methods of a `*Grpc.*ImplBase` subclass → `GrpcMethod` + entry point |

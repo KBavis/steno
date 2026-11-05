@@ -1,0 +1,5 @@
+spring.cloud.stream:
+  bindings:
+    polled-in-0:
+      destination: polled-topic
+      binder: main

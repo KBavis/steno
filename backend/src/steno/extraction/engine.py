@@ -78,6 +78,7 @@ SECRET_KEY = re.compile(
 )
 # Interfaces keyed by name across applications: an unknown name would merge unrelated channels
 CHANNELS = {"KafkaTopic", "Queue"}
+PLACEHOLDER_DEPTH = 10  # how many keys a value may lead through, so a cycle ends
 
 
 @dataclass
@@ -85,6 +86,7 @@ class Capture:
     text: str
     expr: Any = None  # the resolver's expression for it
     node: SgNode | None = None
+    computed: bool = False  # a `transform:` output, not text from the source
 
 
 @dataclass
@@ -238,7 +240,7 @@ class Engine:
                 return Capture(", ".join(n.text() for n in many))
             # A `transform:` output (ast-grep): text, e.g. a class name in snake_case
             transformed = match.get_transformed(name)
-            return Capture(transformed) if transformed is not None else None
+            return Capture(transformed, computed=True) if transformed is not None else None
         return Capture(node.text(), resolver.expression(path, node) if resolver else None, node)
 
     def _where(self, ctx: Ctx) -> bool:
@@ -555,12 +557,27 @@ class Engine:
             return _OMIT
         assert isinstance(cap, Capture)
         r = ctx.resolver
+        if cap.computed and "${" in cap.text:  # a config key a rule built from a name
+            return self._computed_placeholder(ctx, cap.text)
         if r is None or ctx.scope is None or cap.expr is None or _names_code(r, cap.node):
             return _strip_quotes(cap.text)  # config values, method names, operators: their text
         value = r.value_of(cap.expr, ctx.scope)
         if value is UNRESOLVED:
             self._unset(ctx, cap.text)
         return UNRESOLVED_TEXT if value is UNRESOLVED else value
+
+    def _computed_placeholder(self, ctx: Ctx, text: str) -> str:
+        """A `${key}` a `transform:` built, followed through config like one written in code."""
+        value = text
+        for _ in range(PLACEHOLDER_DEPTH):
+            filled = self._placeholders(value)
+            if filled == value:
+                break
+            value = filled
+        if "${" in value:
+            self._unset(ctx, value)
+            return UNRESOLVED_TEXT
+        return value
 
     def _parameter_function(self, ctx: Ctx, spec: Any) -> NodeRef | None:
         """A function reference that's one of the enclosing function's parameters, as in a

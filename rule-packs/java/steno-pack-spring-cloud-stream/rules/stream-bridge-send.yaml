@@ -1,0 +1,21 @@
+id: stream-bridge-send
+description: Sending through a binding, e.g. streamBridge.send("orders-out-0", event) with spring.cloud.stream.bindings.orders-out-0.destination
+match:
+  rule:
+    pattern: $B.send($BINDING, $$$)
+  constraints:
+    BINDING: { regex: '^"' }
+  transform:
+    TOPIC:
+      replace:
+        source: $BINDING
+        replace: '^"(.*)"$'
+        by: "$${spring.cloud.stream.bindings.$1.destination}"
+where:
+  $B:
+    type:
+      - org.springframework.cloud.stream.function.StreamBridge
+emit:
+  - edge: PRODUCES
+    from: "@function"
+    to: { KafkaTopic: { name: $TOPIC } }
