@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Install what Steno's dev stack needs on Linux or WSL, then sync the project.
 # Safe to run repeatedly: anything already present is skipped. `make dev` and `make setup` call this.
-# User-level installs only (uv, nvm, Node 20). Docker and Java need a system install; this script tells you what to do.
+# User-level installs only (uv, nvm, Node 22). Docker and Java need a system install; this script tells you what to do.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-NODE_MAJOR=20
+NODE_MAJOR=22
 ok()   { printf '  \033[32m✔\033[0m %s\n' "$*"; }
 warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
 fail() { printf '  \033[31m✘\033[0m %s\n' "$*"; exit 1; }
@@ -26,7 +26,7 @@ else
   ok "uv $(uv --version | awk '{print $2}') installed"
 fi
 
-# Node: frontend/ (needs 20+)
+# Node: frontend/ (needs 22.12+)
 node_major() { node -v 2>/dev/null | sed 's/^v//' | cut -d. -f1; }
 if [ -s "$HOME/.nvm/nvm.sh" ]; then
   # shellcheck disable=SC1091

@@ -25,7 +25,7 @@ up:            ## Start Postgres and Neo4j
 down:          ## Stop Postgres and Neo4j (data is kept in volumes)
 	$(COMPOSE) down
 
-setup:         ## Install prerequisites (uv, Node 20) and backend/frontend dependencies
+setup:         ## Install prerequisites (uv, Node 22) and backend/frontend dependencies
 	./scripts/bootstrap.sh
 
 migrate:       ## Apply Postgres migrations

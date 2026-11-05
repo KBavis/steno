@@ -4,11 +4,22 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# bootstrap.sh installs Node 20 with nvm; load it so the UI doesn't pick up an older system Node.
+# The Node the UI needs: the version frontend/package.json asks for. With nvm, use it if it's
+# installed. Whatever's wrong with Node, the API and worker still start: only the UI needs it.
+NODE_MAJOR=22
+NODE_MINOR=12
 if [ -s "$HOME/.nvm/nvm.sh" ]; then
   # shellcheck disable=SC1091
-  . "$HOME/.nvm/nvm.sh" && nvm use --silent 20 >/dev/null
+  . "$HOME/.nvm/nvm.sh" || true
+  nvm use --silent "$NODE_MAJOR" >/dev/null 2>&1 || true
 fi
+
+node_ok() {
+  command -v node >/dev/null 2>&1 || return 1
+  local major minor
+  IFS=. read -r major minor _ <<<"$(node -v | sed 's/^v//')"
+  [ "$major" -gt "$NODE_MAJOR" ] || { [ "$major" -eq "$NODE_MAJOR" ] && [ "$minor" -ge "$NODE_MINOR" ]; }
+}
 
 MAKE="make --no-print-directory -s"
 ROOT="$(pwd)"
@@ -61,5 +72,10 @@ stop() {
 trap stop INT TERM EXIT
 run api $MAKE api
 run worker $MAKE worker
-run web $MAKE web
+if node_ok; then
+  run web $MAKE web
+else
+  echo "Not starting the UI: it needs Node $NODE_MAJOR.$NODE_MINOR or newer, and this is" \
+    "$(node -v 2>/dev/null || echo 'no Node'). The API and worker are running." >&2
+fi
 wait
