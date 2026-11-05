@@ -27,7 +27,7 @@ Today's coding agents are strong inside one repository and blind beyond it. Most
 | `rule-packs/` | Rule packs |
 | `deploy/` | docker-compose for Postgres and Neo4j |
 
-Prerequisites: Docker (on WSL, enable Docker Desktop's WSL integration), [uv](https://docs.astral.sh/uv/), Node 20+, Java 21.
+Prerequisites: Docker (on WSL, enable Docker Desktop's WSL integration), [uv](https://docs.astral.sh/uv/), Node 22.12+, Java 21.
 
 ```sh
 make up                                         # Postgres + Neo4j
