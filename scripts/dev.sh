@@ -36,7 +36,7 @@ $MAKE up
 $MAKE migrate graph-init  # both are idempotent; no-ops after the first run
 # Jobs a stopped worker was running would stay "running" forever, and keep their repository
 # locked (one job per repository); no worker is running now, so mark them interrupted
-(cd backend && uv run steno job recover)
+$MAKE recover
 
 pids=()
 run() {  # run NAME CMD...: start in the background, prefixing output with [NAME]

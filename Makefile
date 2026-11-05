@@ -1,6 +1,8 @@
 # Common development commands. Run from the repo root.
 COMPOSE := docker compose -f deploy/docker-compose.yml
-STENO   := cd backend && uv run steno
+# uv when it's installed, else the virtual environment in backend/.venv (pip install -e .)
+RUN     := $(if $(shell command -v uv 2>/dev/null),uv run ,.venv/bin/)
+STENO   := cd backend && $(RUN)steno
 
 # Neo4j's heap follows the machine: 25% of its memory, between 1 and 4 GB (D134, D135). A graph
 # is written in small transactions, so this doesn't need to grow with a repository. Set
@@ -8,10 +10,13 @@ STENO   := cd backend && uv run steno
 NEO4J_HEAP_MB ?= $(shell awk '/MemTotal/ {m = int($$2 / 1024 * 0.25); if (m < 1024) m = 1024; if (m > 4096) m = 4096; print m}' /proc/meminfo 2>/dev/null)
 export NEO4J_HEAP_MB
 
-.PHONY: dev up down setup migrate graph-init graph-stats reset-graph api worker web dry-run test lint resolver
+.PHONY: dev start up down setup migrate recover graph-init graph-stats reset-graph api worker web dry-run test lint resolver
 
 dev:           ## Install missing prerequisites, then start everything in one terminal (Ctrl+C to stop)
 	./scripts/bootstrap.sh
+	./scripts/dev.sh
+
+start:         ## Start everything in one terminal, installing nothing (Ctrl+C to stop)
 	./scripts/dev.sh
 
 up:            ## Start Postgres and Neo4j
@@ -25,6 +30,9 @@ setup:         ## Install prerequisites (uv, Node 20) and backend/frontend depen
 
 migrate:       ## Apply Postgres migrations
 	$(STENO) db upgrade
+
+recover:       ## Mark jobs a stopped worker left running as failed (only with no worker running)
+	$(STENO) job recover
 
 graph-init:    ## Create Neo4j constraints and indexes
 	$(STENO) graph init

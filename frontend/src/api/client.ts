@@ -1,7 +1,7 @@
 // Typed client for the Admin API (backend/src/steno/api). Types mirror api/schemas.py.
 
 export type JobMode = 'full' | 'dry_run'
-export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed'
+export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'
 export type StageName = 'clone' | 'deps' | 'parse' | 'extract' | 'assemble' | 'identify' | 'flows' | 'write' | 'reconcile' | 'coverage' | 'cards'
 export type StageStatus = 'running' | 'succeeded' | 'failed' | 'skipped'
 
@@ -83,6 +83,7 @@ export interface Job {
   queued_at: string
   started_at: string | null
   finished_at: string | null
+  cancel_requested_at: string | null
   error: string | null
   stats: Record<string, unknown>
 }
@@ -408,6 +409,7 @@ export const api = {
     triage: (fingerprints: string[], state: 'ignored' | 'expected' | 'proposed' | 'open', note?: string) =>
       request<{ updated: number }>('/patterns/triage', { method: 'PUT', body: JSON.stringify({ fingerprints, state, note }) }),
   },
+  cancelJob: (id: number) => request<Job>(`/jobs/${id}/cancel`, { method: 'POST' }),
   createJob: (repository_id: number, mode: JobMode) =>
     request<Job>('/jobs', { method: 'POST', body: JSON.stringify({ repository_id, mode }) }),
 }

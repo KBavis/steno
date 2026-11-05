@@ -7,7 +7,10 @@ import logging
 import multiprocessing
 import os
 import signal
+import threading
 import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 
 from steno.config import get_settings
@@ -15,10 +18,57 @@ from steno.db.models import IngestionJob, JobStatus
 from steno.db.session import session_scope
 from steno.ingestion import nightly
 from steno.ingestion.pipeline import run_job
-from steno.ingestion.queue import claim_next
+from steno.ingestion.queue import JobCanceled, claim_next
 from steno.ingestion.resources import Machine, budget_mb, host, machine
 
 log = logging.getLogger(__name__)
+
+
+CANCEL_POLL_S = 2.0
+CANCEL_SIGNAL = signal.SIGUSR1
+
+
+def _cancel_requested(job_id: int) -> bool:
+    with session_scope() as session:
+        return session.get_one(IngestionJob, job_id).cancel_requested_at is not None
+
+
+@contextmanager
+def cancellable(
+    job_id: int, requested: Callable[[int], bool] = _cancel_requested
+) -> Iterator[None]:
+    """Stop the job in this block when someone cancels it, even mid-stage. A thread watches for
+    the request and signals this process, whose main thread is running the job: `JobCanceled` is
+    raised there, and `subprocess.run` kills the helper it's waiting on (the JVM, git) as it
+    unwinds. Native code in progress finishes its current call first."""
+    if threading.current_thread() is not threading.main_thread():
+        yield  # signals only reach the main thread
+        return
+
+    def raise_canceled(*_: object) -> None:
+        raise JobCanceled
+
+    previous = signal.signal(CANCEL_SIGNAL, raise_canceled)
+    done = threading.Event()
+
+    def watch() -> None:
+        while not done.wait(CANCEL_POLL_S):
+            try:
+                if requested(job_id):
+                    log.info("job %s: canceling", job_id)
+                    os.kill(os.getpid(), CANCEL_SIGNAL)
+                    return
+            except Exception:
+                log.exception("job %s: couldn't check for a cancel", job_id)
+
+    watcher = threading.Thread(target=watch, name=f"cancel-{job_id}", daemon=True)
+    watcher.start()
+    try:
+        yield
+    finally:
+        done.set()
+        watcher.join()
+        signal.signal(CANCEL_SIGNAL, previous)
 
 
 def run_once() -> bool:
@@ -34,8 +84,16 @@ def run_once() -> bool:
     with session_scope() as session:
         job = session.get_one(IngestionJob, job_id)
         try:
-            run_job(session, job)
-            job.status = JobStatus.SUCCEEDED
+            with cancellable(job_id):
+                run_job(session, job)
+            session.refresh(job)
+            if job.status != JobStatus.CANCELED:  # canceled with its worker taken to be gone
+                job.status = JobStatus.SUCCEEDED
+        except JobCanceled:
+            session.rollback()
+            job = session.get_one(IngestionJob, job_id)
+            job.status = JobStatus.CANCELED
+            job.error = "canceled while running; the graph may hold part of this run"
         except Exception as exc:
             session.rollback()
             job = session.get_one(IngestionJob, job_id)

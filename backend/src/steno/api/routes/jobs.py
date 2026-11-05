@@ -4,7 +4,7 @@ from sqlalchemy import select
 from steno.api.deps import SessionDep, get_or_404
 from steno.api.schemas import JobCreate, JobDetail, JobOut, StageOut
 from steno.db.models import IngestionJob, IngestionStage, Repository
-from steno.ingestion.queue import RepositoryBusy, enqueue
+from steno.ingestion.queue import JobFinished, RepositoryBusy, cancel, enqueue
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -26,6 +26,16 @@ def create_job(body: JobCreate, session: SessionDep) -> IngestionJob:
             f"This repository already has a job {busy.job.status.value} (job {busy.job.id}); "
             "wait for it to finish.",
         ) from None
+
+
+@router.post("/{job_id}/cancel", response_model=JobOut)
+def cancel_job(job_id: int, session: SessionDep) -> IngestionJob:
+    """Cancel a job: a queued one now, a running one within seconds."""
+    get_or_404(session, IngestionJob, job_id)
+    try:
+        return cancel(session, job_id)
+    except JobFinished as done:
+        raise HTTPException(409, f"This job has already finished: {done}.") from None
 
 
 @router.get("/{job_id}", response_model=JobDetail)

@@ -13,6 +13,7 @@ poll at once without claiming the same job.
 
 import logging
 import shutil
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -35,6 +36,19 @@ log = logging.getLogger(__name__)
 
 # Postgres advisory lock that serializes claims, so the running-jobs limit can't be overshot
 CLAIM_LOCK = 0x5734_0001
+
+
+# A running job whose cancel went unanswered this long has no worker to answer it
+CANCEL_UNANSWERED_S = 60
+
+
+class JobCanceled(BaseException):
+    """Raised in a running job when someone cancels it. Not an `Exception`, so nothing inside a
+    stage that handles errors can swallow it."""
+
+
+class JobFinished(Exception):
+    """The job can't be canceled: it has already finished."""
 
 
 class RepositoryBusy(Exception):
@@ -165,6 +179,32 @@ def _record_wait(job: IngestionJob, plan: Plan, machine: Machine, running_here: 
         "job %s waits for memory: needs %s MB, %s MB free (%s running here)",
         job.id, plan.reserve_mb, wait["free_mb"], running_here,
     )  # fmt: skip
+
+
+def cancel(session: Session, job_id: int) -> IngestionJob:
+    """Cancel a job. A queued one is canceled now. A running one is asked to stop, and its worker
+    stops it within seconds. Asked again after `CANCEL_UNANSWERED_S`, with no answer, its worker
+    is taken to be gone, and the job is marked canceled so its repository is free again."""
+    job = session.get_one(IngestionJob, job_id, with_for_update=True)
+    now = datetime.now(UTC)
+    if job.status == JobStatus.QUEUED:
+        _mark_canceled(job, now, "canceled before it started")
+    elif job.status == JobStatus.RUNNING:
+        asked = job.cancel_requested_at
+        if asked is None:
+            job.cancel_requested_at = now
+        elif (now - asked).total_seconds() >= CANCEL_UNANSWERED_S:
+            _mark_canceled(job, now, "canceled; its worker didn't answer")
+    else:
+        raise JobFinished(job.status.value)
+    session.flush()
+    return job
+
+
+def _mark_canceled(job: IngestionJob, now: datetime, why: str) -> None:
+    job.status = JobStatus.CANCELED
+    job.finished_at = now
+    job.error = why
 
 
 def recover_interrupted(session: Session) -> list[int]:

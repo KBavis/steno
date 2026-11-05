@@ -56,6 +56,7 @@ from steno.identity.identify import deployables
 from steno.identity.identify import identify as run_identify
 from steno.identity.registry import SqlRegistry
 from steno.ingestion import memory
+from steno.ingestion.queue import JobCanceled
 from steno.ingestion.resources import (
     JVM_HEAP_MIN_MB,
     PYTHON_PARSE_MB,
@@ -682,6 +683,13 @@ def _run_stage(session: Session, ctx: JobContext, name: StageName, fn: StageFn) 
     except Skip as reason:
         metrics = {"reason": str(reason)}
         stage.status = StageStatus.SKIPPED
+    except JobCanceled:
+        session.rollback()
+        stage.status = StageStatus.FAILED
+        stage.metrics = {"error": "canceled", "seconds": round(time.perf_counter() - started, 3)}
+        stage.finished_at = _now()
+        session.commit()
+        raise
     except Exception as exc:
         stage.status = StageStatus.FAILED
         # A stage can say more than its error: the graph write reports what it did and failed
