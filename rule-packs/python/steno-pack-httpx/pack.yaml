@@ -9,3 +9,8 @@ versions:
 enabled_when:
   dependencies: [httpx]
   imports: [httpx]
+library:
+  # Reading a response (its body, its bytes as they stream) is part of the request a rule
+  # already recorded, not a call of its own
+  harmless:
+    - httpx.Response

@@ -166,7 +166,9 @@ uv run steno rules test <pack-name>
 uv run steno rules check <path/to/rules/rule-id.yaml> -p <fingerprint> [-p <fingerprint> …]
 ```
 
-`steno rules check` runs the rule over every file the pattern occurs in (read from the git host at the ingested commit). It exits 1 when the rule states no surface fact, explains none of the pattern, or would create a generic or already-taken application name. Fix it, or change the triage. Misses are fine when you can explain them; say so in the pull request.
+`steno rules check` runs the rule over every file the pattern occurs in (read from the git host at the ingested commit). **Run it before any ingestion runs the rule:** once a rule explains a pattern, no occurrences remain, and the check refuses because there's nothing to check. It exits 1 when there's nothing to check, the rule states no surface fact, explains none of the pattern, or would create a generic or already-taken application name. Fix it, or change the triage. Misses are fine when you can explain them; say so in the pull request.
+
+**Then test the question, not just the rule.** Ingest with the rule and ask Steno the use-case question you named, over `search` and `find_dependents`. A rule can pass every check and still not answer it: a data store with no edges exists, but nothing says who uses it. Name only the question it really answers, and say what it can't.
 
 **5. Open the pull request** as the developer, one per destination (D129):
 
