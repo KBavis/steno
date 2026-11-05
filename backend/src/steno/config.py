@@ -131,6 +131,9 @@ class Settings(BaseSettings):
     llm_model: str = "claude-sonnet-5-5"
     # Generate summaries in the job's cards stage (off: only `steno summaries` writes them)
     summaries_enabled: bool = True
+    # Who makes routing's decisions at query time (D142): stand_in (ranks by search matches,
+    # uncalibrated) until there are Jev credits; disabled switches every decision off
+    decision_backend: str = "stand_in"
 
     api_host: str = "127.0.0.1"
     api_port: int = 8000

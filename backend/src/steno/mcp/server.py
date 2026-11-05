@@ -55,6 +55,15 @@ mcp = MCPServer(
         "`budget-app` and `contextualized-backend` both fit; `also_named` in `get_node`), "
         "don't pick one: list the candidates, each with a line on what it is, and ask which "
         "is meant. Answer directly only when one application clearly fits.\n\n"
+        "Every `search` answer without a `scope` carries `routing`: the spaces, applications, "
+        "and flows it judged the question is about, each with a confidence, and the "
+        "`alternatives` it didn't choose. With a `band`: high, proceed; medium, proceed and "
+        "say it's a best match; low, show the options and ask the user which is meant. "
+        "`confidence: uncalibrated` (no band): the choices are rankings from keyword "
+        "matches, not judgments; treat them as medium. `shortlist`: routing couldn't tell the "
+        "flows apart, so pick from the listed flows by what each `does`, or ask. "
+        "`disambiguation`: several applications' names fit; ask which is meant unless the "
+        "question settles it. `question_kind.next` suggests the next tool.\n\n"
         "Work top-down; an organization has thousands of flows, and no page shows them all:\n"
         "1. `search` with keywords, not the question: the nouns and verbs that would be in the "
         'code or its names ("how do I delete a conversation?" → `delete conversation`; '
@@ -229,7 +238,7 @@ def _run(
     params = {k: v for k, v in params.items() if k != "ctx"}
     started = time.perf_counter()
     with session_scope() as session:
-        tools = Tools(get_driver(), database(), session)
+        tools = Tools(get_driver(), database(), session, request_id=_request_id(ctx))
         try:
             result = call(tools)
             if result.get("citations"):

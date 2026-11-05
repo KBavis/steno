@@ -9,7 +9,7 @@ How agents get context out of Steno quickly and accurately: the MCP tools, searc
 > - **How the tools work together** ([§5](#how-the-tools-work-together-built)): top-down, `search` → `where` → `scope` → `get_node` → `get_flow` → `view_flow_code`, reading `completeness` and `agreement` before claiming anything is complete. The server sends this to agents as its MCP instructions when they connect.
 > - **No file contents are stored:** code is read from the git host at the ingested commit; code search goes through the git host's search API.
 > - **Breadth, not depth** ([§4](#breadth-and-depth-decided-d119)): Steno answers *what and where* and serves the code; the consuming agent reasons, and clones only when a task needs it. Every answer that cites code says which `sources` to fetch. What Steno stores stops at five layers: placement, surface, reach, search text, pointers (D136).
-> - **Built (D143):** a deterministic digest on every flow, and LLM-written summaries for applications, spaces, and the organization, both searched by keyword. **Next:** the `routing` block in `search` (D142). **Later:** vector search (after the cost dry run). The routing design below describes the end state.
+> - **Built (D143):** a deterministic digest on every flow, and LLM-written summaries for applications, spaces, and the organization, both searched by keyword. **Built (D142):** the `routing` block in every `search` answer, with the stand-in until there are Jev credits ([Routing, as built](#routing-as-built-d142)). **Later:** vector search (after the cost dry run). The routing design below describes the end state.
 
 ```mermaid
 flowchart LR
@@ -59,6 +59,26 @@ Rough costs:
 | **Token budgets** | Every tool takes `max_tokens` (built: longest lists are trimmed and marked `truncated`); later, Jev Q3 trims by relevance | Decided |
 
 ## 2. Search top-down, over data built bottom-up
+
+#### Routing, as built (D142)
+
+Every `search` answer without a `scope` carries a `routing` block (`backend/src/steno/routing/`), built top down after the keyword search:
+
+| Decision | Question | Reads | Stand-in's signal |
+|---|---|---|---|
+| Q0 | What kind of question (find a flow, what depends on X, what is X, how do I call X, how are A and B connected) | The question | Words that suggest each kind |
+| Q1 | Is it about this space? One yes/no per space | Each space's `summary_line` | Its share of the matches |
+| Q2 | Which application in the chosen spaces | Each application's `summary_line` | Its share of the matches |
+| Q4 | Does this candidate flow do what was asked? One yes/no per candidate (at most 8, proposed by keyword search inside the chosen applications) | Each candidate's digest | Its rank |
+| N4 | Which of several applications whose names fit the question | Their `summary_line`s | Their matches |
+
+- **The block:** `spaces`, `applications`, `flows` chosen, each with its confidence and, when calibrated, its `band` (high above 0.9, medium 0.5–0.9, low below 0.5); `alternatives` not chosen; `question_kind` with the next tool to use; `disambiguation` when N4 ran; `shortlist` when the flows couldn't be told apart.
+- **Close calls keep both branches:** anything within 0.15 of the best is kept.
+- **The shortlist:** the chosen application's flows (at most 25), each with what its code says it `does` (the digest's `DOC` line), those with more of the question's words first, for the agent's model to pick from. With Jev, when the best flow is below 0.9; with the stand-in, only on plain signs (no flow found, words dropped, a match by close spelling only).
+- **The stand-in** (`STENO_DECISION_BACKEND=stand_in`, the default) answers from search's signals; its confidences are rankings, marked `confidence: uncalibrated`, with no band, and the server's instructions say to treat them as medium. `disabled` switches every decision off. Jev is another backend behind the same `Decision` interface.
+- **Every decision is logged** in `jev_decision` with its state, answers, confidence, and the MCP request.
+- **Measured with the stand-in** (15 questions, 2026-11-03): the right application first for 13; the right flow first for 9; the right flow chosen or in the shortlist for 13. The two misses are confident wrong candidates from keyword search ("store git commits" matched one of Steno's CLI flows by its docstring), which is what Q4 reading the digest is for.
+- **State size:** about 450 tokens per question on our four applications; at an organization's scale (200 spaces, 50 applications in a space, 8 candidates) about 12k.
 
 > **Status:** this section is the end-state design. Jev routing, verification, and ranking are `v2`; vector search over cards comes after the cost dry run (stage D). **Today `search` is full-text over the names of searchable nodes and each flow's digest, plus function names in traces** (§5).
 
