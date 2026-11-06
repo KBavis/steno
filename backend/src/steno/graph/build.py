@@ -14,6 +14,8 @@ entry point, or an effect at or below them) also become Step nodes, which carry 
 Pure: no database access, so it's testable on its own. `writer.py` sends the plan to Neo4j.
 """
 
+import logging
+import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -37,8 +39,14 @@ from steno.graph import ids
 from steno.graph import trace as trace_codec
 from steno.graph.digest import write_digests
 from steno.graph.structure import Module, Structure
+from steno.ingestion.memory import peak_mb
 from steno.resolvers.base import Function, Invocation, Resolvers, UnresolvedCall, looks_like_io
 from steno.rule_packs.packs import HttpSystem
+
+log = logging.getLogger(__name__)
+# A large repository's flows stage can run for a long time: say how far it's got this often
+PROGRESS_SECONDS = 60
+SLOWEST_FLOWS = 10  # how many the stage's metrics name
 
 # Node types search will cover (they'll carry cards; graph-reference.md §3, Card properties)
 SEARCHABLE = {
@@ -244,9 +252,16 @@ class _Builder:
         self.significant: set[Key] = set()
         self.utility: set[Key] = set()
         self.files: dict[str, dict[str, int]] = {}  # file path → counts, for File nodes
-        self.counted: set[Key] = set()
         self.inferred: set[Key] = set()  # entry points no rule names (D74)
         self.interceptors: list[Any] = []  # code run in front of entry points (D103)
+        self._app_of_file: dict[str, str | None] = {}
+        self._touched_of: dict[str, set[str]] = {}
+        self._entry_of: dict[Key, dict[str, Any]] = {}
+        self._flows_done = 0
+        self._entries_done = 0
+        self._flows_total = 0
+        self._last_progress = 0.0
+        self._slowest: list[dict[str, Any]] = []
 
     def run(self) -> GraphPlan:
         self._structure()
@@ -256,12 +271,21 @@ class _Builder:
             self._fact_node(node)
         for edge in self.x.edges:
             self._fact_edge(edge)
+        started = time.monotonic()
         self._call_graph()
+        call_graph = time.monotonic()
         self._flows()
+        flows = time.monotonic()
         self._kinds()
         self._file_nodes()
         # D143: what routing and keyword search read
         write_digests(self.plan, {s: f.doc for s, f in self.functions.items() if f.doc})
+        self.plan.stats["timings"] = {
+            "call_graph_s": round(call_graph - started, 1),
+            "flows_s": round(flows - call_graph, 1),
+            "digests_s": round(time.monotonic() - flows, 1),
+        }
+        self.plan.stats["slowest_flows"] = self._slowest
         self.plan.stats["unmet_joins"] = self.unmet
         return self.plan
 
@@ -342,8 +366,12 @@ class _Builder:
         return self.app_keys.get(app, self.ctx.repo) if app else self.ctx.repo
 
     def _app_for(self, rel_file: str) -> str | None:
-        m = self.s.module_of(rel_file)
-        return self.apps.get(m.path) if m else None
+        # Remembered per file, once the applications are known: every interceptor asks for every
+        # flow, and module_of looks through every module
+        if rel_file not in self._app_of_file:
+            m = self.s.module_of(rel_file)
+            self._app_of_file[rel_file] = self.apps.get(m.path) if m else None
+        return self._app_of_file[rel_file]
 
     # ------------------------------------------------------- extracted facts
 
@@ -915,6 +943,8 @@ class _Builder:
         up onto the flow (L1)."""
         if not self.r:
             return
+        self._flows_total = len(self.x.entry_points) + len(self.inferred)
+        self._last_progress = time.monotonic()
         for ep in self.x.entry_points:
             prov = self._prov(ep.origin.rule, ep.origin.file, ep.origin.line)
             if isinstance(ep.trigger, NodeFact):
@@ -941,6 +971,7 @@ class _Builder:
             )
             flow = ids.flow_id(app_key, name)
             before = self._interceptors_for(entry_symbol, trigger_node.labels, app)
+            began = time.monotonic()
             trace = self._cascades_touched(self._trace(flow, (entry_symbol, None), before))
             stops = sum(len(t.get("unresolved", [])) for t in trace)
             start, end = entry.span
@@ -973,6 +1004,7 @@ class _Builder:
                 self.plan.edge("BELONGS_TO", flow, app, **prov)
                 self.app_triggers.setdefault(app, set()).add(trigger_kind)
             self._steps(flow, trace)
+            self._flow_done(name, len(trace), began)
         for key in sorted(self.inferred, key=_key_order):
             self._inferred_flow(key)
 
@@ -1021,6 +1053,7 @@ class _Builder:
             else f"Background work · {where}"
         )
         flow = ids.flow_id(app_key, name)
+        began = time.monotonic()
         trace = self._cascades_touched(self._trace(flow, key))
         stops = sum(len(t.get("unresolved", [])) for t in trace)
         self.plan.node(
@@ -1048,6 +1081,26 @@ class _Builder:
         if app:
             self.plan.edge("BELONGS_TO", flow, app, **prov)
         self._steps(flow, trace)
+        self._flow_done(name, len(trace), began)
+
+    def _flow_done(self, name: str, entries: int, began: float) -> None:
+        """Keep the slowest flows for the stage's metrics, and log progress now and then: a stage
+        that's stopped records no metrics, and the log is then all there is to go on."""
+        now = time.monotonic()
+        self._flows_done += 1
+        self._entries_done += entries
+        self._slowest.append({"flow": name, "entries": entries, "seconds": round(now - began, 2)})
+        if len(self._slowest) > 2 * SLOWEST_FLOWS:
+            self._slowest = sorted(self._slowest, key=lambda f: -f["seconds"])[:SLOWEST_FLOWS]
+        if now - self._last_progress >= PROGRESS_SECONDS:
+            self._last_progress = now
+            log.info(
+                "flows: %d of %d built, %d trace entries so far, %s MB peak",
+                self._flows_done,
+                self._flows_total,
+                self._entries_done,
+                peak_mb(),
+            )
 
     def _interceptors_for(
         self, entry: str, trigger_labels: list[str], app: str | None
@@ -1080,10 +1133,10 @@ class _Builder:
         entries: list[dict[str, Any]] = []
         expanded: set[Key] = set()
         occurrences: dict[Key, int] = defaultdict(int)
+        stack: set[Key] = set()  # the functions on the current path
 
-        def visit(key: Key, path: str, call: Call | None, stack: frozenset[Key]) -> None:
-            fn = self.functions[key[0]]
-            entry = self._entry(key, fn, path, call)
+        def visit(key: Key, path: str, call: Call | None) -> None:
+            entry = self._entry(key, path, call)
             entries.append(entry)
             if key in self.significant:
                 occurrences[key] += 1
@@ -1101,15 +1154,17 @@ class _Builder:
             if key in self.utility:
                 return
             expanded.add(key)
+            stack.add(key)
             for i, c in enumerate(self.graph.get(key, []), start=1):
-                visit(c.target, f"{path}.{i}", c, stack | {key})
+                visit(c.target, f"{path}.{i}", c)
+            stack.discard(key)
 
         # Interceptors first, each its own top-level step marked as running before the handler
         for n, i in enumerate(before or [], start=1):
             start = len(entries)
-            visit((i.function, None), str(n), None, frozenset())
+            visit((i.function, None), str(n), None)
             entries[start]["interceptor"] = i.kind
-        visit(root, str(len(before or []) + 1), None, frozenset())
+        visit(root, str(len(before or []) + 1), None)
         return entries
 
     def _cascades_touched(self, trace: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1118,10 +1173,13 @@ class _Builder:
         valid-time row to a category's list and saving the category does write category_vt."""
         touched: set[str] = set()
         fields = getattr(self.r, "touched_fields", None) if self.r else None
-        for t in trace:
-            fn = self.functions.get(t["symbol"])
-            if fn is not None and fields is not None:
-                touched |= fields(fn)
+        if fields is not None:
+            for symbol in {t["symbol"] for t in trace}:  # a function repeats across a trace
+                known = self._touched_of.get(symbol)
+                if known is None:
+                    fn = self.functions.get(symbol)
+                    known = self._touched_of[symbol] = fields(fn) if fn is not None else set()
+                touched |= known
         self._touched = touched
         for t in trace:
             if t.get("effects"):
@@ -1159,12 +1217,32 @@ class _Builder:
         return [g.describe() for g in sorted([*followed, *self.ledger.unexplained_calls(fn)],
                                               key=lambda g: g.line)]  # fmt: skip
 
-    def _entry(self, key: Key, fn: Function, path: str, call: Call | None) -> dict[str, Any]:
+    def _entry(self, key: Key, path: str, call: Call | None) -> dict[str, Any]:
+        """A trace entry: what's the same at every call site of this function, worked out once,
+        then this call site's own fields. Empty and false fields are left out of the JSON."""
+        fixed = self._entry_of.get(key)
+        if fixed is None:
+            fixed = self._entry_of[key] = self._function_fields(key)
+        entry = {"path": path, **fixed}
+        if call:
+            if call.line:
+                entry["call_line"] = call.line
+            if call.conditional:
+                entry["conditional"] = True
+            if call.in_loop:
+                entry["in_loop"] = True
+            if call.is_async:
+                entry["async"] = True
+            if call.candidate:
+                entry["candidate"] = True
+        return entry
+
+    def _function_fields(self, key: Key) -> dict[str, Any]:
+        fn = self.functions[key[0]]
         start, end = fn.span
         rel = self._rel(fn)
         counts = self.files.setdefault(rel, {"functions": 0, "significant": 0})
-        entry: dict[str, Any] = {
-            "path": path,
+        fields: dict[str, Any] = {
             "symbol": key[0],
             "bound_to": key[1],
             "name": fn.name,
@@ -1172,11 +1250,7 @@ class _Builder:
             "file": rel,
             "start_line": start,
             "end_line": end,
-            "call_line": call.line if call else None,
-            "conditional": bool(call and call.conditional),
-            "in_loop": bool(call and call.in_loop),
-            "async": bool(call and call.is_async) or fn.is_async,
-            "candidate": bool(call and call.candidate),
+            "async": fn.is_async,
             "significant": key in self.significant,
             "utility": key in self.utility,
             "effects": [
@@ -1190,12 +1264,9 @@ class _Builder:
             "doc": fn.doc,
             "body_hash": fn.body_hash,
         }
-        if key not in self.counted:  # count each function once per file, not per flow
-            self.counted.add(key)
-            counts["functions"] += 1
-            counts["significant"] += int(key in self.significant)
-        # Keep the JSON small: drop empty and false fields
-        return {k: v for k, v in entry.items() if v not in (None, False, [], "")}
+        counts["functions"] += 1  # once per function in its file, not per flow
+        counts["significant"] += int(key in self.significant)
+        return {k: v for k, v in fields.items() if v not in (None, False, [], "")}
 
     def _steps(self, flow: str, trace: list[dict[str, Any]]) -> None:
         """Steps (L2): the significant entries, nested under their nearest significant
@@ -1303,15 +1374,19 @@ def _key_order(key: Key) -> tuple[str, str]:
 
 
 def _reaches_effect(nodes: set[Any], graph: dict[Any, list[Any]], effectful: set[Any]) -> set[Any]:
-    """Functions with an effect, directly or anywhere below them ("significant")."""
+    """Functions with an effect, directly or anywhere below them ("significant"): one walk back
+    from the functions with effects, so a long call chain costs no repeated passes."""
+    callers: dict[Any, list[Any]] = defaultdict(list)
+    for q in nodes:
+        for c in graph.get(q, []):
+            callers[c].append(q)
     result = set(effectful) & nodes
-    changed = True
-    while changed:
-        changed = False
-        for q in nodes - result:
-            if any(c in result for c in graph.get(q, [])):
+    todo = list(result)
+    while todo:
+        for q in callers.get(todo.pop(), ()):
+            if q not in result:
                 result.add(q)
-                changed = True
+                todo.append(q)
     return result
 
 

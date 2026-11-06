@@ -26,7 +26,7 @@ at most LIMIT targets per line and FUNCTIONS functions, nearest the entry first,
 saying how many more there are. Lines with nothing to say are left out.
 """
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import TYPE_CHECKING, Any
 
 from steno.graph import trace as trace_codec
@@ -94,8 +94,9 @@ def flow_digest(plan: "GraphPlan", flow: str, index: "_Index | None" = None) -> 
 
 class _Index:
     """What every flow's digest reads, built once: the plan's edges by source and by target,
-    each flow's application and decoded trace, and how many of an application's flows touch
-    each target or run each function (for UNIQUE)."""
+    each flow's application, and how many of an application's flows touch each target or run
+    each function (for UNIQUE). Only one flow's decoded trace is held at a time: all of them
+    together are the largest thing in the stage, and each is read one flow after another."""
 
     def __init__(self, plan: "GraphPlan", docs: dict[str, str] | None = None) -> None:
         self.plan = plan
@@ -112,7 +113,8 @@ class _Index:
             and "Flow" in plan.nodes[e.src].labels
             and "Application" in plan.nodes[e.dst].labels
         }
-        self._traces: dict[str, list[dict[str, Any]]] = {}
+        self.flows_in: Counter[str] = Counter(self.app_of.values())
+        self._trace_of: tuple[str, list[dict[str, Any]]] | None = None
         self.shared: dict[str | None, dict[str, int]] = defaultdict(lambda: defaultdict(int))
         for node in plan.nodes.values():
             if "Flow" not in node.labels:
@@ -134,14 +136,13 @@ class _Index:
         filters and the like, D103) and what they call. They run in front of many flows, so
         their docs and functions would crowd out what this flow does; the flow keeps them in
         `interceptors` and its full trace, and what they require is the agent's to read (D138)."""
-        if flow not in self._traces:
+        if self._trace_of is None or self._trace_of[0] != flow:
             raw = self.plan.nodes[flow].props.get("trace")
             entries = trace_codec.decode(raw) if raw else []
             ahead = {str(t["path"]) for t in entries if t.get("interceptor")}
-            self._traces[flow] = [
-                t for t in entries if str(t["path"]).split(".", 1)[0] not in ahead
-            ]
-        return self._traces[flow]
+            kept = [t for t in entries if str(t["path"]).split(".", 1)[0] not in ahead]
+            self._trace_of = (flow, kept)
+        return self._trace_of[1]
 
     def _targets(self, flow: str) -> set[str]:
         return {e.dst for es in self.rollups(flow).values() for e in es}
@@ -268,7 +269,7 @@ def _docs(trace: list[dict[str, Any]], docs: dict[str, str]) -> list[str]:
 def _unique(plan: "GraphPlan", index: _Index, flow: str, app: str | None) -> list[str]:
     """What no other flow in the application touches or runs: its own effects first, then its
     own functions nearest the entry. Nothing when it's the application's only flow."""
-    siblings = sum(1 for f, a in index.app_of.items() if a == app) if app else 0
+    siblings = index.flows_in[app] if app else 0
     if siblings < 2:
         return []
     counts = index.shared[app]

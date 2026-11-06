@@ -8,7 +8,7 @@ import pytest
 
 from steno.config import get_settings
 from steno.extraction.facts import Extraction, NodeFact, Origin, split_url
-from steno.graph.build import Context, build
+from steno.graph.build import Context, _reaches_effect, build
 from steno.graph.structure import detect
 from steno.graph.trace import decode as decode_trace
 from steno.ingestion.local import run_folder
@@ -521,3 +521,23 @@ def test_stream_bindings_join_a_producer_and_a_consumer_on_one_topic(tmp_path: P
     edges = {(e.type, e.src, e.dst) for e in plan.edges.values()}
     assert ("PRODUCES", "flow:demo-publisher:POST /orders", topic) in edges
     assert any(t == "STARTS" and s == topic and "demo-listener" in d for t, s, d in edges)
+
+
+def test_significant_functions_are_found_through_chains_and_cycles():
+    graph = {
+        "entry": ["middle", "pure"],
+        "middle": ["writes"],
+        "writes": [],
+        "pure": ["pure_too"],
+        "pure_too": ["pure"],  # a cycle that never reaches an effect
+        "loop_a": ["loop_b"],
+        "loop_b": ["loop_a", "writes"],  # a cycle that does
+    }
+
+    assert _reaches_effect(set(graph), graph, {"writes", "not_reached"}) == {
+        "entry",
+        "middle",
+        "writes",
+        "loop_a",
+        "loop_b",
+    }

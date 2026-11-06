@@ -93,6 +93,23 @@ On ThingsBoard the flows stage took 41 of a job's 46 minutes. Three things repea
 | flows | 2,459 s | 125 s |
 | Python's peak memory | 1,644 MB | 839 MB |
 
+**A third round (2026-11-05)**, after a run at an organization's repository was stopped at over 8 hours in this stage. The cause there isn't known yet, because a stopped stage recorded nothing; ThingsBoard doesn't reproduce it. Profiling ThingsBoard found work that grows faster than the repository, and work repeated per trace entry:
+
+- **Which functions a framework calls** was worked out again for every inferred flow: inferred flows × hook entries × the harmless list, 68 million checks on ThingsBoard. Hooks and inferred flows grow together, so this grows with the square of the repository. Now once.
+- **Digests held every flow's decoded trace** in memory at once; now one at a time. This costs a second decode of each trace, and saves about 500 MB on ThingsBoard, growing with the number of trace entries.
+- **Once per function, not per trace entry:** a trace entry's fixed fields and the relationships a function touches. The path being walked is one set, not a copy per call. Each file's application is remembered. Flows per application are counted once, and significant functions are found in one backward walk.
+
+| ThingsBoard, same graph (every property equal) | Before | After |
+|---|---|---|
+| Flows | 55.8 s | 25.9 s |
+| Digests | 15.9 s | 25.9 s |
+| Whole build | 74.7 s | 54.6 s |
+| Python's peak memory | 1,380 MB | 844 MB |
+
+**What's left grows with trace entries:** about 5 µs each (5.73 million on ThingsBoard, and each flow walks everything it reaches again), plus the digest's decode. A repository where flows reach most of its code costs flows × reach; the trace ablation (D140) decides whether traces stay.
+
+**Seeing it run:** the stage logs `flows: N of M built, E trace entries so far, X MB peak` every minute, so a stopped run still shows how far it got. A finished stage's metrics add `timings` (call graph, flows, digests, in seconds) and `slowest_flows`.
+
 **The helper's time limit** grows with the repository: `STENO_RESOLVER_JVM_TIMEOUT` (1,800 s) plus `STENO_RESOLVER_JVM_TIMEOUT_PER_FILE` (0.25 s) per Java file, so a monorepo isn't cut off for being large (Elasticsearch's 21,229 files ran past the old fixed 30 minutes).
 
 ## 4. Compact traces (D63, refined)

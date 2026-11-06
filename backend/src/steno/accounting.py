@@ -105,6 +105,7 @@ class Ledger:
         # vendor SDK no list knows, can do I/O nobody declared
         self.others: list[tuple[LibraryCall, bool]] = []
         self.hooks: list[tuple[Hook, bool]] = []  # framework hooks, explained?
+        self._callback_entries: dict[str, Hook] | None = None
         self._marks: dict[str, list[str]] = defaultdict(list)
         if rs:
             for r in rs:
@@ -218,13 +219,17 @@ class Ledger:
         return [h for h, declared in self.hooks if not declared]
 
     def callback_entries(self) -> dict[str, Hook]:
-        """Functions a framework calls through an unknown hook: they start flows of their own."""
+        """Functions a framework calls through an unknown hook: they start flows of their own.
+        Worked out once: every inferred flow asks, and hooks and those flows grow together."""
+        if self._callback_entries is not None:
+            return self._callback_entries
         out: dict[str, Hook] = {}
         for hook in self.unknown_hooks():
             for symbol in hook.entries:
                 method = symbol.split("#", 1)[-1].split("(", 1)[0].rsplit(".", 1)[-1]
                 if not self.is_harmless(f"{hook.target}#{method}"):  # `initialize()` and such
                     out.setdefault(symbol, hook)
+        self._callback_entries = out
         return out
 
     def marks(self, symbol: str) -> list[str]:

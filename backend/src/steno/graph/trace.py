@@ -19,6 +19,7 @@ from typing import Any
 VERSION = 2
 # Per call site: the bits that vary from one call of a function to the next
 FLAGS = ("conditional", "in_loop", "async", "candidate", "repeat", "recursive", "unresolved")
+_FLAG_BITS = tuple((name, 1 << b) for b, name in enumerate(FLAGS))
 # Per function: the same at every call site in the flow
 FUNCTION = (
     "symbol",
@@ -42,18 +43,21 @@ def encode(entries: list[dict[str, Any]]) -> bytes:
     rows: list[list[Any]] = []
     row_of: dict[str, int] = {}
     for e in entries:
-        fn = {k: e[k] for k in FUNCTION if k in e}
-        if "unresolved" in e:
-            fn["unresolved"] = e["unresolved"]
         key = (e["symbol"], e.get("bound_to"))
         i = index.get(key)
         if i is None:
+            fn = {k: e[k] for k in FUNCTION if k in e}
+            if "unresolved" in e:
+                fn["unresolved"] = e["unresolved"]
             i = index[key] = len(functions)
             functions.append(fn)
         elif "unresolved" in e and "unresolved" not in functions[i]:
             functions[i]["unresolved"] = e["unresolved"]
         parent, _, ordinal = e["path"].rpartition(".")
-        flags = sum(1 << b for b, name in enumerate(FLAGS) if e.get(name))
+        flags = 0
+        for name, bit in _FLAG_BITS:
+            if e.get(name):
+                flags |= bit
         row = [row_of[parent] if parent else -1, int(ordinal), i, e.get("call_line") or 0, flags,
                e.get("step") or 0]  # fmt: skip
         if e.get("interceptor"):
@@ -72,22 +76,21 @@ def decode(raw: Any) -> list[dict[str, Any]]:
         return json.loads(raw)
     data = json.loads(zlib.decompress(bytes(raw)))
     functions: list[dict[str, Any]] = data["f"]
+    # Each function's fields once; every call site starts from a copy
+    fields = [{k: fn[k] for k in FUNCTION if k in fn} for fn in functions]
     entries: list[dict[str, Any]] = []
     for parent, ordinal, i, call_line, flags, step, *rest in data["e"]:
-        fn = functions[i]
         path = f"{entries[parent]['path']}.{ordinal}" if parent >= 0 else str(ordinal)
-        entry: dict[str, Any] = {"path": path}
-        for k in FUNCTION:
-            if k in fn:
-                entry[k] = fn[k]
+        entry: dict[str, Any] = {"path": path, **fields[i]}
         if call_line:
             entry["call_line"] = call_line
-        for b, name in enumerate(FLAGS):
-            if flags & (1 << b):
-                if name == "unresolved":
-                    entry["unresolved"] = fn.get("unresolved", [])
-                else:
-                    entry[name] = True
+        if flags:
+            for name, bit in _FLAG_BITS:
+                if flags & bit:
+                    if name == "unresolved":
+                        entry["unresolved"] = functions[i].get("unresolved", [])
+                    else:
+                        entry[name] = True
         if step:
             entry["step"] = step
         if rest:
