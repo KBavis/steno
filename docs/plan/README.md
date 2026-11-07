@@ -1,39 +1,29 @@
 # Plan
 
-Where Steno is, where it's going, how an organization gets onboarded, and every decision made along the way.
+Where Steno is, where it's going, and every decision made along the way.
 
 > **In one minute**
-> - **Now:** proof of concept, stage **A** (foundations + one application). Python and Java ingest end to end; MCP tools are live; the coverage report works.
-> - **Next:** a scored question set compared against an agent without Steno, with **routing accuracy** as its headline and the trace ablation (D140); the investigation plugin (D133); and the rest of the work decided on 2026-10-20 (D115–D127): Java at scale and **rule curation** (Steno drafts rules, a person approves). See the [build order](./roadmap.md#5-build-order-for-d115d141).
-> - **Direction:** Steno stores the surface and points to the body (D136); after the POC it becomes the organization's context layer, adding Projects and Constraints (D141, `v1`).
-> - **Then:** a stub organization built to exercise every facet and identity case (B), real multi-service code (C), our own organization (D).
-> - **Stops:** v1 adds what a client deployment needs; v2 holds Jev, runtime evidence, frontends, and more.
+> - **Now:** POC stage **A**. Python and Java ingest end to end, MCP tools are live, and coverage works.
+> - **Next:** a scored question set with **routing accuracy** as its headline, the trace ablation (D140), and the investigation plugin (D133).
+> - **Then:** a stub organization (B), real multi-service code (C), and our organization (D). Whether B and C stay is open.
+> - **After:** `v1` adds what a client needs, plus Projects and Constraints. `v2` holds the rest.
 
 ```mermaid
 flowchart LR
-    A["<b>A</b> · Foundations + one app<br/><i>now</i>"] --> B["<b>B</b> · Stub organization<br/>every facet, every identity case"]
-    B --> C["<b>C</b> · petclinic<br/>Routing, real joins"]
-    C --> D["<b>D</b> · Our organization<br/>manifest, XLD, cost dry run"]
-    D --> V1["<b>v1</b> · first client"]
-    V1 --> V2["<b>v2</b> · Jev, runtime,<br/>frontend, …"]
+    A["<b>A</b> Foundations<br/><i>now</i>"] --> B["<b>B</b> Stub organization"]
+    B --> C["<b>C</b> petclinic"]
+    C --> D["<b>D</b> Our organization"]
+    D --> V1["<b>v1</b> First client"]
+    V1 --> V2["<b>v2</b> Later"]
 ```
 
 ## Pages
 
-| Page | What it covers |
+| Page | Covers |
 |---|---|
-| [Roadmap](./roadmap.md) | The POC stages with scope and exit criteria, how accuracy is measured, v1, v2, and risks |
-| [Onboarding](./onboarding.md) | The nine-step flow every organization goes through, and what the UI is for |
-| [Organization standards](./organization-standards.md) | **Proposed.** What Steno must learn about any organization's conventions, how far to trust each source, and where each standard lives |
-| [Routing design](./routing-design.md) | **Proposed.** Finding where to look across an organization: flows first, Jev's judgments, and how services connect |
-| [Decisions](./decisions.md) | Every numbered decision (D1–D131) and the open questions |
-| [Later](./later/README.md) | Parked designs: Jev, runtime evidence, frontends, data schemas, the UI's long-term vision |
-
-## Stage A, in order
-
-Built: identity (registry, identify step, Steno IDs, renames), witness types and sources, the completeness block (with what was checked, D118), `sources` in answers (D119), claims and reconcile. Remaining:
-
-1. **Application kinds** from triggers ([Graph](../concepts/graph.md#5-application-kinds)).
-2. **Java at scale** (D127) ([Resolvers §5.3](../how-it-works/ingestion/resolvers.md#53-large-repositories-decided-d127-partly-built)).
-3. **Patterns and rule curation** (D121–D126, D146, D147) ([Rule curation](../how-it-works/ingestion/rule-curation.md)): the coverage report on the surface, worked locally by the `rule-pack-author` skill, continuing into stage B.
-4. **Question set** drawn from the [lead use cases](../purpose/use-cases.md#lead-use-cases-in-detail), for budgeting-app and Contextualized, scored, with the comparison without Steno ([Roadmap §4](./roadmap.md#4-evaluation)).
+| [Roadmap](./roadmap.md) | Stages, exit criteria, evaluation, build order, risks |
+| [Decisions](./decisions.md) | D1–D150 and the open questions |
+| [Onboarding](./onboarding.md) | The nine steps for an organization |
+| [Routing design](./routing-design.md) | What was measured behind D150, and what's still open |
+| [Organization standards](./organization-standards.md) | **Proposed.** What Steno must learn about an organization |
+| [Later](./later/README.md) | Parked designs, including Jev |

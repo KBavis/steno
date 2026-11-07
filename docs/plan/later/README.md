@@ -1,31 +1,25 @@
 # Later
 
-Designs that are parked until the POC and v1 prove out. Each is kept so the work done so far isn't lost, and so nothing built now blocks it. Part of [Plan](../README.md).
+Designs parked until the POC and v1 prove out, each with a hook kept now.
 
 > **In one minute**
-> - **Jev** (a fast, calibrated decision model) for routing, verification, and ingestion decisions: designed in detail, `v2`. Stand-ins until then.
-> - **Runtime evidence** (OBSERVED): traces and logs as a witness, mostly to check the static graph. `v2`.
-> - **Frontends, data store schemas, ownership, environments:** `v2`, each with a hook kept now. Project-aware planning returns as the Projects pillar of the context layer (`v1`, D141).
+> - **Jev** at query time is built and optional. The rest of Jev is `v2`.
+> - **Runtime evidence, frontends, schemas, ownership, environments:** `v2`.
 
-| Item | What it adds | Hook kept now | Scope |
+```mermaid
+flowchart LR
+    P["POC"] --> V1["v1: Projects, Constraints"] --> V2["v2: items below"]
+```
+
+| Item | Adds | Hook kept now | Scope |
 |---|---|---|---|
-| **[Jev](./jev.md)** | Typed, calibrated decisions at ingestion (DI candidates, transports, entry points, hosts, card regeneration) and query time (routing, verification, ranking, guided navigation) | The `Decision` interface (`decisions/`); every decision can be switched off; stand-ins | `v2` |
-| **Runtime evidence (OBSERVED)** | Which calls really happen: OpenTelemetry, service mesh, logs, broker client IDs, scheduler run history. Most valuable as a **checker** of the static graph. | OBSERVED is a witness type in every facet's matrix | `v2` |
-| **Frontends** | UI applications whose calls join backend endpoints: "which screens break if I change this endpoint?" | UI routes are an entry-point type; Routing marks public endpoints (D92) | `v2` |
-| **Data V2** | Columns, constraints, relationships, purpose; a read-only database catalog; migrations replayed into a temporary database | `Table` stubs, `:Migrations` modules | `v2` |
-| **Ownership** | `Team` nodes from CODEOWNERS, manifests, catalogs, HR directories | Manifest team fields can be read as aliases now | `v2` |
-| **Environments** | What's deployed where, on which servers, with what resources; matching a production stack trace to the commit that produced it | Deploy names are already PLATFORM name sources | `v2` |
-| **Project-aware planning** | Moved out by D98, back in Steno by D141 as the Projects pillar: [the context layer](../../purpose/context-layer.md). | Stable and planned IDs (stage A); `fact_change` | `v1` |
-| **Entity anchors** | Retrieval from a question's nouns and verbs to flows that perform that operation on those entities | `USES_ENTITY`, `MAPS_TO` | `v2` |
+| **[Jev](./jev.md)** | Ingestion decisions, more navigation | The `Decision` interface | `v2` |
+| **Runtime evidence** | Which calls really happen; a checker for the static graph | OBSERVED witness type | `v2` |
+| **Frontends** | Which screens break with an endpoint | Routing marks public endpoints (D92) | `v2` |
+| **Data V2** | Columns, relationships, catalogs, replayed migrations | `Table` stubs, `:Migrations` | `v2` |
+| **Ownership** | `Team` nodes | Manifest team fields | `v2` |
+| **Environments** | What's deployed where | Deploy names | `v2` |
+| **Project-aware planning** | Back as the [Projects pillar](../../purpose/context-layer.md) | Stable IDs, `fact_change` | `v1` |
+| **Entity anchors** | Retrieval from a question's nouns and verbs | `USES_ENTITY`, `MAPS_TO` | `v2` |
 
-## The UI's long-term vision
-
-MCP is the primary interface; the UI's first job is onboarding and coverage review (D93). Later areas:
-
-| Area | What it does |
-|---|---|
-| **Low-confidence review queue** | People resolve decisions marked `ambiguous` |
-| **Flow tracer** | Follow a flow step by step, stitched across services, with its code |
-| **"Bloomberg terminal" view** | Navigate organization → space → application and see each space's ins and outs by transport. It renders the same views `get_node` returns to agents. |
-| **Change timeline** | What each nightly run changed, attributed to the PRs merged that day, later to projects |
-| **Visualize enhancements** | Semantic zoom (D53) is built; free-form exploration with a WebGL renderer may come later |
+**UI, long term:** a low-confidence review queue, a flow tracer, a space-level view of ins and outs, and a change timeline. MCP stays the primary interface (D93).

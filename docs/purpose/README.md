@@ -1,44 +1,43 @@
-# Purpose and use cases
+# Purpose
 
-What Steno is for, who uses it, and the questions it has to answer well. The use cases here drive everything else: **a feature belongs in Steno only if a use case needs it.**
+What Steno is for and who uses it. **A feature belongs in Steno only if a use case needs it.**
 
 > **In one minute**
-> - Agents are strong inside one repository and blind beyond it. Most of what matters for a change (who consumes this topic, which flows cross this service, what breaks downstream, how to trigger and test a flow) lives outside it.
-> - Steno answers **"what is"**: the organization's architecture as it runs today, derived from code, current, and cited.
-> - Five **lead use cases** set the bar: PR review with context, breaking-change checks, "grill me" planning, delta-driven testing, and stack trace to flow. Each is a set of questions with answers we can check, and the POC's question sets are drawn from them.
-> - **Steno matters when a change touches an application's surface,** or when an agent needs to invoke a flow: it gives the agent the other end of every edge, even when the developer works in only one or two repositories (D136).
-> - Steno supplies the context. After the POC it becomes the organization's whole **context layer**: Projects and Constraints join the architecture behind one MCP (D141). The tools and workflows that use it (review bots, planning workflows, test generators, and eventually an agent-first SDLC) are built on top, in other repositories.
+> - Steno answers **"what is"**: the architecture as it runs today, derived from code, current, and cited.
+> - Five **lead use cases** set the bar: PR review with context, breaking-change checks, "grill me" planning, delta-driven testing, and stack trace to flow.
+> - **Steno matters when a change touches an application's surface,** or when an agent needs to invoke a flow (D136).
+> - After the POC it becomes the organization's **context layer**, adding Projects and Constraints (D141). Tools that use the context live in other repositories.
 
 ```mermaid
 flowchart LR
-    Q["Questions from people and agents<br/>planning · implementing · reviewing ·<br/>testing · on call"] --> M["Steno MCP tools"]
-    M --> G[("The organization's architecture<br/>applications · interfaces · flows ·<br/>tables · dependencies")]
+    Q["Questions from people and agents"] --> M["Steno MCP"]
+    M --> G[("The organization's architecture")]
     G --> A["Answers with citations,<br/>and what couldn't be seen"]
 ```
 
 ## Pages
 
-| Page | What it covers |
+| Page | Covers |
 |---|---|
-| [Use cases](./use-cases.md) | The lead use cases in detail (questions, tools, what a correct answer contains), then the full catalog |
-| [Where Steno fits](./where-steno-fits.md) | What Steno owns and doesn't, why an agent with every repository isn't enough, where the line between breadth and depth is, and the guarantees Steno makes |
-| [The context layer](./context-layer.md) | Where Steno goes after the POC: the Projects and Constraints pillars, how they connect through Steno IDs, and the principles (`v1`, D141) |
-| [Integration](./integration.md) | What Steno provides to other systems that build on it: stable IDs, planned IDs, change history, attribution hooks, MCP |
-
-## Why it's worth it
-
-1. **Tribal knowledge stops decaying.** "How does this fit together?" lives in senior engineers' heads and leaves with them. A living graph keeps it.
-2. **Discovery is paid for once.** Every new hire, contractor, and fresh agent session re-derives the same picture from scratch. A shared graph pays that cost once.
-3. **Senior judgment scales.** "This breaks something downstream" or "this already exists" runs on every change, without waiting for the few people who know.
-4. **One engineer with an agent can work at organization scale,** changing things across services and spaces while keeping the patterns that have been in place for years, because the agent can see the whole organization.
+| [Use cases](./use-cases.md) | The lead use cases and the full catalog |
+| [Where Steno fits](./where-steno-fits.md) | Boundaries, guarantees, breadth and depth |
+| [The context layer](./context-layer.md) | Projects and Constraints (`v1`) |
+| [Integration](./integration.md) | What Steno offers systems built on it |
 
 ## Who uses it
 
 | Who | Typically asks |
 |---|---|
-| An engineer (or their agent) implementing a change | Where does this live? What else must change? Who depends on this? |
-| A reviewer (or a review bot) | What does this PR actually touch beyond the diff? |
-| A dev manager or lead planning work | Which services, spaces, and flows does this project touch? What's unanswered? |
-| A tester (or a test agent) | How do I trigger this flow, with what input, and what should I check afterward? What's downstream? |
+| An engineer or their agent | Where does this live? What else must change? Who depends on this? |
+| A reviewer or review bot | What does this PR touch beyond the diff? |
+| A lead planning work | Which services and flows does this touch? What's unanswered? |
+| A tester or test agent | How do I trigger this flow? What's downstream? |
 | On call | Which flow does this stack trace belong to? Who's affected? |
-| A platform or architecture team | Where do declarations and code disagree? What's unused? Where do spaces reach into each other's data? |
+| A platform team | Where do declarations and code disagree? What's unused? |
+
+## Why it's worth it
+
+1. **Tribal knowledge stops decaying.** A living graph keeps what senior engineers know.
+2. **Discovery is paid for once,** not by every new hire and agent session.
+3. **Senior judgment scales.** "This breaks something downstream" runs on every change.
+4. **One engineer with an agent can work at organization scale.**

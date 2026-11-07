@@ -1,24 +1,34 @@
 # Security and privacy
 
-What Steno holds, what leaves the organization, and who may see what. Part of [How it works](./README.md).
+What Steno holds, what leaves the organization, and who may see what.
 
 > **In one minute**
-> - Steno stores **no file contents**, but its facts, citations, and cards describe the code, and the MCP server holds git credentials to read it. Both need the same access controls as the repositories.
-> - **Secret values are never ingested.** Credentials live in a secret manager; Steno stores references.
-> - **Data leaving the organization** (to an LLM for cards, to a decision model later) must be confirmed against the organization's policy first, and kept to the minimum.
-> - **MCP authentication and scoping by role** are `v1` requirements before any client deployment.
-> - **Steno writes to one repository only:** the organization's rule-pack repository, where it commits approved rules (D125).
+> - **No file contents stored,** but facts and citations describe the code, and the MCP server holds git credentials. Apply the same access controls as the repositories.
+> - **Secret values are never ingested.**
+> - **Confirm the organization's policy** before data leaves it.
+> - **MCP authentication and scoping** are required before any client deployment (`v1`).
+> - **Steno pushes nothing.** A developer's skill opens rule pull requests (D147).
+
+```mermaid
+flowchart LR
+    S["Steno server"] -- "read only" --> GIT["Repositories"]
+    S -- "summary inputs" --> LLM["The organization's LLM"]
+    S -- "digests" --> J["Jev (optional)"]
+    D["Developer's skill"] -- "code samples" --> DL["Developer's LLM"]
+    D -- "pull request" --> PK["Pack repository"]
+```
 
 | Area | Position | Status |
 |---|---|---|
-| **Source code** | No file contents stored. Facts, citations, and cards describe the code; the MCP server reads code from the git host at the ingested commit. Treat Steno's data with the same access controls as the repositories. | Decided |
-| **Secrets** | Never ingested. Config keys that look like secrets (`password`, `secret`, `token`, `credential`, `private-key`, `api-key`, …) are skipped by every config rule. A value from a vault is recorded as an unresolved reference. Connector credentials are references into a secret manager. | Decided (built) |
-| **Deployment values** | When admins supply runtime values (Proposed), URLs are stripped of `user:password@`, credential-like keys are refused, and values never reach an LLM. | Proposed |
-| **Data leaving the organization** | The LLM receives flow context, including bounded code snippets, when writing cards, and, on a developer's machine, the `rule-pack-author` skill sends code samples and framework source to the developer's own LLM provider when drafting rules (D147); Steno's server sends none. A decision model (later) receives digests: names, summaries, interactions, rarely code. **Confirm the organization's policy before any LLM spend,** and send only the minimum. A local model is possible through LiteLLM. | Decided (policy check), **Open** (our organization's answer) |
-| **Clone tokens** | Today a token can appear on the git command line. Direction: git's credential helper. | Open |
-| **Credentials for many systems** (`v1`) | Each API connector is read-only, uses the narrowest scope, references a secret manager, and gets a security review per connector type. | Decided (direction) |
-| **MCP access control** | Authentication (OAuth over Streamable HTTP) and scoping results by space or role (a contractor sees less than an employee). | **Open**, `v1` |
-| **Auditing** | Tool calls (`tool_call`), decisions (`jev_decision`), and LLM generations (`llm_call`, `llm_output`) are logged. | Decided (tool calls built) |
-| **Organization repositories** | Steno never asks an organization to change its repositories; it's read-only against every repository it ingests. | Decided |
-| **The rule-pack repository** | Steno commits and pushes approved rules, authored as Steno, to the organization's rule-pack repository (or to `rule-packs/org/` in its own). Its write credential is scoped to that one repository and kept apart from the read credentials used for ingestion (D125). | Decided |
-| **Deployment** | One Steno deployment per organization (D34). Where it runs (the client's cloud, on premises, air-gapped) is **Open** and a first question for any client. | Open |
+| **Source code** | No contents stored; read from the git host at the ingested commit | Decided |
+| **Secrets** | Never ingested. Secret-looking config keys are skipped by every rule. Credentials are references. | Built |
+| **Deployment values** | Stripped of credentials, secret keys refused, never sent to an LLM | Proposed |
+| **Data leaving** | The server sends summary inputs (facts and README text) to the organization's LLM, and digests to Jev if turned on. The skill sends code samples to the developer's LLM provider. A local model is possible. **Jev's retention has no stated number of days.** | Policy check Decided; our answer **Open** |
+| **Clone tokens** | Can appear on the git command line. Direction: a credential helper. | Open |
+| **Credentials for many systems** (`v1`) | Read-only, narrow scope, reviewed per connector | Direction |
+| **MCP access** | OAuth and scoping by space or role | **Open**, `v1` |
+| **Auditing** | Tool calls, decisions, and LLM calls are logged | Built |
+| **Organization repositories** | Read-only | Decided |
+| **Rule pull requests** | Opened by the skill as the developer, with the developer's credentials. Steno holds no write credential (D147). | Decided |
+| **Core-pack tests** | Minimal and synthetic, so organization code stays out of Steno's repository | Guardrail in the skill |
+| **Deployment** | One per organization. Where it runs is **Open**. | Open |
