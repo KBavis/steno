@@ -150,9 +150,10 @@ For several issues, show them all, plus the dependency order. Create nothing unt
    ```sh
    gh issue create --title "<title>" --body-file <file> \
      --label "type:feature,effort:m" \
-     --milestone "Redesign" --project "Steno"
+     --milestone "Redesign"
+   gh project item-add 5 --owner KBavis --url <issue url>
    ```
-   Note the number in the URL it prints. For an epic, create the epic first, then its sub-issues.
+   Don't use `gh issue create --project`: it looks up classic Projects and fails. Note the number in the URL it prints. For an epic, create the epic first, then its sub-issues.
 2. Link with GitHub's native relationships:
    ```sh
    .claude/skills/github-issue/scripts/link_issues.sh blocked-by <issue> <blocker>
