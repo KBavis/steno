@@ -1,6 +1,6 @@
 ---
 name: github-issue
-description: Create well-formed GitHub issues for Steno from a plain-language request, such as "make an issue for the clone stage" or "break the rule engine into issues". Grounds each issue in the design docs and code, checks for duplicates, assigns type, area, priority, and effort labels and a roadmap milestone, writes a structured body with acceptance criteria, links dependencies and sub-issues natively, and shows a draft for approval before creating anything. Use whenever someone asks to file, draft, or plan issues, a bug report, or an epic.
+description: Create well-formed GitHub issues for Steno from a plain-language request, such as "make an issue for the clone stage" or "break the rule engine into issues". Grounds each issue in the design docs and code, checks for duplicates, assigns a type and effort label and a milestone, adds the issue to the Steno Project, writes a structured body with acceptance criteria, links dependencies and sub-issues natively, and shows a draft for approval before creating anything. Use whenever someone asks to file, draft, or plan issues, a bug report, or an epic.
 ---
 
 # GitHub issue
@@ -10,73 +10,51 @@ You turn a request into one or more GitHub issues on the Steno repository that s
 ## 0. Preflight
 
 1. `gh --version` and `gh auth status`. If `gh` is missing or not logged in, stop and tell the person: install the GitHub CLI (https://cli.github.com, e.g. `sudo apt install gh` on Ubuntu/WSL), then run `gh auth login`.
-2. `gh label list --limit 100`. If the `type:`, `area:`, `priority:`, and `effort:` labels below are missing, offer to run the one-time setup, and run it only after the person says yes:
+2. `gh label list --limit 100`. If the `type:` and `effort:` labels below are missing, offer to run the one-time setup, and run it only after the person says yes:
    ```sh
    .claude/skills/github-issue/scripts/setup_labels.sh
    ```
-   It creates every label below plus the roadmap milestones, and is safe to re-run.
+   It creates every label below plus the milestones, and is safe to re-run.
+3. Every issue goes on the **Steno Project** (https://github.com/users/KBavis/projects/5). If `gh project list --owner KBavis` fails for missing scopes, tell the person to run `gh auth refresh -s project,read:project`.
 
 ## 1. Understand and ground the request
 
-- Work out **what** should change and **why**. Decide whether it's **one issue or several**. Anything larger than `effort:l` becomes an **epic** with sub-issues.
-- **Read before writing.** Check `docs/plan/decisions.md` (decision log and open questions), `docs/plan/roadmap.md`, and the relevant page under `docs/` and code, so the issue cites real decisions (`D40`), doc sections, and files (`backend/src/steno/ingestion/pipeline.py`).
-- **Design status matters.** If the work depends on something marked **Proposed** or **Open**, or would change a **Decided** item, label it `needs-decision` and add a *Decision needed* section. Design choices belong to the repository owner; an issue never decides them.
+- Work out **what** should change and **why**. Decide whether it's **one issue or several**. Anything larger than `effort:l` becomes an **epic**: a parent issue with sub-issues.
+- **Read before writing.** Check `docs/plan/decisions.md`, `docs/plan/roadmap.md`, and the relevant page under `docs/` and code, so the issue cites real decisions (`D40`), doc sections, and files (`backend/src/steno/ingestion/pipeline.py`). During the redesign, also check `docs/POC/` (local notes: `plan.md`, `categories.md`, and agreed decisions in `threads/`).
+- **Design status matters.** If the work depends on a design point that isn't agreed yet, don't file it as buildable work: file a `type:design` issue for the question instead, or note the dependency on one. Design choices belong to the repository owner; an issue never decides them.
 - **Check for duplicates:** `gh issue list --state all --search "<keywords>"`. If a match exists, show it and ask whether to update it, link to it, or create a new one anyway.
 
 ## 2. Classify
 
-Pick exactly one **type**, one or two **areas**, one **priority**, and one **effort**, plus a **milestone**. Explain the priority and effort in one line each in the draft so the person can push back.
+Keep it small: exactly one **type**, one **effort** (except on epics), a **milestone**, and a **parent epic** when one fits. Explain the effort in one line in the draft so the person can push back.
 
 | Type | Use for |
 |---|---|
 | `type:feature` | New capability |
 | `type:bug` | Something behaves wrong |
-| `type:chore` | Refactoring, tooling, upgrades; no behavior change |
+| `type:refactor` | Restructure or remove code, tooling, upgrades; no behavior change |
 | `type:docs` | Documentation only |
-| `type:design` | A decision to make and record in `docs/` (ends with a decision-log entry) |
-| `type:spike` | Time-boxed research that ends in a recommendation, not code |
-| `type:epic` | A larger goal tracked through sub-issues |
-
-| Area | Covers |
-|---|---|
-| `area:ingestion` | Pipeline stages, job queue, worker |
-| `area:extractors` | Rule engine, rule packs, assemblers |
-| `area:resolver` | Symbol and DI resolution (symbol resolvers: JVM helper, Python) |
-| `area:graph` | Neo4j schema, stable IDs, projection, graph writes |
-| `area:db` | Postgres models and migrations |
-| `area:mcp` | MCP server and tools |
-| `area:api` | Admin API |
-| `area:ui` | Frontend |
-| `area:llm` | Cards, LLM and decision backends (Jev and stand-ins) |
-| `area:infra` | Docker, Makefile, CI, dev tooling |
-| `area:docs` | Design docs and READMEs |
-
-| Priority | Meaning |
-|---|---|
-| `priority:p0` | Urgent: blocks current work or breaks the main path |
-| `priority:p1` | Needed for the current POC stage (docs/plan/roadmap.md) |
-| `priority:p2` | Should do soon; improves the current phase |
-| `priority:p3` | Nice to have; later |
+| `type:design` | Decide, don't build: an alignment thread or a design question. Ends with the decision recorded |
 
 | Effort | Rough size for one person |
 |---|---|
-| `effort:xs` | Under an hour |
 | `effort:s` | Up to half a day |
 | `effort:m` | One to two days |
-| `effort:l` | Three to five days |
-| `effort:xl` | More than a week. **Don't file it; split it into an epic.** |
+| `effort:l` | Three to five days. **Anything bigger isn't filed; split it into an epic.** |
 
-**Milestones** are the roadmap stages (`docs/plan/roadmap.md`): `POC A: Foundations`, `POC B: Stub organization`, `POC C: Multi-service`, `POC D: Our organization`, `v1`, `v2`.
+**Epics** are parent issues with sub-issues, not a label. An epic carries the type of most of its work and no effort. Candidate epics live in `docs/POC/categories.md` until agreed; ask before creating a new epic.
 
-**State labels:** `needs-decision` (see §1) and `blocked` (waiting on something *outside* the repo; for other issues, use dependency links instead).
+**Milestones:** `Redesign` (alignment threads, the docs rewrite, cleanup), then the POC milestones agreed in thread T1, `v1`, and `v2`. Run `gh api 'repos/{owner}/{repo}/milestones' --jq '.[].title'` for the current list.
+
+**Blocked work:** use native *blocked by* links (§5), not a label. Priority isn't a label either: the person orders the Project's views by hand.
 
 ## 3. Write the issue
 
-**Title:** brief and in Title Case: an imperative summary, ideally under 50 characters and never over 70, with no type or area prefix (labels carry those). Capitalize the main words; keep short articles, conjunctions, and prepositions lowercase unless they come first. *"Implement the Clone Stage for Dry Runs"*, not *"[Ingestion] Clone stage"* or *"Implement the clone stage so that dry runs can record clone time"*.
+**Title:** brief and in Title Case: an imperative summary, ideally under 50 characters and never over 70, with no type or area prefix. Capitalize the main words; keep short articles, conjunctions, and prepositions lowercase unless they come first. *"Implement the Clone Stage for Dry Runs"*, not *"[Ingestion] Clone stage"* or *"Implement the clone stage so that dry runs can record clone time"*.
 
 **Body:** use the template for the type. Keep every section concrete; leave a section out rather than writing "N/A".
 
-### Feature, chore, docs
+### Feature, refactor, docs
 
 ```markdown
 ## Summary
@@ -139,18 +117,7 @@ Optional, clearly marked as a recommendation.
 - [ ] The decision is recorded in `docs/` (decision log entry, affected sections updated)
 ```
 
-### Spike (`type:spike`)
-
-```markdown
-## Question
-## Time box
-e.g. one day.
-## What to try
-## Output
-A short write-up with a recommendation (comment on this issue, or a doc). Follow-up issues filed.
-```
-
-### Epic (`type:epic`)
+### Epic (a parent issue)
 
 ```markdown
 ## Goal
@@ -168,10 +135,10 @@ Present each issue as:
 
 ```
 Title:      Implement the Clone Stage for Dry Runs
-Labels:     type:feature, area:ingestion, priority:p1, effort:m
-Milestone:  POC A: Foundations
+Labels:     type:feature, effort:m
+Milestone:  Redesign
 Links:      blocked by #12 · sub-issue of #20
-Why p1/m:   needed for POC stage A; one new stage plus tests
+Why m:      one new stage plus tests
 <body>
 ```
 
@@ -182,10 +149,11 @@ For several issues, show them all, plus the dependency order. Create nothing unt
 1. Write each body to a temporary file, then create:
    ```sh
    gh issue create --title "<title>" --body-file <file> \
-     --label "type:feature,area:ingestion,priority:p1,effort:m" \
-     --milestone "POC A: Foundations"
+     --label "type:feature,effort:m" \
+     --milestone "Redesign"
+   gh project item-add 5 --owner KBavis --url <issue url>
    ```
-   Note the number in the URL it prints. For an epic, create the epic first, then its sub-issues.
+   Don't use `gh issue create --project`: it looks up classic Projects and fails. Note the number in the URL it prints. For an epic, create the epic first, then its sub-issues.
 2. Link with GitHub's native relationships:
    ```sh
    .claude/skills/github-issue/scripts/link_issues.sh blocked-by <issue> <blocker>
@@ -202,5 +170,5 @@ List each created issue with its number, title, and URL, and the links made. Men
 
 - Never create, edit, close, or label issues without the person's approval of the draft.
 - Never put secrets, tokens, internal hostnames, or personal data in an issue. The repository may be public.
-- Don't decide design questions in an issue; frame them with `type:design` or `needs-decision`.
+- Don't decide design questions in an issue; frame them as `type:design`.
 - One issue, one outcome. If the acceptance criteria describe two independent results, split it.
