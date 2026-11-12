@@ -14,77 +14,85 @@ from steno.graph.trace import decode as decode_trace
 from steno.ingestion.local import run_folder
 from steno.rule_packs.packs import is_enabled, load_packs
 
-CASE = (
-    get_settings().rule_packs_dir
-    / "python/steno-pack-fastapi/tests/fastapi-background-task/after-response/input"
+needs_java = pytest.mark.skipif(
+    not (get_settings().resolver_jvm_dir / "lib").is_dir() or shutil.which("java") is None,
+    reason="the JVM helper isn't built (make resolver)",
 )
 
+
+J = "src/main/java/demo/"
 # A small app: an endpoint, a service that writes a table, and a helper called from three
 # places (a utility).
 APP = {
-    "models.py": """
-        from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-
-
-        class Base(DeclarativeBase):
-            pass
-
-
-        class Project(Base):
-            __tablename__ = "project"
-            id: Mapped[int] = mapped_column(primary_key=True)
+    "build.gradle": """
+        dependencies {
+            implementation 'org.springframework.boot:spring-boot-starter-web'
+            implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+        }
     """,
-    "helpers.py": """
-        def fmt(value):
-            return _strip(str(value))
-
-
-        def _strip(text):
-            return text.strip()
+    J + "Project.java": """
+        package demo;
+        import jakarta.persistence.*;
+        @Entity
+        @Table(name = "project")
+        public class Project { @Id private Long id; }
     """,
-    "service.py": """
-        from sqlalchemy.ext.asyncio import AsyncSession
-
-        from helpers import fmt
-        from models import Project
-
-
-        class ProjectService:
-            def __init__(self, db: AsyncSession):
-                self.db = db
-
-            def describe(self, name):
-                return fmt(name)
-
-            async def create(self, name):
-                fmt(name)
-                self._check(name)
-                self.db.add(Project())
-                self._check(name)
-
-            def _check(self, name):
-                return fmt(name)
+    J + "ProjectRepository.java": """
+        package demo;
+        import org.springframework.data.jpa.repository.JpaRepository;
+        public interface ProjectRepository extends JpaRepository<Project, Long> {}
     """,
-    "routers.py": """
-        from fastapi import APIRouter
-
-        from service import ProjectService
-
-        router = APIRouter(prefix="/projects")
-        svc = ProjectService(None)
-
-
-        @router.post("/")
-        async def create_project(name: str):
-            svc.describe(name)
-            await svc.create(name)
+    J + "Helpers.java": """
+        package demo;
+        public class Helpers {
+            static String fmt(Object value) { return strip(String.valueOf(value)); }
+            static String strip(String text) { return text.trim(); }
+        }
+    """,
+    J + "ProjectService.java": """
+        package demo;
+        import org.springframework.stereotype.Service;
+        @Service
+        public class ProjectService {
+            private final ProjectRepository db;
+            public ProjectService(ProjectRepository db) { this.db = db; }
+            public String describe(String name) { return Helpers.fmt(name); }
+            public void create(String name) {
+                Helpers.fmt(name);
+                check(name);
+                db.save(new Project());
+                check(name);
+            }
+            String check(String name) { return Helpers.fmt(name); }
+        }
+    """,
+    J + "ProjectController.java": """
+        package demo;
+        import org.springframework.web.bind.annotation.*;
+        @RestController
+        @RequestMapping("/projects")
+        public class ProjectController {
+            private final ProjectService svc;
+            public ProjectController(ProjectService svc) { this.svc = svc; }
+            @PostMapping("/")
+            public void createProject(@RequestParam String name) {
+                svc.describe(name);
+                svc.create(name);
+            }
+        }
     """,
 }
 FLOW = "flow:demo:POST /projects/"
 
 
-def _plan(case: Path = CASE, repo_name: str = "demo"):
-    repo = Path(case)
+def _write(root: Path, files: dict[str, str]) -> Path:
+    for name, code in files.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text(dedent(code).lstrip())
+    return root
+
+
+def _plan(repo: Path, repo_name: str = "demo"):
     packs = [p for p in load_packs(get_settings().rule_packs_dir) if is_enabled(p, repo)]
     engine = run_folder(repo, packs)
     x = engine.out
@@ -93,62 +101,57 @@ def _plan(case: Path = CASE, repo_name: str = "demo"):
 
 
 def _app(tmp_path: Path) -> Path:
-    for name, code in APP.items():
-        (tmp_path / name).write_text(dedent(code).lstrip())
-    (tmp_path / "requirements.txt").write_text("fastapi\nsqlalchemy\n")
-    return tmp_path
+    return _write(tmp_path, APP)
 
 
 def _trace(plan, flow=FLOW):
     return {t["path"]: t for t in decode_trace(plan.nodes[flow].props["trace"])}
 
 
-def test_architecture_and_code_nodes_without_function_nodes():
-    plan = _plan()
+@needs_java
+def test_architecture_and_code_nodes_without_function_nodes(tmp_path):
+    plan = _plan(_app(tmp_path))
     edges = {(e.type, e.src, e.dst) for e in plan.edges.values()}
-    flow = "flow:demo:POST /jobs/projects/{project_id}"
 
     assert plan.nodes["app:demo"].labels[0] == "Application"
     assert ("BUILT_FROM", "app:demo", "module:demo:.") in edges
-    assert ("STARTS", "endpoint:demo:POST:/jobs/projects/{project_id}", flow) in edges
+    assert ("STARTS", "endpoint:demo:POST:/projects/", FLOW) in edges
     assert not any("Function" in n.labels for n in plan.nodes.values())
     assert not any(e.type in ("INVOKES", "ENTRY", "RUNS") for e in plan.edges.values())
-    # The background task a rule found is in the trace, called async
-    trace = _trace(plan, flow)
-    assert trace["1"]["symbol"] == "routers.run_project_jobs"
-    assert trace["1.1"]["symbol"] == "services.JobService.run_project_jobs"
-    assert trace["1.1"]["async"] is True
-    assert plan.nodes[flow].props["trace_files"] == ["routers.py", "services.py"]
+    # The flow's functions are its trace, starting at the handler
+    assert _trace(plan)["1"]["symbol"] == "demo.ProjectController#createProject(java.lang.String)"
 
 
+@needs_java
 def test_trace_lists_every_call_but_never_expands_a_utility(tmp_path):
     trace = _trace(_plan(_app(tmp_path)))
     names = {path: t["name"] for path, t in trace.items()}
 
     assert names == {
-        "1": "create_project",
+        "1": "createProject",
         "1.1": "describe",
         "1.1.1": "fmt",
         "1.2": "create",
         "1.2.1": "fmt",
-        "1.2.2": "_check",
+        "1.2.2": "check",
         "1.2.2.1": "fmt",
-        "1.2.3": "_check",
+        "1.2.3": "check",
     }
     # fmt is called from three places and nothing architectural is below it: a utility,
-    # listed at each call site, its own call to _strip never expanded
+    # listed at each call site, its own call to strip never expanded
     assert all(trace[p].get("utility") for p in ("1.1.1", "1.2.1", "1.2.2.1"))
-    # _check was expanded the first time; the second call is listed, not expanded again
+    # check was expanded the first time; the second call is listed, not expanded again
     assert trace["1.2.3"].get("repeat") is True
     assert trace["1.2"]["effects"][0]["edge"] == "WRITES_TO"
-    assert trace["1.2"]["call_line"] == 12
+    assert trace["1.2"]["call_line"] == 11
 
 
+@needs_java
 def test_significant_functions_become_steps_with_their_effects(tmp_path):
     plan = _plan(_app(tmp_path))
     edges = {(e.type, e.src, e.dst): e for e in plan.edges.values()}
-    root = f"step:{FLOW}:routers.create_project"
-    create = f"step:{FLOW}:service.ProjectService.create"
+    root = f"step:{FLOW}:demo.ProjectController#createProject(java.lang.String)"
+    create = f"step:{FLOW}:demo.ProjectService#create(java.lang.String)"
     table = next(n.id for n in plan.nodes.values() if n.labels[0] == "Table")
 
     steps = {n.id: n.props for n in plan.nodes.values() if n.labels == ["Step"]}
@@ -178,19 +181,20 @@ def test_org_defined_channels_join_applications_by_name(tmp_path):
     assert ids == ["pxchannel:orders", "pxchannel:orders"]
 
 
-def test_every_fact_records_its_provenance():
-    for node in _plan().nodes.values():
+@needs_java
+def test_every_fact_records_its_provenance(tmp_path):
+    nodes = _plan(_app(tmp_path)).nodes.values()
+    assert nodes
+    for node in nodes:
         assert node.props["repo"] == "demo"
         assert node.props["ingestion_job"] == 7
         assert node.props["commit"] == "abc123"
 
 
-def test_unidentified_stores_belong_to_their_own_repository():
+@needs_java
+def test_unidentified_stores_belong_to_their_own_repository(tmp_path):
     """Two applications in one space whose databases aren't known yet don't share a store."""
-    case = (
-        get_settings().rule_packs_dir
-        / "python/steno-pack-sqlalchemy/tests/sqlalchemy-dml/update-statement/input"
-    )
+    case = _app(tmp_path)
     stores = []
     for repo in ("billing", "catalog"):
         plan = _plan(case, repo)
@@ -212,9 +216,10 @@ def test_an_effect_keeps_every_operation_and_call_site():
     assert props["call_sites"] == ["120 upsert", "140 upsert", "164 delete"]
 
 
-def test_an_application_is_a_service_by_the_triggers_of_its_flows():
+@needs_java
+def test_an_application_is_a_service_by_the_triggers_of_its_flows(tmp_path):
     # kinds are labels from what starts the flows; the module that builds it is Deployable
-    plan = _plan()
+    plan = _plan(_app(tmp_path))
     app = plan.nodes["app:demo"]
     assert "Service" in app.labels and app.props["kinds"] == ["Service"]
     assert "Deployable" in plan.nodes["module:demo:."].labels
@@ -224,48 +229,43 @@ def test_an_application_is_a_service_by_the_triggers_of_its_flows():
 # ----------------------------------------------------------- cross-module HTTP joins
 
 
+WEB = "dependencies { implementation 'org.springframework.boot:spring-boot-starter-web' }"
+
+
 def _service_pair(tmp_path: Path) -> Path:
     """Two modules of one repository: `gateway` calls `orders` by its bare service name,
     the shape a gateway route's `uri` or a Feign `@FeignClient` name takes
     (`route_target`), with no scheme and no dots."""
-    (tmp_path / "orders").mkdir()
-    (tmp_path / "orders/requirements.txt").write_text("fastapi\n")
-    (tmp_path / "orders/__init__.py").write_text("")
-    (tmp_path / "orders/orders_api.py").write_text(
-        dedent(
-            """
-            from fastapi import FastAPI
-
-            orders_app = FastAPI()
-
-
-            @orders_app.get("/items")
-            def list_items():
-                return []
-            """
-        ).lstrip()
-    )
-    (tmp_path / "gateway").mkdir()
-    (tmp_path / "gateway/requirements.txt").write_text("fastapi\nrequests\n")
-    (tmp_path / "gateway/__init__.py").write_text("")
-    (tmp_path / "gateway/gateway_api.py").write_text(
-        dedent(
-            """
-            import requests
-            from fastapi import FastAPI
-
-            gateway_app = FastAPI()
-
-
-            @gateway_app.get("/gateway/items")
-            def proxy_items():
-                return requests.get("http://demo-orders/items").json()
-            """
-        ).lstrip()
-    )
-    return tmp_path
+    return _write(tmp_path, {
+        "orders/build.gradle": WEB,
+        "orders/src/main/java/orders/OrdersApi.java": """
+            package orders;
+            import java.util.List;
+            import org.springframework.web.bind.annotation.*;
+            @RestController
+            public class OrdersApi {
+                @GetMapping("/items")
+                public List<String> listItems() { return List.of(); }
+            }
+        """,
+        "gateway/build.gradle": WEB,
+        "gateway/src/main/java/gateway/GatewayApi.java": """
+            package gateway;
+            import org.springframework.web.bind.annotation.*;
+            import org.springframework.web.client.RestTemplate;
+            @RestController
+            public class GatewayApi {
+                private final RestTemplate rest = new RestTemplate();
+                @GetMapping("/gateway/items")
+                public String proxyItems() {
+                    return rest.getForObject("http://demo-orders/items", String.class);
+                }
+            }
+        """,
+    })  # fmt: skip
 
 
+@needs_java
 def test_a_call_to_another_modules_bare_service_name_joins_its_endpoint(tmp_path: Path):
     plan = _plan(_service_pair(tmp_path))
     # Each module is its own application, named after the repository plus its folder (no
@@ -287,30 +287,27 @@ def test_a_call_to_another_modules_bare_service_name_joins_its_endpoint(tmp_path
     assert "external:demo-orders" not in plan.nodes
 
 
+@needs_java
 def test_a_bare_host_that_names_no_known_module_still_becomes_an_external_system(
     tmp_path: Path,
 ):
-    (tmp_path / "requirements.txt").write_text("fastapi\nrequests\n")
-    (tmp_path / "main.py").write_text(
-        dedent(
-            """
-            import requests
-
-
-            def call_unknown():
-                return requests.get("http://totally-unrelated-service/items").json()
-            """
-        ).lstrip()
-    )
+    _write(tmp_path, {
+        "build.gradle": WEB,
+        "src/main/java/demo/Main.java": """
+            package demo;
+            import org.springframework.web.client.RestTemplate;
+            public class Main {
+                private final RestTemplate rest = new RestTemplate();
+                public String callUnknown() {
+                    String url = "http://totally-unrelated-service/items";
+                    return rest.getForObject(url, String.class);
+                }
+            }
+        """,
+    })  # fmt: skip
     plan = _plan(tmp_path)
     externals = [n for n in plan.nodes.values() if "ExternalSystem" in n.labels]
     assert any(n.props.get("host") == "totally-unrelated-service" for n in externals)
-
-
-needs_java = pytest.mark.skipif(
-    not (get_settings().resolver_jvm_dir / "lib").is_dir() or shutil.which("java") is None,
-    reason="the JVM helper isn't built (make resolver)",
-)
 
 
 def _java_service(root: Path, name: str, java: str, config: str = "") -> None:

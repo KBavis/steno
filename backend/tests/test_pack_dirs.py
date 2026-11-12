@@ -32,9 +32,9 @@ def test_extra_folders_in_either_layout_are_org_packs(tmp_path: Path, monkeypatc
 
 
 def test_a_pack_name_found_twice_is_an_error(tmp_path: Path, monkeypatch) -> None:
-    _pack(tmp_path / "org" / "steno-pack-fastapi", "steno-pack-fastapi")
+    _pack(tmp_path / "org" / "steno-pack-spring-web", "steno-pack-spring-web")
     monkeypatch.setattr(get_settings(), "rule_pack_dirs", [tmp_path / "org"])
-    with pytest.raises(ValueError, match="two packs named steno-pack-fastapi"):
+    with pytest.raises(ValueError, match="two packs named steno-pack-spring-web"):
         load_all_packs()
 
 

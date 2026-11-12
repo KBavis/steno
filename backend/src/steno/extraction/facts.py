@@ -74,7 +74,7 @@ class TableOfRef:
 
     expr: Any  # the resolver's own expression and scope
     scope: Any
-    language: str = "python"
+    language: str = "java"
 
 
 Ref = AppRef | NodeRef | HttpRef | TableOfRef

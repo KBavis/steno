@@ -24,15 +24,6 @@ from steno.resolvers.base import Function, Hook, LibraryCall, Resolvers, Unresol
 
 # Libraries whose calls can reach the network, a store, or a broker
 NETWORK_IO = {
-    "aiohttp", "aiokafka", "anthropic", "asyncpg", "atlassian", "boto3", "botocore", "chromadb",
-    "confluent_kafka", "elasticsearch", "ftplib", "github", "google.cloud", "grpc", "httpx",
-    "jira", "kafka", "langchain", "llama_index.llms", "llama_index.embeddings",
-    "llama_index.vector_stores", "llama_index.storage", "llama_index.core.storage", "motor",
-    "neo4j", "ollama", "openai",
-    "paramiko", "pika", "psycopg", "psycopg2", "pymongo", "redis", "requests", "slack_sdk",
-    "smtplib", "socket", "sqlalchemy", "urllib.request", "urllib3", "websockets", "http.client",
-    "sqlite3", "subprocess",
-    # Java, by package
     "com.amazonaws", "com.datastax.oss", "com.rabbitmq", "feign", "io.grpc", "io.lettuce",
     "okhttp3", "org.apache.kafka", "org.apache.http", "org.apache.hc", "org.mongodb",
     "org.springframework.amqp", "org.springframework.data", "org.springframework.jdbc",
@@ -40,13 +31,9 @@ NETWORK_IO = {
     "org.springframework.web.reactive.function.client", "redis.clients", "software.amazon",
     "java.net.http", "java.net.HttpURLConnection", "java.sql",
 }  # fmt: skip
-# Files: model artifacts, uploads, exports are stores too. A call into one that no rule
+# Files: uploads, exports, and model artifacts are stores too. A call into one that no rule
 # explains is still a gap, ranked below the network, messaging, and databases
 FILE_IO = {
-    "builtins.open", "pathlib.Path.open", "pathlib.Path.read_text", "pathlib.Path.write_text",
-    "pathlib.Path.read_bytes", "pathlib.Path.write_bytes", "shutil", "pickle.load",
-    "pickle.dump", "joblib.load", "joblib.dump", "onnxruntime.InferenceSession", "torch.load",
-    "torch.save", "numpy.load", "numpy.save",
     "java.nio.file.Files", "java.io.FileInputStream", "java.io.FileOutputStream",
     "java.io.FileReader", "java.io.FileWriter", "java.io.RandomAccessFile",
 }  # fmt: skip
@@ -55,13 +42,9 @@ IO_LIBRARIES = NETWORK_IO | FILE_IO
 HARMLESS = {
     "java.", "javax.annotation", "lombok", "com.fasterxml.jackson", "org.mapstruct",
     "org.slf4j", "org.apache.logging", "org.apache.commons.lang3",
-    "typing", "dataclasses", "enum", "abc", "functools", "contextlib", "pydantic",
     "jakarta.validation.ConstraintValidator#initialize",
     "javax.validation.ConstraintValidator#initialize",
     "jakarta.transaction.Transactional", "javax.transaction.Transactional",
-    "torch.nn", "pandas.core", "sklearn",
-    # Asking the machine its own name isn't a call to anything
-    "socket.gethostname", "socket.getfqdn",
 }  # fmt: skip
 
 

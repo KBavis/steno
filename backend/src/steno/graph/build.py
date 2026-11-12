@@ -65,7 +65,7 @@ POINTERS = ("start_line", "end_line", "call_line")
 # inherited method whose calls depend on that (Task.run as DiffTaskRunner), else None
 Key = tuple[str, str | None]
 UNRESOLVED_SYSTEM = "unresolved"
-LANGUAGE_OF = {".py": "python", ".java": "java"}
+LANGUAGE_OF = {".java": "java"}
 # What kind of thing starts a flow, by its trigger's label (the UI groups flows by it)
 TRIGGER_KIND = {
     "HttpEndpoint": "http",

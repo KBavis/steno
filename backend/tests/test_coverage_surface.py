@@ -1,8 +1,11 @@
 """The coverage report on the surface: library gaps, quiet signals, silent repositories
 and witnesses, hooks that start work, and drops that lost a surface fact."""
 
+import shutil
 from pathlib import Path
 from textwrap import dedent
+
+import pytest
 
 from steno.config import get_settings
 from steno.coverage.collect import (
@@ -20,55 +23,74 @@ from steno.ingestion.local import run_folder
 from steno.rule_packs.packs import Pack, Rule, is_enabled, load_packs
 from steno.rule_packs.surface import on_surface
 
-APP = """
-    import acme_orders
-    import stripe
-    from fastapi import APIRouter
-
-    router = APIRouter()
-
-
-    @router.post("/checkout")
-    async def checkout(order_id: str):
-        acme_orders.client.create(order_id)        # the organization's wrapper: not followed
-        stripe.Charge.create(amount=100)           # a vendor SDK no list knows
-        with open("/tmp/receipt.txt", "w") as f:   # a local file: ranked low
-            f.write(order_id)
-"""
+needs_jvm = pytest.mark.skipif(
+    not (get_settings().resolver_jvm_dir / "lib").is_dir() or shutil.which("java") is None,
+    reason="the JVM helper isn't built (make resolver)",
+)
+J = "src/main/java/com/x/"
+APP = {
+    "build.gradle": """
+        dependencies { implementation 'org.springframework.boot:spring-boot-starter-web' }
+    """,
+    J + "Checkout.java": """
+        package com.x;
+        import com.acme.orders.OrdersClient;
+        import com.stripe.Charge;
+        import java.nio.file.Files;
+        import java.nio.file.Path;
+        import org.springframework.web.bind.annotation.*;
+        @RestController
+        public class Checkout {
+            private final OrdersClient orders = new OrdersClient();
+            @PostMapping("/checkout")
+            public void checkout(@RequestParam String orderId) throws Exception {
+                orders.create(orderId);                  // the organization's wrapper: not followed
+                Charge.create(100);                      // a vendor SDK no list knows
+                // a local file: ranked low
+                Files.writeString(Path.of("/tmp/receipt.txt"), orderId);
+            }
+        }
+    """,
+}
 
 
 def _report(tmp_path: Path, prefixes: list[str] | None = None, **kw):
-    (tmp_path / "app.py").write_text(dedent(APP).lstrip())
-    (tmp_path / "requirements.txt").write_text("fastapi\nstripe\nacme-orders\n")
+    for name, code in APP.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(dedent(code).lstrip())
     all_packs = load_packs(get_settings().rule_packs_dir)
     packs = [p for p in all_packs if is_enabled(p, tmp_path)]
     engine = run_folder(tmp_path, packs)
     x = engine.out
     structure = detect(tmp_path, {ep.origin.file for ep in x.entry_points})
-    plan = build(x, engine.resolver, structure, Context("demo", "space:1", "org:1", 1, "c"))
+    ctx = Context("demo", "space:1", "org:1", 1, "c")
+    plan = build(x, engine.resolver, structure, ctx, packs=all_packs)
     report = collect(x, engine.resolver, plan, all_packs, internal_prefixes=prefixes, **kw)
     return {(i.signal, i.target): i for i in report.items}, report
 
 
+@needs_jvm
 def test_an_internal_wrapper_and_an_unknown_sdk_are_library_gaps(tmp_path):
-    items, _ = _report(tmp_path, ["acme_"])
-    internal = items[("internal_library", "acme_orders")]
-    assert internal.label == "Internal library not followed · acme_orders"
-    assert internal.samples[0]["detail"].startswith("acme_orders.")
-    assert ("external_library", "stripe") in items
+    items, _ = _report(tmp_path, ["com.acme"])
+    internal = items[("internal_library", "com.acme.orders")]
+    assert internal.label == "Internal library not followed · com.acme.orders"
+    assert internal.samples[0]["detail"].startswith("com.acme.orders.")
+    assert ("external_library", "com.stripe") in items
     # A local file is still a gap, below the network, messaging, and databases
-    assert ("file_call", "builtins") in items
-    assert not any(s == "external_call" and t == "builtins" for s, t in items)
+    assert ("file_call", "java.nio") in items
+    assert not any(s == "external_call" and t == "java.nio" for s, t in items)
 
 
+@needs_jvm
 def test_without_prefixes_the_organizations_library_is_external(tmp_path):
     items, _ = _report(tmp_path)
-    assert ("external_library", "acme_orders") in items
+    assert ("external_library", "com.acme.orders") in items
     assert not any(s == "internal_library" for s, _ in items)
 
 
+@needs_jvm
 def test_library_gaps_rank_internal_before_external(tmp_path):
-    _, report = _report(tmp_path, ["acme_"])
+    _, report = _report(tmp_path, ["com.acme"])
     order = [i.signal for i in report.items]
     assert order.index("internal_library") < order.index("external_library")
     assert order.index("external_library") < order.index("file_call")
@@ -102,8 +124,10 @@ def test_a_repository_that_produced_nothing_is_one_item(tmp_path):
     assert report.items[0] is silent  # a whole missing witness ranks first
 
 
+@needs_jvm
 def test_a_repository_with_an_application_isnt_silent(tmp_path):
-    items, _ = _report(tmp_path, files=["app.py"], read={"app.py"}, repository="demo",
+    items, _ = _report(tmp_path, files=[J + "Checkout.java"], read={J + "Checkout.java"},
+                       repository="demo",
                        library_modules=0)  # fmt: skip
     assert not any(s == "silent_repository" for s, _ in items)
 

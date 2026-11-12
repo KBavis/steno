@@ -1,2 +1,0 @@
-edges:
-  - WRITES_TO: { from: service.detach, to: project_data, operation: update }

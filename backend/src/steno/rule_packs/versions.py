@@ -4,7 +4,7 @@ See docs/how-it-works/ingestion/rules-and-packs.md §6 (`versions`) and the cove
 
 Read from every build file the build loads, not just the main one: Gradle scripts applied from
 others (`dependencies.gradle`), version catalogs (`libs.versions.toml`), Gradle properties,
-Maven POMs (parent, properties), and Python requirements, pyproject files, and lock files. A
+and Maven POMs (parent, properties). A
 version written as a variable (`${springBootVersion}`, `versions.boot`, `version.ref`) is looked
 up in the same files. Nothing is built or downloaded: a version only the build tool would work
 out (a BOM's managed versions, a range) is left unknown, and the coverage report says so.
@@ -20,7 +20,7 @@ from steno.source.files import is_test_file, source_files
 
 @dataclass(frozen=True)
 class Dependency:
-    name: str  # `group:artifact` (Java), a plugin id, or a Python distribution name
+    name: str  # `group:artifact`, or a plugin id
     version: str | None  # None when the build doesn't say it
     file: str  # repository-relative
 
@@ -64,12 +64,6 @@ def dependencies(repo: Path) -> list[Dependency]:
             out += _catalog(f, rel)
         elif f.name == "pom.xml":
             out += _maven(f.read_text(errors="replace"), rel)
-        elif re.fullmatch(r"requirements.*\.txt", f.name):
-            out += _requirements(f.read_text(errors="replace").splitlines(), rel)
-        elif f.name == "pyproject.toml":
-            out += _pyproject(f, rel)
-        elif f.name in ("uv.lock", "poetry.lock"):
-            out += _lock(f, rel)
     return out
 
 
@@ -173,50 +167,6 @@ def _maven(text: str, rel: str) -> list[Dependency]:
             if kind == "parent" and props:
                 props.setdefault("project.parent.version", v or "")
     return out
-
-
-# ------------------------------------------------------------------- Python
-
-
-def _requirement(spec: str, rel: str) -> Dependency | None:
-    """`fastapi==0.115.12` → 0.115.12. A range (`>=0.100`) isn't a version: unknown."""
-    spec = spec.split("#", 1)[0].split(";", 1)[0].strip()
-    if not spec or spec.startswith("-"):
-        return None
-    name = re.split(r"[\s<>=!~\[]", spec, maxsplit=1)[0]
-    pinned = re.search(r"===?\s*([\w.\-+]+)", spec)
-    return Dependency(name, pinned.group(1) if pinned else None, rel)
-
-
-def _requirements(lines: list[str], rel: str) -> list[Dependency]:
-    return [d for line in lines if (d := _requirement(line, rel))]
-
-
-def _pyproject(f: Path, rel: str) -> list[Dependency]:
-    try:
-        data = tomllib.loads(f.read_text())
-    except tomllib.TOMLDecodeError:
-        return []
-    specs = list(data.get("project", {}).get("dependencies", []))
-    for group in (data.get("project", {}).get("optional-dependencies") or {}).values():
-        specs += group
-    out = _requirements(specs, rel)
-    poetry = data.get("tool", {}).get("poetry", {}).get("dependencies") or {}
-    out += [Dependency(n, None, rel) for n in poetry if n != "python"]
-    return out
-
-
-def _lock(f: Path, rel: str) -> list[Dependency]:
-    """`uv.lock` and `poetry.lock`: the exact versions installed."""
-    try:
-        data = tomllib.loads(f.read_text())
-    except tomllib.TOMLDecodeError:
-        return []
-    return [
-        Dependency(p["name"], str(p["version"]), rel)
-        for p in data.get("package", [])
-        if p.get("name") and p.get("version")
-    ]
 
 
 # ------------------------------------------------------------------- ranges

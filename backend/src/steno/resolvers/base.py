@@ -3,12 +3,12 @@
 See docs/how-it-works/ingestion/resolvers.md §1 and §5.2.
 
 The engine, the assemblers, the graph builder, and the coverage report ask these questions and
-never look inside a language's syntax. Each resolver has its own expressions (Python: `ast`
-nodes; Java: positions the JVM helper resolved) and scopes; callers only pass them back.
+never look inside a language's syntax. Each resolver has its own expressions (Java: positions
+the JVM helper resolved) and scopes; callers only pass them back.
 
 `Resolvers` holds one resolver per language in a repository, picks one by file, and answers the
 call-graph questions across all of them. The config property map belongs to it and is shared by
-every resolver, so a Spring `${key}` and a Python `os.getenv("KEY")` read the same config.
+every resolver, so every `${key}` reads the same config.
 """
 
 from collections.abc import Iterator

@@ -1,23 +1,32 @@
 """an org's own messaging framework is two rules, a sender and a receiver, and
 applications connect wherever the channel names match."""
 
+import shutil
 from pathlib import Path
 from textwrap import dedent
 
+import pytest
+
+from steno.config import get_settings
 from steno.graph.build import Context, build
 from steno.graph.structure import detect
 from steno.ingestion.local import run_folder
 from steno.rule_packs.packs import is_enabled, load_packs
 
+pytestmark = pytest.mark.skipif(
+    not (get_settings().resolver_jvm_dir / "lib").is_dir() or shutil.which("java") is None,
+    reason="the JVM helper isn't built (make resolver)",
+)
+
 PACK = {
     "pack.yaml": """
         name: org-px
         version: 0.1.0
-        language: python
+        language: java
         source: org
         description: The org's own messaging
         enabled_when:
-          imports: [px]
+          imports: [com.acme.px]
     """,
     "rules/px-send.yaml": """
         id: px-send
@@ -26,7 +35,7 @@ PACK = {
           rule:
             pattern: $M.post($CHANNEL, $$$)
         where:
-          $M: { type: px.Messenger }
+          $M: { type: com.acme.px.Messenger }
         emit:
           - edge: PRODUCES
             from: "@function"
@@ -34,14 +43,17 @@ PACK = {
     """,
     "rules/px-receive.yaml": """
         id: px-receive
-        description: A handler for a channel, e.g. @on_message("orders")
+        description: A handler for a channel, e.g. @OnMessage("orders")
         match:
           rule:
-            kind: decorated_definition
+            kind: method_declaration
             has:
-              kind: decorator
+              kind: modifiers
               has:
-                pattern: on_message($CHANNEL)
+                kind: annotation
+                all:
+                  - has: { field: name, regex: "^OnMessage$" }
+                  - has: { field: arguments, has: { nthChild: 1, pattern: $CHANNEL } }
         emit:
           - node: [Interface, PxChannel]
             as: channel
@@ -52,26 +64,33 @@ PACK = {
     """,
 }
 SENDER = """
-    from px import Messenger, on_message
+    package com.x;
+    import com.acme.px.Messenger;
+    import com.acme.px.OnMessage;
 
-    messenger = Messenger()
+    public class App {
+        private final Messenger messenger = new Messenger();
 
+        @OnMessage("payments")
+        public void onPayment(Object payment) {
+            publish(payment);
+        }
 
-    @on_message("payments")
-    def on_payment(payment):
-        publish(payment)
-
-
-    def publish(payment):
-        messenger.post("orders", payment)
+        void publish(Object payment) {
+            messenger.post("orders", payment);
+        }
+    }
 """
 RECEIVER = """
-    from px import on_message
+    package com.x;
+    import com.acme.px.OnMessage;
 
-
-    @on_message("orders")
-    def on_order(order):
-        return order
+    public class App {
+        @OnMessage("orders")
+        public Object onOrder(Object order) {
+            return order;
+        }
+    }
 """
 
 
@@ -84,7 +103,7 @@ def _write(root: Path, files: dict[str, str]) -> Path:
 
 def _plan(tmp_path: Path, name: str, code: str):
     packs_dir = _write(tmp_path / "packs", {f"org/org-px/{k}": v for k, v in PACK.items()})
-    repo = _write(tmp_path / name, {"app.py": code, "requirements.txt": "px\n"})
+    repo = _write(tmp_path / name, {"src/main/java/com/x/App.java": code, "build.gradle": ""})
     packs = [p for p in load_packs(packs_dir) if is_enabled(p, repo)]
     engine = run_folder(repo, packs)
     structure = detect(repo, {ep.origin.file for ep in engine.out.entry_points})
@@ -102,7 +121,7 @@ def test_sender_and_receiver_in_different_applications_meet_on_one_channel(tmp_p
     steps = [
         e.src for e in sender.edges.values() if e.type == "PRODUCES" and e.src.startswith("step:")
     ]
-    assert len(steps) == 1 and steps[0].endswith(":app.publish")
+    assert len(steps) == 1 and steps[0].endswith("com.x.App#publish(java.lang.Object)")
     # The receiver's flow is started by the same channel node
     assert ("STARTS", "pxchannel:orders", "flow:shipping:orders") in received
     assert "Interface" in receiver.nodes["pxchannel:orders"].labels

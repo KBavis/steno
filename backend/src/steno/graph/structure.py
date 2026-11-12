@@ -1,8 +1,8 @@
 """How a repository is built: its modules (build units) and the applications they produce.
 
 docs/how-it-works/graph-reference.md §3, Module roles. A Module is the ecosystem's build unit
-(a Python
-project, an npm package, a Maven/Gradle module); a `:Deployable` module produces a deployable
+(a Maven or Gradle
+module, an npm package); a `:Deployable` module produces a deployable
 and gets an Application (the role was `:Service` until 2026-10-27, renamed so it doesn't collide
 with the Application kind). Phase 1 detection (Proposed; docs/plan/decisions.md lists the
 signals as Open): a module is Deployable when rules found entry points in it.
@@ -15,9 +15,6 @@ from steno.source.files import source_files
 
 # Build file → (build tool, language)
 BUILD_FILES = {
-    "pyproject.toml": ("python", "python"),
-    "setup.py": ("python", "python"),
-    "setup.cfg": ("python", "python"),
     "package.json": ("npm", "typescript"),
     "pom.xml": ("maven", "java"),
     "build.gradle": ("gradle", "java"),
@@ -62,8 +59,8 @@ def detect(repo: Path, entry_files: set[str]) -> Structure:
     for path in source_files(repo):
         rel = path.relative_to(repo)
         name = path.name
-        if name in BUILD_FILES or (name.startswith("requirements") and name.endswith(".txt")):
-            tool, language = BUILD_FILES.get(name, ("pip", "python"))
+        if name in BUILD_FILES:
+            tool, language = BUILD_FILES[name]
             key = rel.parent.as_posix()
             modules.setdefault(key, Module(key, tool, language))
     if "." not in modules:  # files outside every build unit belong to the repository itself

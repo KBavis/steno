@@ -5,7 +5,7 @@ Steno's own lookups). Asking it one question at a time would cost a round trip e
 helper reads the whole repository once and writes everything the engine could ask: every
 function and type, every call site (what it calls, or why that can't be told), and the symbol,
 type, class, and value of every expression a rule may capture, keyed by file and position. This
-resolver looks the answers up and offers the same interface as the Python one.
+resolver looks the answers up and offers the interface every resolver shares (base.py).
 
 It reads the repository's source and the JDK; dependency JARs come later. A library type is still
 named from its import, but what a library method returns isn't known, so a chain through one stops

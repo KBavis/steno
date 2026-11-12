@@ -1,2 +1,0 @@
-edges:
-  - READS_FROM: { from: service.load, to: project, operation: select }

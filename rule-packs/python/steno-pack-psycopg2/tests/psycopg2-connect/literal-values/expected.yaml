@@ -1,5 +1,0 @@
-nodes:
-- DataStore:
-    host: db.local
-    vendor: postgresql
-    database: budget
