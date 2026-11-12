@@ -130,20 +130,17 @@ FILES = {
         }
     """,
     # Another application in the repository: the Java app's security config isn't its own
-    "worker/pyproject.toml": """
-        [project]
-        name = "worker"
-        dependencies = ["fastapi"]
+    "worker/build.gradle": """
+        dependencies { implementation 'org.springframework.boot:spring-boot-starter-web' }
     """,
-    "worker/main.py": """
-        from fastapi import FastAPI
-
-        app = FastAPI()
-
-
-        @app.post("/admin/tasks")
-        def run():
-            return {}
+    "worker/src/main/java/com/w/TaskController.java": """
+        package com.w;
+        import org.springframework.web.bind.annotation.*;
+        @RestController
+        public class TaskController {
+            @PostMapping("/admin/tasks")
+            public void run() {}
+        }
     """,
 }
 

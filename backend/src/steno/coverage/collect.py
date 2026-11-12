@@ -35,15 +35,10 @@ SAMPLES = 5
 
 # Libraries whose calls usually reach the network, a store, or a broker. With IO_VERBS, the
 # stand-in for Jev I8 ("does this call look like I/O?"): a library call named like I/O
-# (`session.execute`, `client.post`) is worth a rule if no rule explains it. Constructors and
-# query builders (`httpx.AsyncClient()`, `select(...)`) aren't I/O themselves.
+# (`template.execute`, `client.post`) is worth a rule if no rule explains it. Constructors and
+# builders (`new OkHttpClient()`) aren't I/O themselves.
 IO_PACKAGES = {
-    "aiohttp", "aiokafka", "anthropic", "asyncpg", "atlassian", "boto3", "botocore", "chromadb",
-    "confluent_kafka", "elasticsearch", "ftplib", "github", "google", "grpc", "httpx", "jira",
-    "kafka", "langchain", "llama_index", "motor", "neo4j", "ollama", "openai", "paramiko",
-    "pika", "psycopg", "psycopg2", "pymongo", "redis", "requests", "slack_sdk", "smtplib",
-    "socket", "sqlalchemy", "urllib", "urllib3", "websockets",
-    # Java, by package (resolvers/java.py, library_of)
+    # By package (resolvers/java.py, library_of)
     "com.amazonaws", "com.datastax.oss", "com.rabbitmq", "feign", "io.grpc", "io.lettuce",
     "jakarta.jms", "javax.jms",
     "okhttp3", "org.apache.kafka", "org.apache.http", "org.mongodb", "org.springframework.amqp",
@@ -568,7 +563,7 @@ def _standard(library: str) -> bool:
 
 def is_internal(symbol: str, library: str, prefixes: list[str], roots: set[str]) -> bool:
     """Whether a library is the organization's own code: under one of its prefixes (a Java
-    package `com.acme`, a coordinate `com.acme:*`, a Python package prefix `acme_`), or under
+    package `com.acme`, a coordinate `com.acme:*`, or a name prefix `acme_`), or under
     one of the repository's own package roots (`com.acme` for code in `com.acme.billing`)."""
     for raw in [*prefixes, *roots]:
         p = raw.strip().removesuffix(".*").removesuffix("*")
@@ -586,7 +581,7 @@ def is_internal(symbol: str, library: str, prefixes: list[str], roots: set[str])
 
 def _own_roots(r: Resolvers) -> set[str]:
     """The organization-level package roots of the repository's own Java code: `com.acme`
-    for `com.acme.billing.Invoice`. Python packages have no such root, so it's prefixes only."""
+    for `com.acme.billing.Invoice`."""
     roots: set[str] = set()
     for fn in r.functions():
         if "#" not in fn.symbol:
@@ -762,8 +757,8 @@ def _unread_config(
         key = clue.fields.get("key") if clue.kind == "property" else None
         if not isinstance(key, str) or key in used or _under(key, noise):
             continue
-        # A settings class's field (pydantic's `DATABASE_URL: str = ...`) is code the app
-        # reads as `settings.X`, not a config file nothing reads
+        # A key that comes from code (a settings class's field) is read by the app, not a
+        # config file nothing reads
         if PurePosixPath(clue.origin.file).suffix in CODE_SUFFIXES:
             continue
         prefix = config_prefix(key)

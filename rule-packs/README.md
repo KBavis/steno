@@ -4,12 +4,12 @@ Rule packs teach Steno to recognize what code **does**. This folder holds every 
 
 ## What a rule pack is
 
-Steno reads repositories without running them, so it has to recognize what code means from how it's written. In a FastAPI app, a function decorated with `@router.post("/projects")` is an HTTP endpoint. In a Spring app, a class with `@Entity @Table(name="users")` maps to the `users` table.
+Steno reads repositories without running them, so it has to recognize what code means from how it's written. In a Spring app, a method annotated `@PostMapping("/projects")` in a `@RestController` is an HTTP endpoint, and a class with `@Entity @Table(name="users")` maps to the `users` table.
 
-A **rule** captures one such pattern: **"when you see this code, it means this fact."** A **rule pack** is a versioned bundle of rules for one framework or one organization: `steno-pack-fastapi`, `steno-pack-spring-kafka`, `yourorg-internal`.
+A **rule** captures one such pattern: **"when you see this code, it means this fact."** A **rule pack** is a versioned bundle of rules for one framework or one organization: `steno-pack-spring-web`, `steno-pack-spring-kafka`, `yourorg-internal`.
 
 - Rules are **deterministic**. No AI runs when Steno ingests code; a rule matches or it doesn't.
-- Packs are **auto-enabled** from a repository's dependencies: `fastapi` in `requirements.txt` turns on `steno-pack-fastapi`.
+- Packs are **auto-enabled** from a repository's dependencies: `spring-boot-starter-web` in `build.gradle` turns on `steno-pack-spring-web`.
 - The **coverage report** after every ingestion lists code that looked important but that no rule explained, ranked by how often it appears. It tells you which rule to write next.
 
 The full format is in **[Rules and rule packs](../docs/how-it-works/ingestion/rules-and-packs.md)**. This page is the practical guide.
@@ -21,7 +21,6 @@ Packs are grouped by ecosystem, meaning a language plus its config files, or a f
 ```
 rule-packs/
 ├─ java/                         CODE: Spring, JPA, Kafka, …
-├─ python/                       CODE: FastAPI, SQLAlchemy, …
 ├─ http/                         HTTP signatures for well-known services
 ├─ kafka/                        PLATFORM: Strimzi topics and ACLs
 ├─ catalog/                      DECLARED: Backstage catalog files
@@ -36,13 +35,13 @@ Code rules mostly produce **facts** (straight into the graph); rules over platfo
 Each pack:
 
 ```
-steno-pack-fastapi/
+steno-pack-spring-web/
 ├─ pack.yaml                     name, version, language, description, enabled_when, witness_type
 ├─ rules/
-│  └─ fastapi-endpoint.yaml      one rule per file; the file name is the rule id
+│  └─ spring-mapping.yaml        one rule per file; the file name is the rule id
 └─ tests/
-   └─ fastapi-endpoint/          one folder per rule
-      └─ nested-prefix/          one folder per test case
+   └─ spring-mapping/            one folder per rule
+      └─ with-prefix/            one folder per test case
          ├─ input/               small copies of real code
          └─ expected.yaml        the facts (and claims) this case must produce
 ```
@@ -55,27 +54,30 @@ A rule has two halves:
 - **`emit`**: what it means, in Steno's vocabulary.
 
 ```yaml
-id: fastapi-endpoint
-description: A route handler, e.g. @router.post("/projects/{project_id}")
+id: spring-mapping
+description: A handler method with a path, e.g. @PostMapping("/{projectId}") in a @RestController
 match:
   rule:
-    kind: decorated_definition
+    kind: method_declaration
     has:
-      kind: decorator
+      kind: modifiers
       has:
-        pattern: $ROUTER.$METHOD($PATH $$$)
-  constraints:
-    METHOD: { regex: "^(get|post|put|patch|delete)$" }
+        kind: annotation
+        all:
+          - has: { field: name, regex: "^(Get|Post|Put|Patch|Delete)Mapping$", pattern: $ANNO }
+          - has: { field: arguments, has: { nthChild: 1, pattern: $PATH } }
+  transform:
+    METHOD: { replace: { source: $ANNO, replace: "Mapping$", by: "" } }
 emit:
   - node: [Interface, HttpEndpoint]     # a thing in the graph
     as: endpoint
     method: $METHOD
     path: $PATH
-    prefixed_by: $ROUTER                # the router's prefix chain is added later
+    prefixed_by: "@class"               # the controller's @RequestMapping prefix is added later
   - edge: EXPOSES                       # a connection: this app exposes the endpoint
     from: "@app"
     to: endpoint
-  - entry_point:                        # this function starts a flow
+  - entry_point:                        # this method starts a flow
       trigger: endpoint
       function: "@function"
 ```
@@ -89,7 +91,7 @@ A rule can emit four things:
 | `clue` | A partial fact for Steno to combine later, e.g. "this router's prefix is `/jobs`" |
 | `entry_point` | "This function is started by this trigger." Steno derives flows from these. |
 
-**Clues** exist because some facts are spread across files. A FastAPI endpoint's full path comes from the decorator, the router's `prefix=`, and wherever the router is mounted. Each rule reports only what it sees, and Steno joins the pieces by the symbol they're about. Rules never refer to each other. See [Clues](../docs/how-it-works/ingestion/rules-and-packs.md#4-clues-decided).
+**Clues** exist because some facts are spread across files. A Spring endpoint's full path comes from the method's mapping and the controller's `@RequestMapping` prefix. Each rule reports only what it sees, and Steno joins the pieces by the symbol they're about. Rules never refer to each other. See [Clues](../docs/how-it-works/ingestion/rules-and-packs.md#4-clues-decided).
 
 ## Writing a rule
 
@@ -99,7 +101,7 @@ In Claude Code, describe what you want recognized:
 
 > "Topics declared under `app.kafka.topics` in `application.yml` are Kafka topics."
 >
-> "In Contextualized, every SQLAlchemy model with a `__tablename__` maps to a table."
+> "Every class annotated `@Document(collection = ...)` maps to a MongoDB collection."
 
 The [`rule-pack-author` skill](../.claude/skills/rule-pack-author/SKILL.md) then:
 1. finds real examples in the code,
@@ -118,20 +120,20 @@ You review and own the result. GitHub Copilot and other agents can follow the sa
 5. Check it against real code:
    ```sh
    uv run .claude/skills/rule-pack-author/scripts/check_match.py \
-     rule-packs/python/steno-pack-fastapi/rules/fastapi-endpoint.yaml path/to/repo
+     rule-packs/java/steno-pack-spring-web/rules/spring-mapping.yaml path/to/repo
    ```
    It shows every match and what was captured.
 6. Run the pack's tests, which check the emitted facts against `expected.yaml`:
    ```sh
-   cd backend && uv run steno rules test steno-pack-fastapi
+   cd backend && uv run steno rules test steno-pack-spring-web
    ```
    `uv run steno extract <folder>` shows everything the enabled packs produce on a whole repository.
 
 ## Core packs and org packs
 
-| | Core packs (`java/`, `python/`, …) | Org packs (`org/`) |
+| | Core packs (`java/`, `http/`, …) | Org packs (`org/`) |
 |---|---|---|
-| **Covers** | Public frameworks: Spring, FastAPI, JPA, Kafka clients | Your internal frameworks and conventions |
+| **Covers** | Public frameworks: Spring, JPA, Kafka clients | Your internal frameworks and conventions |
 | **`source`** | `core` | `org` |
 | **Typical size** | 5–20 rules per framework | A handful of rules |
 

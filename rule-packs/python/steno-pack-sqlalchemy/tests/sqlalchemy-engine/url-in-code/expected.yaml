@@ -1,5 +1,0 @@
-nodes:
-  - DataStore:
-      vendor: postgresql
-      host: db.local:5432
-      database: orders

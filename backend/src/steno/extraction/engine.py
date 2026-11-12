@@ -128,7 +128,7 @@ class Engine:
         run here; syntax trees are built during extraction, one file at a time."""
         self.files = list(source_files(self.repo))
         languages = {p.language for p in self.packs}
-        if languages & {"python", "java"}:
+        if "java" in languages:
             self.resolver = build_resolvers(self.repo, self.files, languages)
             self.out.errors += [
                 f"{p.relative_to(self.repo).as_posix() if p != self.repo else '.'}: {msg}"

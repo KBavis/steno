@@ -1,2 +1,0 @@
-edges:
-  - READS_FROM: { from: service.parent_of, to: project, operation: select }

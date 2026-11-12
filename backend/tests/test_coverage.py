@@ -1,7 +1,11 @@
-"""The coverage report's signals, on a small app with one of each gap."""
+"""The coverage report's signals, on a small app with one of each gap. The Java sample needs
+the JVM helper (`make resolver`)."""
 
+import shutil
 from pathlib import Path
 from textwrap import dedent
+
+import pytest
 
 from steno.config import get_settings
 from steno.coverage.collect import collect
@@ -10,57 +14,75 @@ from steno.graph.structure import detect
 from steno.ingestion.local import run_folder
 from steno.rule_packs.packs import is_enabled, load_packs
 
+needs_jvm = pytest.mark.skipif(
+    not (get_settings().resolver_jvm_dir / "lib").is_dir() or shutil.which("java") is None,
+    reason="the JVM helper isn't built (make resolver)",
+)
+J = "src/main/java/com/x/"
 APP = {
-    "app.py": """
-        import httpx
-        import redis
-        from fastapi import APIRouter
-
-        router = APIRouter()
-        cache = redis.Redis()
-
-
-        class Tenants:
-            def __init__(self, url: str):
-                self.url = url
-
-            async def ping(self):
-                async with httpx.AsyncClient() as client:
-                    return await client.get(f"{self.url}/health")
-
-
-        @router.post("/orders")
-        async def create_order(tenant_url: str):
-            cache.publish("orders", "created")          # redis: no pack covers it
-            return await Tenants(tenant_url).ping()     # host is runtime data
-
-
-        async def nightly_cleanup():                    # nothing calls it: an inferred flow
-            async with httpx.AsyncClient() as client:
-                await client.delete("https://api.example.com/old")
+    "build.gradle": """
+        dependencies {
+            implementation 'org.springframework.boot:spring-boot-starter-web'
+            implementation 'redis.clients:jedis'
+        }
     """,
-    "broken.py": "def oops(:\n",
+    J + "Tenants.java": """
+        package com.x;
+        import org.springframework.web.client.RestTemplate;
+        public class Tenants {
+            private final String url;
+            private final RestTemplate rest = new RestTemplate();
+            public Tenants(String url) { this.url = url; }
+            public String ping() { return rest.getForObject(url + "/health", String.class); }
+        }
+    """,
+    J + "Orders.java": """
+        package com.x;
+        import org.springframework.web.bind.annotation.*;
+        import redis.clients.jedis.Jedis;
+        @RestController
+        public class Orders {
+            private final Jedis cache = new Jedis();
+            @PostMapping("/orders")
+            public String create(@RequestParam String tenantUrl) {
+                cache.publish("orders", "created");          // redis: no pack covers it
+                return new Tenants(tenantUrl).ping();        // host is runtime data
+            }
+        }
+    """,
+    J + "Cleanup.java": """
+        package com.x;
+        import org.springframework.web.client.RestTemplate;
+        public class Cleanup {
+            private final RestTemplate rest = new RestTemplate();
+            public void nightly() {                          // nothing calls it: an inferred flow
+                rest.delete("https://api.example.com/old");
+            }
+        }
+    """,
+    J + "Broken.java": "class Broken { void oops( }\n",
 }
 
 
 def _report(tmp_path: Path):
     for name, code in APP.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / name).write_text(dedent(code).lstrip())
-    (tmp_path / "requirements.txt").write_text("fastapi\nhttpx\nredis\n")
     all_packs = load_packs(get_settings().rule_packs_dir)
     packs = [p for p in all_packs if is_enabled(p, tmp_path)]
     engine = run_folder(tmp_path, packs)
     x = engine.out
     structure = detect(tmp_path, {ep.origin.file for ep in x.entry_points})
-    plan = build(x, engine.resolver, structure, Context("demo", "space:1", "org:1", 1, "c"))
+    ctx = Context("demo", "space:1", "org:1", 1, "c")
+    plan = build(x, engine.resolver, structure, ctx, packs=all_packs)
     report = collect(x, engine.resolver, plan, all_packs)
     return {(i.signal, i.target): i for i in report.items}, report.metrics
 
 
 def _plan(tmp_path: Path):
     for name, code in APP.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / name).write_text(dedent(code).lstrip())
-    (tmp_path / "requirements.txt").write_text("fastapi\nhttpx\nredis\n")
     packs = [p for p in load_packs(get_settings().rule_packs_dir) if is_enabled(p, tmp_path)]
     engine = run_folder(tmp_path, packs)
     structure = detect(tmp_path, {ep.origin.file for ep in engine.out.entry_points})
@@ -68,45 +90,50 @@ def _plan(tmp_path: Path):
     return build(engine.out, engine.resolver, structure, ctx)
 
 
+@needs_jvm
 def test_uncalled_work_is_an_inferred_flow(tmp_path):
     plan = _plan(tmp_path)
     flows = {n.props["name"]: n for n in plan.nodes.values() if n.labels[0] == "Flow"}
-    inferred = flows["Background work · app.nightly_cleanup"]
+    inferred = flows["Background work · Cleanup.nightly"]
     assert inferred.props["inferred"] is True and inferred.props["trigger_kind"] == "inferred"
     assert inferred.props["confidence"] == 0.5
     # No trigger is known, so nothing STARTS it
     assert not any(k[0] == "STARTS" and k[2] == inferred.id for k in plan.edges)
     # Called functions (Tenants.ping) and the constructor aren't starting points of their own
-    assert set(flows) == {"POST /orders", "Background work · app.nightly_cleanup"}
+    assert set(flows) == {"POST /orders", "Background work · Cleanup.nightly"}
 
 
+@needs_jvm
 def test_each_gap_is_an_item(tmp_path):
     items, _ = _report(tmp_path)
     assert set(items) == {
-        ("unknown_host", "app.Tenants"),
+        ("unknown_host", "com.x.Tenants"),
         # One item per library; the library item isn't repeated beside its calls
-        ("external_call", "redis"),
+        ("external_call", "redis.clients"),
         # Nothing in the code starts it, but it does real work: a flow, flagged, one
-        # item per module
-        ("inferred_entry", "app"),
+        # item per class
+        ("inferred_entry", "com.x.Cleanup"),
     }
 
 
+@needs_jvm
 def test_unparsed_files_are_a_number_not_an_item(tmp_path):
     _, metrics = _report(tmp_path)
-    assert metrics["unparsed_files"] == 1  # broken.py
+    assert metrics["unparsed_files"] == 1  # Broken.java
 
 
+@needs_jvm
 def test_unknown_hosts_keep_their_url_template(tmp_path):
     items, _ = _report(tmp_path)
-    host = items[("unknown_host", "app.Tenants")]
-    assert host.label == "Unknown host · Tenants (app.py)"
+    host = items[("unknown_host", "com.x.Tenants")]
+    assert host.label == "Unknown host · Tenants (Tenants.java)"
     assert host.samples[0]["detail"] == "{url}/health"
 
 
+@needs_jvm
 def test_completeness_counts_explained_io(tmp_path):
     _, metrics = _report(tmp_path)
-    # The two httpx calls are explained by the httpx rule; redis.publish isn't
+    # The two RestTemplate calls are explained by the spring-web rules; Jedis.publish isn't
     assert (metrics["io_calls"], metrics["io_calls_explained"]) == (3, 2)
 
 

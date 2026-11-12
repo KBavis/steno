@@ -1,7 +1,7 @@
 """Each flow's digest: deterministic, bounded however large the flow is, and written on
 every flow by the build."""
 
-from test_graph_build import FLOW, _app, _plan
+from test_graph_build import FLOW, _app, _plan, needs_java
 
 from steno.graph import trace as trace_codec
 from steno.graph.build import GraphPlan
@@ -51,16 +51,19 @@ def _shop(tables: int = 1, functions: int = 3, **flow: object) -> GraphPlan:
     return plan
 
 
+@needs_java
 def test_every_flow_the_build_writes_has_a_digest(tmp_path):
     plan = _plan(_app(tmp_path))
     digest = plan.nodes[FLOW].props["digest"]
     lines = digest.splitlines()
     assert lines[0] == "POST /projects/ · demo"
     assert lines[1].split() == ["TRIGGER", "http", "POST", "/projects/"]
-    assert any(x.startswith("WRITES") and "project (insert)" in x for x in lines)
+    assert any(x.startswith("WRITES") and "project (upsert)" in x for x in lines)
     # Nearest the entry first: the entry, then what it calls directly, in call order
     functions = next(x for x in lines if x.startswith("FUNCTIONS")).split(None, 1)[1]
-    assert functions.startswith("create_project, ProjectService.describe, ProjectService.create")
+    assert functions.startswith(
+        "ProjectController.createProject, ProjectService.describe, ProjectService.create"
+    )
     assert "fmt" in functions
     assert all("digest" in n.props for n in plan.nodes.values() if "Flow" in n.labels)
 

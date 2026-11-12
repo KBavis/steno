@@ -17,7 +17,7 @@ from steno.rule_packs.versions import dependencies
 from steno.source.files import is_test_file, source_files
 
 # Language → file extensions the pack's code rules run on
-EXTENSIONS = {"python": (".py",), "java": (".java",)}
+EXTENSIONS = {"java": (".java",)}
 
 
 @dataclass
@@ -186,9 +186,8 @@ def _norm(name: str) -> str:
 
 def declared_dependencies(repo: Path) -> set[str]:
     """Dependency names the repository's build files declare (rule_packs/versions.py): Gradle
-    scripts and catalogs, Maven POMs, Python requirements and pyproject files. Java dependencies
-    are `group:artifact`. Lock files are left out: they list what other libraries pull in too."""
-    return {_norm(d.name) for d in dependencies(repo) if not d.file.endswith(".lock")}
+    scripts and catalogs and Maven POMs. Dependencies are `group:artifact`."""
+    return {_norm(d.name) for d in dependencies(repo)}
 
 
 def _has_files(repo: Path, globs: list[str], content: str | None = None) -> bool:
@@ -218,9 +217,7 @@ def _has_language(language: str, repo: Path) -> bool:
 
 def _imports_any(language: str, repo: Path, modules: list[str]) -> bool:
     names = "|".join(re.escape(m) for m in modules)
-    if language == "python":
-        pattern = re.compile(rf"^\s*(?:from|import)\s+(?:{names})(?:[.\s]|$)", re.MULTILINE)
-    elif language == "java":
+    if language == "java":
         pattern = re.compile(rf"^\s*import\s+(?:static\s+)?(?:{names})[.;]", re.MULTILINE)
     else:
         return False

@@ -81,7 +81,7 @@ Rules never create `Flow` or `Step` nodes, and never reference another rule.
 ### 4. Choose the pack
 
 - Find the existing pack for the framework in `rule-packs/<ecosystem>/`.
-- Otherwise create one: `rule-packs/<java|python|…>/steno-pack-<framework>/` for public frameworks (`source: core`), or `rule-packs/org/<org>-<name>/` for internal ones (`source: org`). Fill in `pack.yaml` (see rules-and-packs.md §6), including `enabled_when.dependencies` as they appear in the build file.
+- Otherwise create one: `rule-packs/<java|http|kafka|…>/steno-pack-<framework>/` for public frameworks (`source: core`), or `rule-packs/org/<org>-<name>/` for internal ones (`source: org`). Fill in `pack.yaml` (see rules-and-packs.md §6), including `enabled_when.dependencies` as they appear in the build file.
 
 ### 5. Write the rule
 
@@ -98,7 +98,7 @@ uv run .claude/skills/rule-pack-author/scripts/check_match.py <rule.yaml> <repo-
 
 It prints every match with its captures (code rules through ast-grep, config rules through key paths). It doesn't check `where:` or the emitted facts; `steno rules test` (step 7) does.
 
-- Run it on the examples **and on the whole repository**. Compare the count with an independent estimate (for example, `grep -c "@router\."`). **A pattern that looks right can silently miss cases.** The first FastAPI prefix pattern, `$ROUTER = APIRouter($$$, prefix=$PREFIX, $$$)`, matched only 1 of Contextualized's 8 routers, because it needed another argument next to `prefix=`. A structural rule found all 8.
+- Run it on the examples **and on the whole repository**. Compare the count with an independent estimate (for example, `grep -c "@PostMapping"`). **A pattern that looks right can silently miss cases.** The first FastAPI prefix pattern, `$ROUTER = APIRouter($$$, prefix=$PREFIX, $$$)`, matched only 1 of Contextualized's 8 routers, because it needed another argument next to `prefix=`. A structural rule found all 8.
 - Investigate every miss and every unexpected match, then adjust. Repeat until the numbers make sense.
 
 ### 7. Write the test cases

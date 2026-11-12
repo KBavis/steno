@@ -63,13 +63,6 @@ FILES = {
           </dependencies>
         </project>
     """,
-    # Python: a pin, a range (not a version), and a lock file
-    "py/requirements.txt": "fastapi==0.115.12\nhttpx>=0.27\n",
-    "py/uv.lock": """
-        [[package]]
-        name = "sqlalchemy"
-        version = "2.0.40"
-    """,
 }
 
 
@@ -101,9 +94,6 @@ def _found(repo: Path, key: str) -> set[tuple[str | None, str]]:
         ("io.grpc", {("1.60.0", "gradle/libs.versions.toml")}),
         ("com.fasterxml.jackson.core:jackson-databind", {("2.16.1", "gradle/libs.versions.toml")}),
         ("org.apache.httpcomponents.client5:httpclient5", {("5.3", "svc/pom.xml")}),
-        ("fastapi", {("0.115.12", "py/requirements.txt")}),
-        ("sqlalchemy", {("2.0.40", "py/uv.lock")}),
-        ("httpx", set()),  # `>=0.27` is a range, not the version that runs
         ("org.projectlombok:lombok", {("1.18.30", "lib/build.gradle.kts")}),
         ("com.google.guava:guava", set()),  # set by the environment at build time
     ],
@@ -117,8 +107,6 @@ def test_scripts_and_catalogs_enable_packs(repo: Path) -> None:
     # Declared only in dependencies.gradle and the version catalog
     assert "io-github-openfeign:feign-core" in deps
     assert "io-grpc:grpc-stub" in deps
-    # Lock files list what other libraries pull in: not a reason to enable a pack
-    assert "sqlalchemy" not in deps
 
 
 @pytest.mark.parametrize(

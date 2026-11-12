@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     rules_org_only: bool = False
 
     # The organization's own code, for the coverage report's library gaps: Java packages
-    # (`com.acme`), coordinates (`com.acme:*`), or Python packages (`acme_`). A library under
+    # (`com.acme`), coordinates (`com.acme:*`), or name prefixes (`acme_`). A library under
     # one is internal; the repository's own package roots count too, so it can stay empty.
     # STENO_INTERNAL_PREFIXES: prefixes separated by commas. Onboarding takes it over in v1.
     internal_prefixes: Annotated[list[str], NoDecode] = []
