@@ -14,6 +14,18 @@ An organization-wide context engine for AI agents. It ingests repositories into 
 
 **Proof of concept, stage A** (`docs/plan/roadmap.md`). Built: identity, witness types, claims and reconcile, the completeness block. Remaining: the work in the roadmap's build order for D115–D141 (the coverage report on the surface and local rule curation, D146–D147; the investigation plugin and skill, D133; routing with Jev and its confidence, flows first from flow digests, D142, D150), and a scored question set compared against an agent without Steno, with routing accuracy as its headline and the trace ablation (D140). Then B (a stub organization exercising every facet), C (spring-petclinic-microservices), D (our organization). Accuracy of MCP answers is the bar, and a feature belongs in Steno only if a use case in `docs/purpose/use-cases.md` needs it. Jev at query time is built and optional (D142, D150); Jev at ingestion and runtime evidence are `v2`, and other decisions use stand-ins.
 
+## How we work
+
+Work is tracked on the [Steno Project](https://github.com/users/KBavis/projects/5): epics are parent issues, and milestones run Redesign → POC 1: One repository → POC 2: Across repositories → v1 → v2.
+
+- **One issue, one PR.** Every PR closes exactly one issue (`Closes #n`). Work that isn't agreed in an issue or a design thread gets no PR.
+- **Small enough to review in one sitting:** under about 400 changed lines, tests included. A pure deletion may be bigger if it does only one thing. Bigger work is split into sub-issues.
+- **The PR carries context:** what changed and why, what to review (files in reading order), and how it was tested. Explanations of how things work happen in chat, not in the PR.
+- **The owner merges.** Claude opens PRs, never merges them, and never pushes to `main`.
+- **Status follows the PR:** an open PR moves its issue to In Review; merging moves it to Done.
+- **Branches:** `type/short-name`, matching the issue's type label (`feature`, `bug`, `refactor`, `docs`, `design`).
+- **The repository is public.** Describe the organization Steno is trialed on only in general terms; its packs, question sets, and results stay outside this repository.
+
 ## Repository layout
 
 - `backend/src/steno/`: `api/` (Admin API), `mcp/` (MCP tools), `ingestion/` (job queue, stage pipeline, worker, `local.py`: parse → extract → assemble on a folder, for the CLI and tests; jobs use the pipeline), `db/` (SQLAlchemy models + Alembic migrations for the Postgres tables in `docs/how-it-works/storage.md`), `graph/` (Neo4j schema, stable IDs, projections; structure, builder, writer), `coverage/` (the coverage report), `decisions/` (the `Decision` interface; stand-in backends), `connectors/`, `llm/`. Ingestion code by stage: `source/` (listing files, reading config and structured records; shared), `rule_packs/` (loading, selecting, testing packs; library versions), `extraction/` (the rule engine: parse + extract), `resolvers/` (symbol resolvers, one per language), `assemblers/` (one per clue type), `identity/` (the identify stage and the identity registry), `claims/` (claim types and the claim store), `reconcile/` (comparing the code with other witnesses)
