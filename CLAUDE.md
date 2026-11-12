@@ -19,6 +19,7 @@ An organization-wide context engine for AI agents. It ingests repositories into 
 Work is tracked on the [Steno Project](https://github.com/users/KBavis/projects/5): epics are parent issues, and milestones run Redesign → POC 1: One repository → POC 2: Across repositories → v1 → v2.
 
 - **One issue, one PR.** Every PR closes exactly one issue (`Closes #n`). Work that isn't agreed in an issue or a design thread gets no PR.
+- **Plan first for larger work.** An `effort:s` issue goes straight to a PR. For `effort:m` and `effort:l`, a short plan (the approach, the files touched, what's deleted or added, anything surprising) is posted as a comment on the issue and approved by the owner before any code. A plan that shows the work is bigger than one PR splits the issue into sub-issues.
 - **Small enough to review in one sitting:** under about 400 changed lines, tests included. A pure deletion may be bigger if it does only one thing. Bigger work is split into sub-issues.
 - **The PR carries context:** what changed and why, what to review (files in reading order), and how it was tested. Explanations of how things work happen in chat, not in the PR.
 - **The owner merges.** Claude opens PRs, never merges them, and never pushes to `main`.
