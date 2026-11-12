@@ -11,7 +11,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="STENO_", env_file=".env", extra="ignore")
 
-    # Postgres: what Steno is told and what it did (D33)
+    # Postgres: what Steno is told and what it did
     database_url: str = "postgresql+psycopg://steno:steno@localhost:5434/steno"
 
     # Neo4j: what Steno knows
@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     # Where ingestion workers clone repositories; deleted after each run
     workspace_dir: Path = Path("/tmp/steno-workspaces")
 
-    # How a repository's graph is written to Neo4j (D135): in many small transactions, so Neo4j's
+    # How a repository's graph is written to Neo4j: in many small transactions, so Neo4j's
     # memory depends on the size of one, not of the repository. A transaction holds at most this
     # many MB of properties and this many rows; one that still runs out of Neo4j's memory is
     # halved and tried again.
@@ -31,14 +31,14 @@ class Settings(BaseSettings):
     graph_write_node_rows: int = 2000
     graph_write_edge_rows: int = 5000
 
-    # How MCP serves a flow (D140): `trace` (its steps in order, from the stored trace) or
+    # How MCP serves a flow: `trace` (its steps in order, from the stored trace) or
     # `reach` (its trigger, effects, and the functions it reaches, without order or nesting),
     # for the stage A ablation that decides whether flows keep their ordered trace
     flow_view: Literal["trace", "reach"] = "trace"
 
     @property
     def index_dir(self) -> Path:
-        """Each Java resolver's on-disk index (D127), removed when it's done; one a stopped
+        """Each Java resolver's on-disk index, removed when it's done; one a stopped
         worker left is removed by `steno job recover`."""
         return self.workspace_dir / "indexes"
 
@@ -61,11 +61,11 @@ class Settings(BaseSettings):
     disabled_packs: Annotated[list[str], NoDecode] = []
 
     # Every rule goes to the organization's pack repository (STENO_RULE_PACK_DIRS), never to
-    # Steno's own rule-packs/ (D148). A miss in a public library is listed for a person to
+    # Steno's own rule-packs/. A miss in a public library is listed for a person to
     # report, not committed. STENO_RULES_ORG_ONLY
     rules_org_only: bool = False
 
-    # The organization's own code, for the coverage report's library gaps (D146): Java packages
+    # The organization's own code, for the coverage report's library gaps: Java packages
     # (`com.acme`), coordinates (`com.acme:*`), or Python packages (`acme_`). A library under
     # one is internal; the repository's own package roots count too, so it can stay empty.
     # STENO_INTERNAL_PREFIXES: prefixes separated by commas. Onboarding takes it over in v1.
@@ -78,7 +78,7 @@ class Settings(BaseSettings):
             return [n.strip() for n in value.split(",") if n.strip()]
         return value
 
-    # The JVM helper for Java symbol resolution (D69): `make resolver` builds it here
+    # The JVM helper for Java symbol resolution: `make resolver` builds it here
     resolver_jvm_dir: Path = (
         Path(__file__).resolve().parents[3]
         / "resolver-jvm"
@@ -94,14 +94,14 @@ class Settings(BaseSettings):
     resolver_jvm_timeout: int = 1800
     resolver_jvm_timeout_per_file: float = 0.25
     # Resolve method bodies this many files at a time against a declaration index of the whole
-    # repository, so memory stays bounded (D127); 0 resolves everything in one pass
+    # repository, so memory stays bounded; 0 resolves everything in one pass
     resolver_jvm_batch_files: int = 0
     # A repository with more Java files than this resolves in batches from its first run: one
-    # pass ran a 5,500-file repository out of memory at a 2 GB heap (D127)
+    # pass ran a 5,500-file repository out of memory at a 2 GB heap
     resolver_jvm_batch_above_files: int = 3000
 
     # A ceiling on ingestion jobs running at once across every machine. Within it, each
-    # machine takes only what fits its memory and CPUs (D128; docs: storage.md)
+    # machine takes only what fits its memory and CPUs (docs: storage.md)
     max_parallel_jobs: int = 16
     # Worker processes `steno worker` starts (each runs one job at a time); 0: one per CPU
     # this machine may use, up to 8
@@ -113,9 +113,9 @@ class Settings(BaseSettings):
     job_memory_default_mb: int = 3072
     # Memory (MB) kept free beyond what a job takes: other things on the machine grow while it
     # runs (Neo4j, Postgres, the system). A job starts only if it fits the free memory minus
-    # this, even when it's the only one (D134)
+    # this, even when it's the only one
     memory_headroom_mb: int = 768
-    # How long (minutes) a job's Java step waits for free memory before failing (D134)
+    # How long (minutes) a job's Java step waits for free memory before failing
     memory_wait_minutes: int = 30
     # This machine's name for counting its jobs (default: the host name)
     worker_host: str = ""
@@ -123,12 +123,12 @@ class Settings(BaseSettings):
     # Worker queue polling
     worker_poll_seconds: float = 2.0
 
-    # Nightly ingestion (D59): each night at this time (UTC, HH:MM), queue a run for every
+    # Nightly ingestion: each night at this time (UTC, HH:MM), queue a run for every
     # repository whose default branch moved since it was last ingested
     nightly_enabled: bool = True
     nightly_at: str = "02:00"
 
-    # Generated text (D143): summaries for applications, spaces, and the organization. The
+    # Generated text: summaries for applications, spaces, and the organization. The
     # provider: claude_agent_sdk (this machine's Claude Code login, or ANTHROPIC_API_KEY; for
     # development), or fake (tests). An organization's gateway (Azure) comes later. The model
     # is still Open, decided from a dry run's token counts
@@ -138,7 +138,7 @@ class Settings(BaseSettings):
     llm_model: str = "claude-sonnet-5-5"
     # Generate summaries in the job's cards stage (off: only `steno summaries` writes them)
     summaries_enabled: bool = True
-    # Who makes routing's decisions at query time (D142): stand_in (ranks by search matches,
+    # Who makes routing's decisions at query time: stand_in (ranks by search matches,
     # uncalibrated), jev, or disabled, which switches every decision off
     decision_backend: str = "stand_in"
     # Jev, directly from TypeSafe by default, or through an organization's gateway: its address
@@ -149,7 +149,7 @@ class Settings(BaseSettings):
     jev_auth_scheme: str = "Bearer"  # empty for a header that takes the key alone (api-key)
     jev_model: str = "jev-1.14.0"  # pinned: scores can shift between versions
     jev_timeout_seconds: float = 10.0
-    # Turn on once its probabilities are checked on this organization's questions (D142): only
+    # Turn on once its probabilities are checked on this organization's questions: only
     # then do answers carry bands
     jev_calibrated: bool = False
 

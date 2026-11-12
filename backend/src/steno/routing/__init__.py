@@ -1,4 +1,4 @@
-"""Routing a question (D142): where to look, with a confidence, so the consuming agent knows
+"""Routing a question: where to look, with a confidence, so the consuming agent knows
 when to trust the answer. Flows first (docs/plan/routing-design.md):
 
     Q0  what kind of question it is           (find a flow, what depends on X, what is X, …)

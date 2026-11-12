@@ -1,4 +1,4 @@
-"""The write stage's record of what the graph write did (D135)."""
+"""The write stage's record of what the graph write did."""
 
 from types import SimpleNamespace
 

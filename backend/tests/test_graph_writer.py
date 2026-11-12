@@ -1,4 +1,4 @@
-"""Writing a graph to Neo4j in bounded transactions (D135): the order, the size of a batch,
+"""Writing a graph to Neo4j in bounded transactions: the order, the size of a batch,
 halving a batch Neo4j can't hold, and what a failure leaves behind. A fake session stands in
 for Neo4j, so none of this touches a real graph."""
 

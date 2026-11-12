@@ -1,4 +1,4 @@
-"""A gateway's routes as claims (D132): what a route's target names, and its subjects."""
+"""A gateway's routes as claims: what a route's target names, and its subjects."""
 
 from steno.claims.types import route_target, subjects, validate
 

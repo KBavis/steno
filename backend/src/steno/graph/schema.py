@@ -11,7 +11,7 @@ ARCHITECTURE_LABELS = (
     "Organization",
     "Space",
     "Application",
-    "Interface",  # + HttpEndpoint / GrpcMethod / KafkaTopic / Queue / org-defined (D61)
+    "Interface",  # + HttpEndpoint / GrpcMethod / KafkaTopic / Queue / org-defined
     "Schedule",
     "Flow",
     "Step",
@@ -22,11 +22,11 @@ ARCHITECTURE_LABELS = (
     "Column",
     "ExternalSystem",
     "KafkaCluster",
-    "Gateway",  # a router that's infrastructure (nginx, an Ingress); D132
-    "Route",  # one route rule of a gateway, forwarding to an application; D132
+    "Gateway",  # a router that's infrastructure (nginx, an Ingress)
+    "Route",  # one route rule of a gateway, forwarding to an application
 )
 
-# Code nodes: how it's built. Functions aren't nodes: they live in each Flow's trace (D60).
+# Code nodes: how it's built. Functions aren't nodes: they live in each Flow's trace.
 CODE_LABELS = (
     "Repository",
     "Module",  # + Deployable / Library / Contract / Migrations / Test / Build
@@ -37,8 +37,8 @@ CODE_LABELS = (
 SEARCHABLE = "Searchable"
 
 FULLTEXT_INDEX = "searchable_text"
-# What full-text search reads: names, other names (an application's aliases, D104), flow
-# digests and generated summaries (D143), names split into words (`git_commit` → git commit),
+# What full-text search reads: names, other names (an application's aliases), flow
+# digests and generated summaries, names split into words (`git_commit` → git commit),
 # and cards
 FULLTEXT_PROPERTIES = ("name", "alias_text", "digest", "summary", "name_words", "card")
 VECTOR_INDEX = "searchable_card_embedding"

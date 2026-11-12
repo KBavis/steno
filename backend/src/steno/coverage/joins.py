@@ -1,4 +1,4 @@
-"""One-sided joins (D146): a connection where Steno found only one end.
+"""One-sided joins: a connection where Steno found only one end.
 
 A topic produced but never consumed, consumed but never produced, or an HTTP endpoint called
 that no application exposes. Each means the other end was missed, or is legitimately outside

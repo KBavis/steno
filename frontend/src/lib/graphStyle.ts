@@ -40,7 +40,7 @@ export const KINDS: Record<string, KindStyle> = {
   repository: { label: 'Repository', icon: FolderGit2, tone: 'code' },
   module: { label: 'Module', icon: Package, tone: 'code' },
   file: { label: 'File', icon: FileCode2, tone: 'code' },
-  // Functions aren't graph nodes; this is a flow's trace entry (D60)
+  // Functions aren't graph nodes; this is a flow's trace entry
   function: { label: 'Function', icon: Braces, tone: 'code' },
   // group kinds
   resource: { label: 'Resource', icon: Route, tone: 'flow' },

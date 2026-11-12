@@ -1,4 +1,4 @@
-"""Project declared structure from Postgres into Neo4j (D33).
+"""Project declared structure from Postgres into Neo4j.
 
 The organization and its spaces are declared by admins and live in Postgres; Neo4j gets
 a copy so the containment tree (Organization → Space → …) exists before anything is

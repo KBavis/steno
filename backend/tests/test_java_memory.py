@@ -1,4 +1,4 @@
-"""The Java resolver's memory within a job (D127): large repositories start in batches, and a
+"""The Java resolver's memory within a job: large repositories start in batches, and a
 run out of memory retries once in the same job instead of failing until the next run."""
 
 import contextvars

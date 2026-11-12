@@ -1,4 +1,4 @@
-"""Generated summaries (D143): applications, then the spaces above them, then the organization.
+"""Generated summaries: applications, then the spaces above them, then the organization.
 
 Bottom up: an application's summary is written from what Steno knows of it (`inputs.py`); a
 space's from its applications' summaries; the organization's from its spaces'. Each is written

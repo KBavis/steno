@@ -1,4 +1,4 @@
-"""The claim store (D109; docs/how-it-works/ingestion/claims-and-reconcile.md §5).
+"""The claim store (docs/how-it-works/ingestion/claims-and-reconcile.md §5).
 
 Each run replaces its repository's claims: an unchanged claim keeps its row (its line is
 updated if it moved), a new one is added, and one no longer found gets `removed_job`, kept for
@@ -7,7 +7,7 @@ what was added or removed are what reconcile recomputes.
 
 Only other witnesses' claims are stored (PLATFORM, DECLARED). CODE facts stay in the graph,
 and CODE names go to the identity registry through identify. The exception is a claim reconcile
-writes into the graph across repositories whatever its witness: a gateway's routes (D132), whose
+writes into the graph across repositories whatever its witness: a gateway's routes, whose
 targets are other repositories' applications.
 """
 
@@ -40,7 +40,7 @@ def claim_key(claim_type: str, fields: dict[str, object], file: str | None) -> s
     return hashlib.sha256(text.encode()).hexdigest()[:40]
 
 
-# CODE claims stored anyway: reconcile writes them into the graph across repositories (D132)
+# CODE claims stored anyway: reconcile writes them into the graph across repositories
 STORED_CODE = {"route"}
 
 

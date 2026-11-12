@@ -1,4 +1,4 @@
-"""Only differences are written (D59), and they become the change history (D18)."""
+"""Only differences are written, and they become the change history."""
 
 import copy
 import json

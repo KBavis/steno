@@ -141,7 +141,7 @@ def parse(ctx: JobContext) -> dict[str, Any]:
         engine.parse()
     if _java_failed(engine):
         # Still failing: one build module at a time, so a module that can't be resolved is a
-        # gap and the rest of the repository is still read (D127)
+        # gap and the rest of the repository is still read
         log.warning("job %s: the Java resolver failed for the whole repository; "
                     "resolving each module on its own", ctx.job.id)  # fmt: skip
         JVM_BY_MODULE.set(True)
@@ -234,7 +234,7 @@ def identify(ctx: JobContext) -> dict[str, Any]:
 def flows(ctx: JobContext) -> dict[str, Any]:
     """Build the call graph in memory, walk it from every entry point, and plan the graph:
     architecture nodes, code nodes, each flow's trace and steps, and flow rollups. The call
-    graph itself isn't kept (D60)."""
+    graph itself isn't kept."""
     engine: Engine = ctx.state["engine"]
     x = engine.out
     structure = ctx.state["structure"]
@@ -252,7 +252,7 @@ def flows(ctx: JobContext) -> dict[str, Any]:
             identities=ctx.state.get("identities", {}),
         ),
         http_systems=[s for p in engine.packs for s in p.http_systems],
-        packs=ctx.state["all_packs"],  # the ledger's I/O and harmless lists (D101)
+        packs=ctx.state["all_packs"],  # the ledger's I/O and harmless lists
     )
     ctx.state["plan"] = plan
     flow_nodes = [n for n in plan.nodes.values() if n.labels[0] == "Flow"]
@@ -268,11 +268,10 @@ def flows(ctx: JobContext) -> dict[str, Any]:
 
 
 def write(ctx: JobContext) -> dict[str, Any]:
-    """Write only what changed since this repository's last run (D59): compare the plan with
-    the graph by stable ID and write the difference in many small transactions (D135), recording
-    each change in `fact_change` (D18) as its transaction commits, so the history matches the
-    graph even if a later one fails. A dry run writes the graph too: it only skips LLM text
-    (D26).
+    """Write only what changed since this repository's last run: compare the plan with
+    the graph by stable ID and write the difference in many small transactions, recording
+    each change in `fact_change` as its transaction commits, so the history matches the
+    graph even if a later one fails. A dry run writes the graph too: it only skips LLM text.
     """
     plan = ctx.state["plan"]
     job_id = ctx.job.id
@@ -344,7 +343,7 @@ def reconcile(ctx: JobContext) -> dict[str, Any]:
 def coverage(ctx: JobContext) -> dict[str, Any]:
     """What no rule explained (docs/how-it-works/ingestion/coverage-report.md):
     one `coverage_item` per gap, keyed by kind and target. Triage carries over from this
-    repository's previous run: an item someone ignored stays ignored (D62)."""
+    repository's previous run: an item someone ignored stays ignored."""
     engine: Engine = ctx.state["engine"]
     report = collect_coverage(
         engine.out,
@@ -368,7 +367,7 @@ def coverage(ctx: JobContext) -> dict[str, Any]:
         repository=ctx.repository.name,
         library_modules=sum(1 for m in ctx.state["structure"].modules if "Library" in m.roles),
     )
-    # What became of the rule author's pull requests (D148), before this run's statuses are set
+    # What became of the rule author's pull requests, before this run's statuses are set
     pull_requests = refresh_proposed(ctx.session, ctx.repository.id)
     ctx.session.flush()
     previous = _previous_triage(ctx)
@@ -394,7 +393,7 @@ def coverage(ctx: JobContext) -> dict[str, Any]:
                 quiet=it.quiet,
             )
         )
-    # The organization's patterns: what the rule author works from (D121, D147)
+    # The organization's patterns: what the rule author works from
     started = time.perf_counter()
     patterns = record_patterns(ctx.session, ctx.repository.id, ctx.job.id, report.items, statuses)
     timings = {
@@ -406,7 +405,7 @@ def coverage(ctx: JobContext) -> dict[str, Any]:
 
 
 def _in_library(ctx: JobContext) -> Any:
-    """Whether a file is in one of the repository's library modules (D122 evidence)."""
+    """Whether a file is in one of the repository's library modules."""
     structure = ctx.state["structure"]
 
     def check(file: str) -> bool:
@@ -473,7 +472,7 @@ def _previous_triage(ctx: JobContext) -> dict[tuple[str, str], CoverageStatus]:
 
 
 def cards(ctx: JobContext) -> dict[str, Any]:
-    """LLM summaries for applications, spaces, and the organization (D143; flows get a
+    """LLM summaries for applications, spaces, and the organization (flows get a
     deterministic digest in the build instead). In a dry run: count tokens and project cost
     only. Each is written only when its inputs changed; the README is read from the clone."""
     from neo4j.exceptions import Neo4jError
@@ -544,7 +543,7 @@ STAGES: list[tuple[StageName, StageFn]] = [
 
 def _plan_java(ctx: JobContext) -> dict[str, Any]:
     """How the Java resolver runs for this job: in batches when the job's plan says so (its
-    last run ran out of memory) or the repository is large (D127)."""
+    last run ran out of memory) or the repository is large."""
     assert ctx.workspace is not None
     settings = get_settings()
     java = sum(1 for _ in ctx.workspace.rglob("*.java"))
@@ -562,13 +561,13 @@ def _plan_java(ctx: JobContext) -> dict[str, Any]:
 
 
 class NotEnoughMemory(RuntimeError):
-    """The machine never had room for the Java resolver within the wait (D134)."""
+    """The machine never had room for the Java resolver within the wait."""
 
 
 def _fit_to_free_memory(ctx: JobContext, plan: dict[str, Any]) -> None:
     """Check the heap against the memory free right now, which may be less than when the job
     was claimed (Neo4j and the system grow): cut it to fit (in batches), or wait for memory to
-    be freed, then fail with what was needed and what was free (D134). The heap never goes
+    be freed, then fail with what was needed and what was free. The heap never goes
     below what the repository is known to need."""
     settings = get_settings()
     resources = (ctx.job.stats or {}).get("resources") or {}
@@ -619,7 +618,7 @@ def _out_of_memory(engine: Engine) -> bool:
 
 def _more_memory(ctx: JobContext, plan: dict[str, Any]) -> bool:
     """After the resolver ran out of memory: batches, and twice the heap, within this machine's
-    budget and the memory free now (the failed helper's is back, D134). Recorded in the job's
+    budget and the memory free now (the failed helper's is back). Recorded in the job's
     plan, so the next run starts from it. False when there's nothing more to give (already
     batched at the most the machine allows)."""
     settings = get_settings()
@@ -651,7 +650,7 @@ def run_job(session: Session, job: IngestionJob) -> None:
         connector=session.get_one(Connector, repository.connector_id),
         session=session,
     )
-    # The JVM heap this repository needed last time, with headroom (D128)
+    # The JVM heap this repository needed last time, with headroom
     resources = (job.stats or {}).get("resources") or {}
     heap = resources.get("jvm_heap_mb")
     token = JVM_HEAP_MB.set(heap if isinstance(heap, int) else None)

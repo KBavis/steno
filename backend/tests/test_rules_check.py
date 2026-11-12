@@ -61,7 +61,7 @@ def test_problems_say_what_a_reviewer_must_know():
 
 
 def test_a_rule_with_no_surface_fact_or_no_recall_is_blocked():
-    """D147: a rule that states nothing on the surface should be a harmless mark instead, and
+    """a rule that states nothing on the surface should be a harmless mark instead, and
     one that explains none of its pattern isn't the rule for it."""
     no_surface = RuleCheck(files=2, explained=["a", "b"], surface=False)
     assert no_surface.blocking()

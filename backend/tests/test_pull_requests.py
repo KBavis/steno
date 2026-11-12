@@ -1,4 +1,4 @@
-"""What became of a pull request, on GitHub and both kinds of Bitbucket (D148)."""
+"""What became of a pull request, on GitHub and both kinds of Bitbucket."""
 
 import json
 from urllib.error import URLError

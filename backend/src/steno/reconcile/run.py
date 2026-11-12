@@ -324,7 +324,7 @@ class _Run:
         )
         return len(stubs) - len(remove)
 
-    # ------------------------------------------------------------- routes (D132)
+    # ------------------------------------------------------------- routes
 
     def routes(self, names: set[str]) -> int:
         """Rewrite the routes of every gateway these names touch, as the gateway or as a

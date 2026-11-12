@@ -1,4 +1,4 @@
-"""What each summary is written from (D143), read from the graph, bounded by construction.
+"""What each summary is written from, read from the graph, bounded by construction.
 
 An application's: its names, kinds, space, and module; its README (read from the clone or the
 git host, never stored); every way in (each flow's trigger with what its code says about

@@ -1,6 +1,6 @@
 """Who writes the text. One call in, one text out: no tools, no turns, no agent.
 
-- `litellm`: whatever the organization runs (D52, D149): its LLM gateway (any
+- `litellm`: whatever the organization runs: its LLM gateway (any
   OpenAI-compatible address), Azure, Bedrock, Vertex, or a vendor's API, by LiteLLM's model
   name and, for a gateway, its address. The key is a reference (`env:NAME`), never stored.
 - `claude_agent_sdk`: the Claude Agent SDK on this machine's Claude Code login (or
@@ -121,7 +121,7 @@ class ClaudeAgentSdk:
 
 
 class LiteLlm:
-    """Any LLM the organization runs, through LiteLLM (D52). `model` is LiteLLM's name for it:
+    """Any LLM the organization runs, through LiteLLM. `model` is LiteLLM's name for it:
     `openai/<model>` with `base_url` for a gateway that speaks the OpenAI API,
     `azure/<deployment>`, `bedrock/<model>`, and so on."""
 

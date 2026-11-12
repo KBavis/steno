@@ -1,4 +1,4 @@
-"""The graph plan: architecture nodes, code nodes, and each flow's trace and steps (D60, D63)."""
+"""The graph plan: architecture nodes, code nodes, and each flow's trace and steps."""
 
 import shutil
 from pathlib import Path
@@ -161,7 +161,7 @@ def test_significant_functions_become_steps_with_their_effects(tmp_path):
 
 
 def test_org_defined_channels_join_applications_by_name(tmp_path):
-    """D61: an Interface label no core rule knows is keyed by its name, not its application."""
+    """an Interface label no core rule knows is keyed by its name, not its application."""
     channel = NodeFact(
         ["Interface", "PxChannel"], {"name": "orders"}, Origin("org-send", "org", "a.py", 1)
     )
@@ -213,7 +213,7 @@ def test_an_effect_keeps_every_operation_and_call_site():
 
 
 def test_an_application_is_a_service_by_the_triggers_of_its_flows():
-    # D85: kinds are labels from what starts the flows; the module that builds it is Deployable
+    # kinds are labels from what starts the flows; the module that builds it is Deployable
     plan = _plan()
     app = plan.nodes["app:demo"]
     assert "Service" in app.labels and app.props["kinds"] == ["Service"]
@@ -226,8 +226,8 @@ def test_an_application_is_a_service_by_the_triggers_of_its_flows():
 
 def _service_pair(tmp_path: Path) -> Path:
     """Two modules of one repository: `gateway` calls `orders` by its bare service name,
-    the shape a gateway route's `uri` or a Feign `@FeignClient` name takes (D132's
-    `route_target`), with no scheme and no dots."""
+    the shape a gateway route's `uri` or a Feign `@FeignClient` name takes
+    (`route_target`), with no scheme and no dots."""
     (tmp_path / "orders").mkdir()
     (tmp_path / "orders/requirements.txt").write_text("fastapi\n")
     (tmp_path / "orders/__init__.py").write_text("")

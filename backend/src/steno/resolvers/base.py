@@ -1,4 +1,4 @@
-"""What every symbol resolver answers, whatever the language (D70).
+"""What every symbol resolver answers, whatever the language.
 
 See docs/how-it-works/ingestion/resolvers.md §1 and §5.2.
 
@@ -70,7 +70,7 @@ class Invocation:
 
 @dataclass(frozen=True)
 class UnresolvedCall:
-    """A call a resolver couldn't follow (D71): kept so a flow that stops here says so."""
+    """A call a resolver couldn't follow: kept so a flow that stops here says so."""
 
     line: int
     column: int
@@ -102,7 +102,7 @@ class LibraryCall:
 
 @dataclass(frozen=True)
 class Hook:
-    """A place a framework runs first-party code without the code calling it (D101): a class
+    """A place a framework runs first-party code without the code calling it: a class
     extending or implementing a framework type, or a framework annotation or decorator."""
 
     symbol: str  # the class or function it's on
@@ -181,7 +181,7 @@ class Resolver(Protocol):
 
 class Properties(dict[str, Any]):
     """The config property map, remembering which keys were read: a key set in config that
-    nothing reads is a coverage item (unread config, D122)."""
+    nothing reads is a coverage item (unread config)."""
 
     def __init__(self) -> None:
         super().__init__()

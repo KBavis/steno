@@ -1,4 +1,4 @@
-"""The rule author's worklist from the command line (D147): read, show, and mark patterns."""
+"""The rule author's worklist from the command line: read, show, and mark patterns."""
 
 import pytest
 from sqlalchemy import select, text

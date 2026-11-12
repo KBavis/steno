@@ -1,4 +1,4 @@
-"""The coverage report stays quiet (D146): a guard against the noise seen on Steno's own
+"""The coverage report stays quiet: a guard against the noise seen on Steno's own
 repository coming back. Each case is a shape that once produced many items for one thing."""
 
 from pathlib import Path
@@ -66,7 +66,7 @@ FILES = {
 
         warm()
     """,
-    # An endpoint, so this is an application (D74 infers flows only inside one)
+    # An endpoint, so this is an application (flows are inferred only inside one)
     "app/api.py": """
         from fastapi import APIRouter
 
@@ -151,7 +151,7 @@ def test_a_file_one_application_writes_and_another_reads_stays_visible():
 
 
 def test_an_unread_file_shows_only_when_it_may_be_something_missed():
-    """D148: a service in a language no pack reads, and a config file with evidence, show."""
+    """a service in a language no pack reads, and a config file with evidence, show."""
     from steno.coverage.collect import Item, _quiet
 
     def unread(target: str, *evidence: str) -> Item:

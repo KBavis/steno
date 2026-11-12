@@ -1,4 +1,4 @@
-"""Symbol resolvers, one per language, behind one interface (D70; base.py)."""
+"""Symbol resolvers, one per language, behind one interface (base.py)."""
 
 from pathlib import Path
 

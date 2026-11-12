@@ -1,4 +1,4 @@
-"""The stand-in for Jev at query time (D142): it answers from search signals, not from reading.
+"""The stand-in for Jev at query time: it answers from search signals, not from reading.
 
 Jev reads the state's text (the question, summary lines, digests) and returns calibrated
 probabilities. Until there are credits, this backend answers the same questions from what

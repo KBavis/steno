@@ -43,7 +43,7 @@ def trace_entry_id(flow: str, path: str) -> str:
 
 
 def channel_id(label: str, name: str) -> str:
-    """A messaging interface known by its name alone (D61): a Kafka topic, a queue, or an
+    """A messaging interface known by its name alone: a Kafka topic, a queue, or an
     org-defined channel. Not scoped to an application, so a sender and a receiver in different
     applications meet on the same node."""
     return f"{label.lower()}:{name}"

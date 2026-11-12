@@ -1,6 +1,6 @@
 """Semantic search over flow digests, with a local model: proposes candidates, never decides.
 
-Digests stay on the machine: the model runs here and the vectors live in Neo4j (D23). Optional:
+Digests stay on the machine: the model runs here and the vectors live in Neo4j. Optional:
 `pip install -e '.[semantic]'` and `STENO_EMBEDDINGS_ENABLED=true`. Without it, or if the model
 can't load, routing proposes from keyword search and names, and says so.
 """

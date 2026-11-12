@@ -1,4 +1,4 @@
-"""The JVM helper's expressions and calls, indexed on disk instead of loaded whole (D127)."""
+"""The JVM helper's expressions and calls, indexed on disk instead of loaded whole."""
 
 import json
 

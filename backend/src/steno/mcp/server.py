@@ -2,9 +2,9 @@
 
 See docs/how-it-works/retrieval-and-mcp.md §5.
 
-Stateless (docs/how-it-works/README.md). The first tools (D54): `search`, `get_node`, `get_flow`,
-`find_dependents`, `view_flow_code`; then `route_request` (D132). Every result carries
-citations (D29), is cut to its `max_tokens`, and every call is logged in `tool_call` (tool,
+Stateless (docs/how-it-works/README.md). The first tools: `search`, `get_node`, `get_flow`,
+`find_dependents`, `view_flow_code`; then `route_request`. Every result carries
+citations, is cut to its `max_tokens`, and every call is logged in `tool_call` (tool,
 parameters, latency, result count).
 """
 
@@ -24,7 +24,7 @@ from steno.mcp.tools import ToolError, Tools, fit
 
 log = logging.getLogger(__name__)
 
-# The trace ablation (D140): serve each flow's reach only, and tell agents so
+# The trace ablation: serve each flow's reach only, and tell agents so
 REACH = get_settings().flow_view == "reach"
 FLOW_HELP = (
     "3. `get_flow` for what a flow touches and the functions it reaches, by file; "

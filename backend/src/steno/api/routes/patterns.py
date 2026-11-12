@@ -1,6 +1,6 @@
-"""The organization's patterns: what no rule explains, grouped by what it is (D121–D123).
+"""The organization's patterns: what no rule explains, grouped by what it is.
 
-The rule author's worklist (D147; docs/how-it-works/ingestion/rule-curation.md): the
+The rule author's worklist (docs/how-it-works/ingestion/rule-curation.md): the
 `rule-pack-author` skill reads open patterns here in the report's order, and sets their state
 when it's done: ignored (harmless), expected (outside the organization), proposed (a rule's
 pull request is open), or open again.
@@ -40,7 +40,7 @@ def patterns(
     """Patterns in a state, as frameworks (patterns sharing an owner: a library, a package
     root, a config prefix) ranked by their summed score; a pattern no library owns stands
     alone. `limit`: how many frameworks or lone patterns. `quiet`: include what the report
-    leaves out (unread files and settings, library versions: D146). Open one-sided joins
+    leaves out (unread files and settings, library versions). Open one-sided joins
     are read from the graph."""
     query = select(CoveragePattern).where(CoveragePattern.state == state)
     if not quiet:
@@ -67,7 +67,7 @@ def patterns(
 @router.get("/occurrences")
 def pattern_occurrences(session: SessionDep, fingerprint: str, limit: int = 50) -> dict[str, Any]:
     """Where a pattern occurs now, with links to the code at the ingested commit, and its
-    samples: what the rule author reads before writing a rule (D147)."""
+    samples: what the rule author reads before writing a rule."""
     try:
         return occurrences(session, fingerprint, limit)
     except LookupError as exc:

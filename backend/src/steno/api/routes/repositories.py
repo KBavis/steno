@@ -1,4 +1,4 @@
-"""Repositories to ingest. Phase 1: an explicit include list (D30)."""
+"""Repositories to ingest. Phase 1: an explicit include list."""
 
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select

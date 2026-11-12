@@ -1,4 +1,4 @@
-"""The coverage report on the surface (D146): library gaps, quiet signals, silent repositories
+"""The coverage report on the surface: library gaps, quiet signals, silent repositories
 and witnesses, hooks that start work, and drops that lost a surface fact."""
 
 from pathlib import Path

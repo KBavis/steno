@@ -1,4 +1,4 @@
-"""Routing a request through a gateway (D132), worked out when asked, not stored per endpoint.
+"""Routing a request through a gateway, worked out when asked, not stored per endpoint.
 
 A route is stored once per route rule: its path pattern (Spring's: `**` any rest of the path,
 `*` one segment, `{name}` one segment), the methods it takes, and its rewrite: strip a number

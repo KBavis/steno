@@ -1,4 +1,4 @@
-"""Generated summaries (D143): written once per input, cached and logged, parsed into a line
+"""Generated summaries: written once per input, cached and logged, parsed into a line
 and a summary, and never erased by the write stage."""
 
 import pytest

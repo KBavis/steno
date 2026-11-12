@@ -2,7 +2,7 @@
 
 Shared by the Admin API's coverage report and the MCP tools, whose answers carry an
 application's unexplained counts so something Steno can see but can't explain is never
-silent (D118).
+silent.
 """
 
 from collections import defaultdict
@@ -44,7 +44,7 @@ SIGNAL_WORDS = {
     "unread_config": "connection settings no rule read",
 }
 
-# The report's sections, in order: the catalog's groups (what-steno-must-see.md §2, D146)
+# The report's sections, in order: the catalog's groups (what-steno-must-see.md §2)
 GROUPS = [
     ("connections", "Connections between applications",
      ["one_sided", "unknown_host", "disagreement", "unmatched_name"]),

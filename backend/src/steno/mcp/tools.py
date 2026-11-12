@@ -1,12 +1,12 @@
-"""What Steno's MCP tools answer (docs/how-it-works/retrieval-and-mcp.md §5; first tools, D54).
+"""What Steno's MCP tools answer (docs/how-it-works/retrieval-and-mcp.md §5; first tools).
 
-Each tool returns a compact answer for an agent: the facts, a `citations` list (D29: each
+Each tool returns a compact answer for an agent: the facts, a `citations` list (each
 claim with its file, lines, commit, and a link), `completeness` (what was checked and what
-wasn't, D118), `sources` (where to read more, D119), `next` hints for the call after this one,
+wasn't), `sources` (where to read more), `next` hints for the call after this one,
 and, when the answer had to be cut to its `max_tokens`, what was left out. The server
 (`server.py`) registers these and logs every call.
 
-Search is full-text for now (D54); cards and Jev routing come later.
+Search is full-text for now; cards and Jev routing come later.
 """
 
 import json
@@ -89,7 +89,7 @@ class Tools:
         return GraphViews(self.driver, self.database)
 
     def _graph_update(self, repo: str | None) -> dict[str, str]:
-        """A `not_checked` entry when the repository's last graph write didn't finish (D135):
+        """A `not_checked` entry when the repository's last graph write didn't finish:
         what is here may be from the commit before, or missing, until the next run completes it."""
         if not repo:
             return {}
@@ -208,8 +208,8 @@ class Tools:
 
     def sources(self, citations: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Where an answer's citations come from, one entry per repository: what a consumer
-        would fetch to read further, and whether the code has moved since Steno read it
-        (D119). Steno decides nothing here; the consumer chooses whether to clone."""
+        would fetch to read further, and whether the code has moved since Steno read it.
+        Steno decides nothing here; the consumer chooses whether to clone."""
         out = []
         for name, group in _source_groups(citations).items():
             row = self._repo(name)
@@ -236,7 +236,7 @@ class Tools:
     def search(
         self, query: str, scope: str | None = None, limit: int = 10, kind: str | None = None
     ) -> dict[str, Any]:
-        """Top-down (D2): first where the matches are (every space and application with any,
+        """Top-down: first where the matches are (every space and application with any,
         and how many), then the hits, each application's best in turn, so one application
         with many matches can't crowd the others off the page. `kind`: only flows, topics,
         endpoints, tables, applications, … (`KIND_LABELS`)."""
@@ -276,7 +276,7 @@ class Tools:
             )
         if scope:
             hits = [h for h in hits if scope in (h.get("space"), h.get("application"), h["id"])]
-        # Which spaces, applications, and flows the question is about, with confidence (D142);
+        # Which spaces, applications, and flows the question is about, with confidence;
         # a scope given skips it
         routing = (
             None
@@ -361,7 +361,7 @@ class Tools:
                 }
         return out
 
-    # ------------------------------------------------------------ routing (D132)
+    # ------------------------------------------------------------ routing
 
     def _routes(self, app_ids: list[str] | None = None) -> list[dict[str, Any]]:
         """Gateways' routes, with the application each forwards to (all, or to these)."""
@@ -385,7 +385,7 @@ class Tools:
         return out
 
     def route_request(self, path: str, method: str | None = None) -> dict[str, Any]:
-        """What serves a request from outside (D132): the gateway route its path matches, the
+        """What serves a request from outside: the gateway route its path matches, the
         path the application sees after the route's rewrite, and the endpoint and flow it
         reaches. Without a matching route, the endpoints anywhere that serve the path as is."""
         path = "/" + path.strip().lstrip("/").split("?")[0]
@@ -422,7 +422,7 @@ class Tools:
         not_checked = {
             "routes_in_code": "routes defined in Java code (RouteLocator beans) or in routers "
             "no pack reads",
-            "frontends": "requests a frontend makes (v2, D92)",
+            "frontends": "requests a frontend makes (v2)",
         }
         return {
             "request": f"{method or '*'} {path}",
@@ -488,7 +488,7 @@ class Tools:
                 )
         return {"public": bool(reached), **({"reached_through": reached} if reached else {})}
 
-    # ------------------------------------------------- witnesses (D109, claims)
+    # ------------------------------------------------- witnesses (claims)
 
     def _uses(self, node_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Reconciled uses of channels by applications (an application's, or a channel's):
@@ -837,7 +837,7 @@ class Tools:
         shown: dict[str, dict[str, Any]] = {}
         for t in trace:
             if detail == "significant" and ("step" not in t or t.get("repeat")):
-                # A call Steno couldn't follow stays visible on the nearest step above (D71)
+                # A call Steno couldn't follow stays visible on the nearest step above
                 holder = _nearest(shown, t["path"])
                 if holder is not None:
                     holder.setdefault("stops", []).extend(_stops(t, of=t["name"]))
@@ -968,7 +968,7 @@ class Tools:
         effects: dict[str, list[dict[str, Any]]],
         summary: bool = False,
     ) -> dict[str, Any]:
-        """A flow as its reach only (D140): its trigger, every effect it reaches with each call
+        """A flow as its reach only: its trigger, every effect it reaches with each call
         site cited, and the functions it reaches with their lines, by file. No order, nesting,
         or call flags: the ablation measures whether answers need them."""
         flow_id, repo, commit = fl["id"], fl.get("repo"), fl.get("commit")
@@ -1197,7 +1197,7 @@ class Tools:
             "next": ["get_flow(flow id) for how a dependent uses it"],
         }
         if direction == "upstream" and kind == "interface":
-            # What other witnesses say about who uses this channel (D109): agreement for each
+            # What other witnesses say about who uses this channel: agreement for each
             # application, and the ones only a witness states (no code found)
             uses, use_citations = self._uses(start)
             if uses:
@@ -1222,7 +1222,7 @@ class Tools:
             possible = self._possible_callers(self._targets_of(start, kind))
             if possible:
                 # Not facts: calls whose host Steno doesn't know, with a matching method and
-                # path (D100). Listed so "nothing calls this" is never said when something may
+                # path. Listed so "nothing calls this" is never said when something may
                 out["possible_callers"] = possible
                 out["possible_callers_note"] = (
                     "calls from flows whose host is set outside the repository and whose method "
@@ -1306,8 +1306,8 @@ class Tools:
         ]
 
     def _flow_completeness(self, fl: Any, unknown_hosts: list[str] | None = None) -> dict[str, Any]:
-        """What this answer can't vouch for (D71, D101): calls in the flow Steno couldn't follow,
-        calls whose host is set where the app runs (D100), whether its trigger is known, and
+        """What this answer can't vouch for: calls in the flow Steno couldn't follow,
+        calls whose host is set where the app runs, whether its trigger is known, and
         framework hooks in its application (filters, validators, callbacks) that may run around
         it without the graph showing it."""
         rows = self._read(
@@ -1352,7 +1352,7 @@ class Tools:
     def _path_matches(self, method: str | None, url: str | None, flow_id: str) -> list[str]:
         """Endpoints in other applications whose method and path match a call whose host isn't
         known: `possibly POST /suggestion in budgeting-app-inference`. A hint, never an edge:
-        a matching path alone doesn't say which service a call reaches (D64)."""
+        a matching path alone doesn't say which service a call reaches."""
         if not method or not url:
             return []
         _, path = split_url(url)
@@ -1538,7 +1538,7 @@ def _matched(f: dict[str, Any], words: list[str]) -> str:
 
 def _summary(node: Any) -> dict[str, Any]:
     """What an application, space, or organization is for, as an LLM wrote it from what Steno
-    found (D143): a starting point to orient by, never a fact to cite."""
+    found: a starting point to orient by, never a fact to cite."""
     if not node.get("summary"):
         return {}
     return {
@@ -1549,7 +1549,7 @@ def _summary(node: Any) -> dict[str, Any]:
 
 
 def _digest_matched(h: dict[str, Any], words: list[str]) -> str | None:
-    """Why a hit matched when its name doesn't say. A flow: the items of its digest (D143) with
+    """Why a hit matched when its name doesn't say. A flow: the items of its digest with
     the words (or their stems), under their line's heading, e.g. `digest: WRITES git_commit
     (insert)`; items with every word when there are any, else those with some, a few per line.
     An application, space, or organization: its summary's line. Matched only by a close
@@ -1577,7 +1577,7 @@ def _digest_matched(h: dict[str, Any], words: list[str]) -> str | None:
             if found:
                 return "digest: " + "; ".join(found)
     elif h.get("summary") and has(str(h["summary"]), any):
-        # An application, space, or organization found by its generated summary (D143)
+        # An application, space, or organization found by its generated summary
         return f"summary: {h.get('summary_line') or h['summary']}"
     return "a close spelling or an abbreviation of the words (`clt` for client)"
 
@@ -1589,7 +1589,7 @@ def _meanings(uses: list[dict[str, Any]]) -> dict[str, str]:
 def _completeness(
     checked: list[str], not_checked: dict[str, Any], unexplained: dict[str, dict[str, int]]
 ) -> dict[str, Any]:
-    """What an answer covered and what it couldn't (D118). Never `complete: true`: that would
+    """What an answer covered and what it couldn't. Never `complete: true`: that would
     be a claim about what Steno can't see. `unexplained`: the applications' open coverage
     items, so something Steno sees but can't explain is never silent."""
     out: dict[str, Any] = {"checked": checked, "not_checked": not_checked}
@@ -1684,7 +1684,7 @@ def _unique(citations: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def reach_of(trace: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Every function a flow reaches, once each, grouped by file in line order (D140)."""
+    """Every function a flow reaches, once each, grouped by file in line order."""
     by_file: dict[str, dict[str, tuple[int, int]]] = defaultdict(dict)
     for t in trace:
         by_file[t["file"]].setdefault(t["symbol"], (t["start_line"], t["end_line"]))
@@ -1752,7 +1752,7 @@ def _nearest(shown: dict[str, dict[str, Any]], path: str) -> dict[str, Any] | No
 
 
 def _stops(t: dict[str, Any], of: str | None = None) -> list[str]:
-    """Where a function's calls stop being followed (D71): `webClient.post().uri(…) at line 61:
+    """Where a function's calls stop being followed: `webClient.post().uri(…) at line 61:
     library type (org.springframework.web)`."""
     out = []
     for g in t.get("unresolved", []):

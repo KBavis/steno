@@ -1,4 +1,4 @@
-"""Send a graph plan to Neo4j in bounded transactions, writing only what changed (D59, D135).
+"""Send a graph plan to Neo4j in bounded transactions, writing only what changed.
 
 See docs/how-it-works/ingestion/README.md §5, stages.md §7, and large-repositories.md §8a.
 

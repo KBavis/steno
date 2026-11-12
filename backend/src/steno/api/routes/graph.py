@@ -1,4 +1,4 @@
-"""Graph views for the Visualize tab (D53): one layer of the graph at a time."""
+"""Graph views for the Visualize tab: one layer of the graph at a time."""
 
 from typing import Any
 

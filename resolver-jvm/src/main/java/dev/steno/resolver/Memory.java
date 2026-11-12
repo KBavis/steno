@@ -9,7 +9,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** How much memory this run needed, so a repository outgrowing its heap shows up before it fails (D127). */
+/** How much memory this run needed, so a repository outgrowing its heap shows up before it fails. */
 final class Memory {
     private static final long MB = 1024 * 1024;
 

@@ -1,4 +1,4 @@
-"""Coverage items become patterns across the organization (D121): reach is the current state,
+"""Coverage items become patterns across the organization: reach is the current state,
 new code is what a run saw first, and a pattern no longer occurring is covered."""
 
 import pytest
@@ -157,7 +157,7 @@ def test_a_proposed_pattern_a_rule_now_explains_is_covered(session):
 
 
 def test_expected_and_proposed_are_triage_states_and_expected_stays(session):
-    """D146, D147: expected (outside the organization) survives the pattern disappearing;
+    """expected (outside the organization) survives the pattern disappearing;
     proposed (a rule's pull request is open) becomes covered once a rule explains it."""
     from steno.coverage.patterns import triage
 
@@ -196,7 +196,7 @@ def test_a_quiet_item_makes_a_quiet_pattern(session):
 
 
 def test_a_declined_pull_request_ignores_its_pattern_with_why(session):
-    """D148: a person decided against the rule, so it stays out of the report."""
+    """a person decided against the rule, so it stays out of the report."""
     from steno.coverage.patterns import refresh_proposed, triage
 
     a = _repo(session, "pattern-test-declined")

@@ -1,5 +1,5 @@
 """organization settings: what the organization chooses for its deployment (the LLM that
-writes summaries, D143); set in the Settings page now, by onboarding later
+writes summaries); set in the Settings page now, by onboarding later
 
 Revision ID: 5e1a7c3d9b20
 Revises: 9d1e6b3c5a20

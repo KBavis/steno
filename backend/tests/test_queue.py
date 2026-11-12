@@ -1,4 +1,4 @@
-"""The job queue (D35): one job per repository at a time, and a limit on jobs running at once.
+"""The job queue: one job per repository at a time, and a limit on jobs running at once.
 Runs against the dev Postgres inside a transaction that's rolled back; skipped without it."""
 
 from datetime import UTC, datetime, timedelta
@@ -96,7 +96,7 @@ def test_interrupted_jobs_unlock_their_repository(session):
 
 
 def test_a_job_waits_until_its_memory_fits_this_machine(session):
-    """D128: with a job already running here, the next waits when its reservation doesn't fit;
+    """with a job already running here, the next waits when its reservation doesn't fit;
     alone on the machine, it starts."""
     from steno.ingestion.resources import Machine
 
@@ -123,7 +123,7 @@ def test_a_job_waits_until_its_memory_fits_this_machine(session):
 
 
 def test_after_running_out_of_jvm_memory_the_next_run_gets_more_and_batches(session):
-    """A repository too big for the defaults recovers instead of failing every night (D128)."""
+    """A repository too big for the defaults recovers instead of failing every night."""
     from steno.ingestion.resources import Machine, estimate
 
     repo = _repo(session, "queue-test-g")

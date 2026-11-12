@@ -1,4 +1,4 @@
-"""A flow's trace as stored: compact and compressed (D63, refined).
+"""A flow's trace as stored: compact and compressed (refined).
 
 A trace lists every function a flow runs, once per call site, so a large flow repeats the same
 functions thousands of times (ThingsBoard: 47,803 entries in one flow, 2.4 GB of trace JSON

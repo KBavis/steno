@@ -1,7 +1,7 @@
 """Which LLM writes the organization's text: its own choice, made on the Settings page
 (`organization.settings["llm"]`), else the deployment's defaults (STENO_LLM_PROVIDER,
 STENO_LLM_MODEL, STENO_LLM_BASE_URL, STENO_LLM_API_KEY_REF). Everything that calls an LLM goes
-through `provider_for` (D149). A key is a reference (`env:NAME`), never the key itself."""
+through `provider_for`. A key is a reference (`env:NAME`), never the key itself."""
 
 from typing import Any
 from urllib.parse import urlsplit

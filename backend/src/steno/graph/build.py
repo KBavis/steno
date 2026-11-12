@@ -5,9 +5,9 @@ docs/how-it-works/graph-reference.md. One containment tree:
     Organization → Space → Application → Interface, Entity, Flow → Step    architecture nodes
                          → Repository → Module → File                       code nodes
 
-joined by `Application -BUILT_FROM-> Module`. Functions aren't nodes (D60): the call graph
-is built in memory, walked from every entry point, and kept only as each flow's **trace**
-(D63), the ordered list of functions it runs, stored on the Flow. Significant functions (an
+joined by `Application -BUILT_FROM-> Module`. Functions aren't nodes: the call graph
+is built in memory, walked from every entry point, and kept only as each flow's **trace**,
+the ordered list of functions it runs, stored on the Flow. Significant functions (an
 entry point, or an effect at or below them) also become Step nodes, which carry the effects
 (READS_FROM, WRITES_TO, CALLS, PRODUCES, CONSUMES); every effect is also rolled up onto the flow.
 
@@ -50,14 +50,14 @@ SEARCHABLE = {
 SHARED = {"Table", "DataStore", "ExternalSystem"}
 EFFECTS = {"READS_FROM", "WRITES_TO", "CALLS", "PRODUCES", "CONSUMES"}
 # Interfaces a rule can name by label alone. Any other label a rule uses on an Interface, or
-# refers to with only a name, is an org-defined channel (D61), keyed by name like a topic.
+# refers to with only a name, is an org-defined channel, keyed by name like a topic.
 APP_SCOPED = {"HttpEndpoint", "GrpcMethod"}
 KNOWN_LABELS = {
     "Function", "Table", "DataStore", "ExternalSystem", "Entity", "Schedule", "Application",
     *APP_SCOPED,
 }  # fmt: skip
 # A function called from this many places, with nothing architectural below it, is a utility:
-# listed where it's called, never expanded (D63). The threshold itself is still Open.
+# listed where it's called, never expanded. The threshold itself is still Open.
 UTILITY_FAN_IN = 3
 # Trace-entry fields that only point into the code at a commit (compared loosely, see writer)
 POINTERS = ("start_line", "end_line", "call_line")
@@ -74,7 +74,7 @@ TRIGGER_KIND = {
     "Queue": "queue",
     "GrpcMethod": "grpc",
 }
-# Application kinds (D85) by the kind of trigger that starts its flows
+# Application kinds by the kind of trigger that starts its flows
 KIND_OF = {"http": "Service", "grpc": "Service", "topic": "Consumer", "queue": "Consumer",
            "channel": "Consumer"}  # fmt: skip
 JAVA_IMPLICIT = {"toString", "equals", "hashCode", "compareTo", "close", "clone", "finalize"}
@@ -129,7 +129,7 @@ class GraphPlan:
     stats: dict[str, Any] = field(default_factory=dict)
     # Functions an entry point reaches (coverage reads it; too large for the stage metrics)
     reached: set[str] = field(default_factory=set)
-    ledger: Any = None  # the map-layer ledger (D101), for the coverage report
+    ledger: Any = None  # the map-layer ledger, for the coverage report
 
     def node(self, id: str, labels: list[str], **props: Any) -> str:
         existing = self.nodes.get(id)
@@ -192,7 +192,7 @@ class Context:
     job_id: int
     commit: str | None
     # Each deployable's identity from identify (module path → AppIdentity): its Steno ID keys
-    # the application and everything under it (D81). Without it (tests, `steno extract`), the
+    # the application and everything under it. Without it (tests, `steno extract`), the
     # path-derived name does
     identities: dict[str, Any] = field(default_factory=dict)
 
@@ -206,7 +206,7 @@ def build(
     packs: list[Any] | None = None,
 ) -> GraphPlan:
     """`http_systems`: the enabled packs' HTTP signatures, which name the services calls go to.
-    `packs`: every pack, for the map-layer ledger's lists of I/O and harmless libraries (D101)."""
+    `packs`: every pack, for the map-layer ledger's lists of I/O and harmless libraries."""
     return _Builder(x, resolver, structure, ctx, http_systems or [], packs or []).run()
 
 
@@ -236,7 +236,7 @@ class _Builder:
         self.app_by_name: dict[str, str] = {}
         self.functions: dict[str, Function] = {f.symbol: f for f in r.functions()} if r else {}
         # Names of first-party functions: an unresolved call by one of these names may be a
-        # flow step that's missing (D71)
+        # flow step that's missing
         self.first_party_names = {f.name for f in self.functions.values()}
         self.fact_ids: dict[int, str | None] = {}  # id(NodeFact) → node id (None: dropped)
         self.effects: dict[str, list[Effect]] = defaultdict(list)  # function symbol → effects
@@ -245,8 +245,8 @@ class _Builder:
         self.utility: set[Key] = set()
         self.files: dict[str, dict[str, int]] = {}  # file path → counts, for File nodes
         self.counted: set[Key] = set()
-        self.inferred: set[Key] = set()  # entry points no rule names (D74)
-        self.interceptors: list[Any] = []  # code run in front of entry points (D103)
+        self.inferred: set[Key] = set()  # entry points no rule names
+        self.interceptors: list[Any] = []  # code run in front of entry points
 
     def run(self) -> GraphPlan:
         self._structure()
@@ -260,7 +260,7 @@ class _Builder:
         self._flows()
         self._kinds()
         self._file_nodes()
-        # D143: what routing and keyword search read
+        # what routing and keyword search read
         write_digests(self.plan, {s: f.doc for s, f in self.functions.items() if f.doc})
         self.plan.stats["unmet_joins"] = self.unmet
         return self.plan
@@ -348,7 +348,7 @@ class _Builder:
     # ------------------------------------------------------- extracted facts
 
     def _access(self, endpoint: NodeFact, app: str | None) -> dict[str, str]:
-        """An endpoint's access from its application's request matchers (D103): the most
+        """An endpoint's access from its application's request matchers: the most
         specific match wins, one naming the method before one that doesn't."""
         path = endpoint.props.get("path")
         if not isinstance(path, str):
@@ -522,7 +522,7 @@ class _Builder:
         return eid
 
     def _channel(self, label: str, name: str, props: dict[str, Any], prov: dict[str, Any]) -> str:
-        """A topic, queue, or org-defined channel (D61): keyed by its name, so the application
+        """A topic, queue, or org-defined channel: keyed by its name, so the application
         that sends and the one that receives meet here. Owned by the space that first wrote it
         (the producer's, by convention; graph-reference.md §3, Topic ownership)."""
         cid = self.plan.node(
@@ -552,7 +552,7 @@ class _Builder:
             if system:  # the service's own host: one system, however many hosts it has
                 return self._external(host, system.name, prov, key=system.name)
             # A bare service name (no dots, not localhost), same shape as a gateway's route
-            # target (D132): try it against the identity registry before assuming it's outside
+            # target: try it against the identity registry before assuming it's outside
             # the organization. Unmatched, it falls back to an ExternalSystem keyed by host,
             # same as today.
             target = self._app_target(host, ref.method, path)
@@ -601,7 +601,7 @@ class _Builder:
 
     def _app_target(self, host: str, method: str, path: str) -> str | None:
         """A bare host naming another module of *this same repository* (the shape a gateway
-        route's `uri` takes, D132's `route_target`): the exact `HttpEndpoint` that module's
+        route's `uri` takes, `route_target`): the exact `HttpEndpoint` that module's
         own build already wrote, so `http://customers-service/owners/{id}` joins the same way
         a gateway route does, instead of becoming a separate `ExternalSystem` per caller.
 
@@ -622,7 +622,7 @@ class _Builder:
         o = e.origin
         prov = self._prov(o.rule, o.file, o.line)
         if _is_function(e.src) or _is_function(e.dst):
-            # Function → function is a call graph edge (an async background task, D45), read
+            # Function → function is a call graph edge (an async background task), read
             # in _call_graph. Function → anything else is an effect, placed on the steps that
             # run that function.
             if _is_function(e.src) and not _is_function(e.dst):
@@ -669,11 +669,11 @@ class _Builder:
     # ------------------------------------------------------ the call graph
 
     def _call_graph(self) -> None:
-        """The call graph of everything an entry point reaches, in memory only (D60).
+        """The call graph of everything an entry point reaches, in memory only.
 
         A call to an inherited method follows the subclass it was made on, so Task.run reached
         through DiffTaskRunner(...).run() runs DiffTaskRunner's methods; that pairing becomes
-        its own key when it calls something different from the base version (D58). A call to
+        its own key when it calls something different from the base version. A call to
         an abstract method goes to every implementation, marked `candidate`.
         """
         if not self.r:
@@ -703,7 +703,7 @@ class _Builder:
             if self.entry_of[ep.function] in self.functions
         }
         self._walk(self.roots, rule_calls)
-        # Interceptors run in front of the entry points they apply to (D103): their calls are
+        # Interceptors run in front of the entry points they apply to: their calls are
         # part of those flows
         self.interceptors = [
             i
@@ -712,7 +712,7 @@ class _Builder:
         ]
         self._walk({(i.function, None) for i in self.interceptors}, rule_calls)
         # Work inside an application that nothing in the code starts (a worker loop, a CLI
-        # command, a tool a framework registers): its own flow, marked inferred (D74)
+        # command, a tool a framework registers): its own flow, marked inferred
         self.inferred = self._inferred_roots(rule_calls)
         self._walk(self.inferred, rule_calls)
         self.roots |= self.inferred
@@ -786,7 +786,7 @@ class _Builder:
         # Classes the known flows already use: an uncalled method of one is dead code (an
         # unused service method), not work something outside the code starts
         used = {self.functions[s].container for s in reached if self.functions[s].in_class}
-        callbacks = self.ledger.callback_entries()  # a framework calls these (D101)
+        callbacks = self.ledger.callback_entries()  # a framework calls these
         roots = set()
         for symbol, fn in sorted(self.functions.items()):
             if symbol in reached or _implicitly_called(fn):
@@ -804,7 +804,7 @@ class _Builder:
         return roots
 
     def _unknown_hooks(self) -> None:
-        """Each application's framework hooks no rule explains (D101): code a framework runs
+        """Each application's framework hooks no rule explains: code a framework runs
         that may touch anything, listed on the application so every answer about it can say so."""
         # Grouped by framework type, rarest first: one request filter isn't buried under twenty
         # validators of the same kind
@@ -857,12 +857,12 @@ class _Builder:
     def _calls_from(self, key: Key, rule_calls: list[tuple[str, int, bool]]) -> list[Call]:
         """A function's calls in source order. A rule's call to a function the code already
         calls there merges into that call (marking it async if the rule says so) instead of
-        adding another (D45)."""
+        adding another."""
         out: list[Call] = []
         for inv in self._calls_of(key):
             for target, candidate in self._targets(inv):
                 out.append(Call(target, inv.line, inv.conditional, inv.in_loop, False, candidate))
-        # A call on a type the app provides as a @Bean runs the bean's code (D103)
+        # A call on a type the app provides as a @Bean runs the bean's code
         for call, provider in self.ledger.provided.get(key[0], []):
             if provider in self.functions:
                 out.append(Call((provider, None), call.line))
@@ -950,7 +950,7 @@ class _Builder:
                 name=name,
                 trigger=trigger_name,
                 trigger_kind=trigger_kind,
-                # Who may call it (D103), and the interceptors that run first
+                # Who may call it, and the interceptors that run first
                 access=trigger_node.props.get("access"),
                 interceptors=[i.function for i in before] or None,
                 entry_symbol=entry_symbol,
@@ -963,7 +963,7 @@ class _Builder:
                 trace_entries=len(trace),
                 trace_files=sorted({t["file"] for t in trace}),
                 trace_symbols=sorted({t["symbol"] for t in trace}),
-                # Calls Steno couldn't follow: the flow may stop short there (D71)
+                # Calls Steno couldn't follow: the flow may stop short there
                 unresolved_calls=stops or None,
                 incomplete=bool(stops) or None,
                 **prov,
@@ -977,14 +977,14 @@ class _Builder:
             self._inferred_flow(key)
 
     def _kinds(self) -> None:
-        """Application kinds (D85): labels from the triggers of the application's flows, not a
-        type; one application can be several; `:Gateway` when its own config routes requests
-        (D132). An in-code schedule is a trigger, not a kind,
+        """Application kinds: labels from the triggers of the application's flows, not a
+        type; one application can be several; `:Gateway` when its own config routes requests.
+        An in-code schedule is a trigger, not a kind,
         and `:Job` needs a PLATFORM witness (a CronJob), so neither is set here. An application
         none of whose flows has a known trigger gets no kind, never a default: it's a coverage
         item instead."""
         unknown = []
-        # An application whose own config routes requests is a gateway (D132)
+        # An application whose own config routes requests is a gateway
         gateways = {
             app
             for c in self.x.claims
@@ -1003,7 +1003,7 @@ class _Builder:
         self.plan.stats["applications_without_kind"] = unknown
 
     def _inferred_flow(self, key: Key) -> None:
-        """A flow no trigger is known for (D74): no STARTS edge, named after the function it
+        """A flow no trigger is known for: no STARTS edge, named after the function it
         starts in, and marked `inferred` so nobody mistakes it for a known entry point."""
         fn = self.functions[key[0]]
         rel = self._rel(fn)
@@ -1052,7 +1052,7 @@ class _Builder:
     def _interceptors_for(
         self, entry: str, trigger_labels: list[str], app: str | None
     ) -> list[Any]:
-        """The interceptors that run before an entry point (D103), filters first: those in its
+        """The interceptors that run before an entry point, filters first: those in its
         application whose scope covers it."""
         if "HttpEndpoint" not in trigger_labels:
             return []
@@ -1073,7 +1073,7 @@ class _Builder:
     def _trace(self, flow: str, root: Key, before: list[Any] | None = None) -> list[dict[str, Any]]:
         """The flow's trace: a depth-first walk from the entry, each call in source order.
 
-        Every function the flow calls is listed once per call site (D63). A function already
+        Every function the flow calls is listed once per call site. A function already
         expanded earlier in the flow is listed again but not expanded (`repeat`); a utility
         is never expanded; a call back into a function on the current path is `recursive`.
         """
@@ -1114,7 +1114,7 @@ class _Builder:
 
     def _cascades_touched(self, trace: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Keep an ORM cascade write only when the flow touches every relationship it goes
-        through (D102): saving a new User with empty accounts writes no account rows; adding a
+        through: saving a new User with empty accounts writes no account rows; adding a
         valid-time row to a category's list and saving the category does write category_vt."""
         touched: set[str] = set()
         fields = getattr(self.r, "touched_fields", None) if self.r else None
@@ -1136,7 +1136,7 @@ class _Builder:
         return all(link in getattr(self, "_touched", set()) for link in str(chain).split(" > "))
 
     def _gaps(self, symbol: str) -> list[dict[str, Any]]:
-        """The calls in a function Steno couldn't follow that may matter (D71): named like a
+        """The calls in a function Steno couldn't follow that may matter: named like a
         first-party function (a step that may be missing) or like I/O (an effect that may be).
         A chain of builder calls through a library type isn't listed call by call; the coverage
         report counts every one, per library."""
@@ -1155,7 +1155,7 @@ class _Builder:
             if self.ledger.keeps(g)
             and (g.reason == "library type" or _matters(g, self.first_party_names))
         ]
-        # I/O-capable library calls no rule explains (D101): the flow may touch more
+        # I/O-capable library calls no rule explains: the flow may touch more
         return [g.describe() for g in sorted([*followed, *self.ledger.unexplained_calls(fn)],
                                               key=lambda g: g.line)]  # fmt: skip
 

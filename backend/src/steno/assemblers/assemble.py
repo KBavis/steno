@@ -96,7 +96,7 @@ ACCESS = {
 
 
 def _access(x: Extraction) -> None:
-    """Who may call each HTTP endpoint (D103). A handler's own annotation
+    """Who may call each HTTP endpoint. A handler's own annotation
     (`@PreAuthorize("hasRole('ADMIN')")`) is set here; request matchers
     (`requestMatchers("/auth/**").permitAll()`) become `access_rules`, which the graph builder
     applies to the endpoints of the application that declares them."""
@@ -224,7 +224,7 @@ def _cascaded(
             NodeRef.of("Table", {"name": table}),
             {
                 **edge.props,
-                # the relationships it goes through, all of which the flow must touch (D102)
+                # the relationships it goes through, all of which the flow must touch
                 "cascade": " > ".join(
                     [*filter(None, [edge.props.get("cascade")]), f"{entity}.{field_name}"]
                 ),
@@ -322,7 +322,7 @@ def _clients_in(x: Extraction, r: Resolver, repo: Path) -> None:
         props: dict[str, Any] = {}
         if not matched:
             # Typed only as a library base class (`FunctionCallingLLM`): every client this app
-            # builds whose type extends it can be the one that runs (D47), like DI candidates
+            # builds whose type extends it can be the one that runs, like DI candidates
             matched = [c for c in clients if _extends(r, c, receiver)]
             props = {"candidate": True, **({"ambiguous": True} if len(matched) > 1 else {})}
         for clue in matched:
@@ -431,7 +431,7 @@ def _client_edge(clue: ClueFact, method: str) -> str | None:
 
 
 def _partial_references(x: Extraction) -> None:
-    """{DataStore: {vendor: chroma}} → the app's single matching node (D50)."""
+    """{DataStore: {vendor: chroma}} → the app's single matching node."""
     for edge in x.edges:
         for end in ("src", "dst"):
             ref = getattr(edge, end)

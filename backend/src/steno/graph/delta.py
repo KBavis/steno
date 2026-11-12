@@ -1,8 +1,8 @@
-"""What a run changes: the plan compared with what the graph already holds (D59).
+"""What a run changes: the plan compared with what the graph already holds.
 
 Only differences are written, so a run over unchanged code writes nothing, and a refactor
 that changes no behavior writes traces but no architecture nodes. The same comparison
-produces the change history (`fact_change`, D18). Pure: the writer reads the graph, this
+produces the change history (`fact_change`). Pure: the writer reads the graph, this
 module decides.
 
 Two kinds of property don't count as a change:
@@ -31,7 +31,7 @@ VOLATILE = {
 }
 # Pointers into the code on Steps and Flows (a trace's are its entries' POINTERS)
 NODE_POINTERS = {"file", *POINTERS, "entry_file", "entry_start_line", "entry_end_line"}
-# Written by later stages (cards, generated summaries: D143), never part of a plan
+# Written by later stages (cards, generated summaries), never part of a plan
 LATER = ("card", "summary")
 TRACE_FIELDS = {"trace", "trace_files", "trace_symbols", "trace_entries"}
 
@@ -184,7 +184,7 @@ def _strip_pointers(entry: dict[str, Any]) -> dict[str, Any]:
 
 
 def changes(delta: Delta) -> list[dict[str, Any]]:
-    """`fact_change` rows (D18): one per node or edge added, removed, or modified, without
+    """`fact_change` rows: one per node or edge added, removed, or modified, without
     traces, plus one per flow whose trace changed, listing the functions added, removed,
     and modified (by body hash)."""
     rows: list[dict[str, Any]] = []

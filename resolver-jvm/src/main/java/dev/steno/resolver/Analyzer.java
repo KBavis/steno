@@ -100,14 +100,14 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Resolves a repository's Java code in one pass (D69, docs/how-it-works/ingestion/resolvers.md §5.2) and returns
+ * Resolves a repository's Java code in one pass (docs/how-it-works/ingestion/resolvers.md §5.2) and returns
  * everything the engine could ask: every function and type, every call site (the method it
  * calls, or why that can't be told), and the symbol, type, class, and value of every expression a
  * rule may capture, keyed by file and position.
  *
  * <p>It reads the repository's own source and the JDK. Dependency JARs are optional and start
  * empty: a library type is still named from its import, but what a library method returns isn't
- * known, so a chain through one stops there and says so (D71).
+ * known, so a chain through one stops there and says so.
  *
  * <p>Two ways to answer every question: JavaParser's symbol solver first (generics, lambdas,
  * overloads), then Steno's own lookups through imports and declarations when the solver gives up
@@ -221,7 +221,7 @@ final class Analyzer {
 
     /**
      * Resolve the repository. With `batchFiles` > 0, in two passes so memory stays bounded
-     * (D127, docs/how-it-works/ingestion/resolvers.md §5.3): every file is parsed and its method bodies dropped,
+     * (docs/how-it-works/ingestion/resolvers.md §5.3): every file is parsed and its method bodies dropped,
      * leaving a declaration index of the whole repository; then bodies are read back and resolved
      * a batch of files at a time. Resolving a call needs other files' declarations, never their
      * bodies, so the answers are the same as one pass over everything (constructor bodies are
@@ -232,7 +232,7 @@ final class Analyzer {
     }
 
     /** With a `spill`, expressions and calls are written to it after each batch instead of
-     *  returned (D127); the caller writes the output file with it. */
+     *  returned; the caller writes the output file with it. */
     Map<String, Object> run(List<Path> sources, int batchFiles, Spill spill) throws IOException {
         long started = System.currentTimeMillis();
         JavaParser parser = new JavaParser(config);
@@ -518,7 +518,7 @@ final class Analyzer {
             m.put("annotations", annotations);
         }
         // Parameters with their types and annotations (`@Validated(Group.class) Dto dto`):
-        // which interceptors apply to an entry point (validation, D103)
+        // which interceptors apply to an entry point (validation)
         List<Map<String, Object>> parameters = new ArrayList<>();
         for (Parameter p : c.getParameters()) {
             List<Map<String, Object>> usages = usages(p.getAnnotations(), c);
@@ -861,7 +861,7 @@ final class Analyzer {
             if (call.fn() != null && call.generated()) {
                 counts[3]++;
                 // A Lombok getter, setter, or builder: not a step, but which fields a function
-                // touches decides whether a save cascades along them (D102)
+                // touches decides whether a save cascades along them
                 if (!setsEmpty(site)) { // `.accounts(new ArrayList<>())` adds no rows
                     accessors.computeIfAbsent(fn.symbol(), k -> new LinkedHashSet<>())
                             .add(call.fn().container() + "#" + call.fn().name());
@@ -1863,7 +1863,7 @@ final class Analyzer {
     // ------------------------------------------------------------------ values
 
     /** The constant an expression holds, or null. Spring placeholders (`${key}`) are kept for
-     *  the engine to fill in from config, since that's where the property map lives (D70). */
+     *  the engine to fill in from config, since that's where the property map lives. */
     Object valueOf(Expression e, int depth) {
         if (depth > 8) {
             return null;

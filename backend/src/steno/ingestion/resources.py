@@ -1,8 +1,8 @@
-"""How much work this machine can take at once (D128).
+"""How much work this machine can take at once.
 
 A worker reads its machine when it claims a job: the memory limit (a container's cgroup limit
 when there is one, else physical memory), the memory available right now, and the CPUs it may
-use. Each job reserves the memory its repository needed last time (measured per stage, D127),
+use. Each job reserves the memory its repository needed last time (measured per stage),
 or a default for a first run, and a job is claimed only when its reservation fits what this
 machine has left. So the same Steno runs one large job at a time on a laptop and many on a big
 worker, without a number to tune per machine.
@@ -60,7 +60,7 @@ def budget_mb(m: Machine) -> int:
 
 def free_mb(m: Machine) -> int:
     """What a new job may use right now: the memory free at this moment, less the headroom the
-    rest of the machine keeps (D134). Free memory already excludes what Neo4j, Postgres, and
+    rest of the machine keeps. Free memory already excludes what Neo4j, Postgres, and
     the other jobs hold."""
     return max(0, m.available_mb - get_settings().memory_headroom_mb)
 
@@ -70,7 +70,7 @@ def fit_heap(
 ) -> int | None:
     """The JVM heap to run with when `free` MB are free and the worker needs `python_mb` more
     alongside it: `want_mb` if that fits, else the largest that does (batches make a smaller
-    heap work, D127), None if that is below `floor_mb`: what the repository is known to need
+    heap work), None if that is below `floor_mb`: what the repository is known to need
     (a heap below its live heap, or one that already ran out, only fails again)."""
     room = int((free - python_mb) / JVM_OVERHEAD)
     if room >= want_mb:
@@ -84,7 +84,7 @@ class Plan:
 
     reserve_mb: int
     jvm_heap_mb: int | None  # None: the configured default
-    batched: bool  # resolve Java in batches (D127) whatever the setting says
+    batched: bool  # resolve Java in batches whatever the setting says
     source: str
     python_mb: int = PYTHON_PARSE_MB  # the worker's memory beside the JVM helper while it runs
     floor_mb: int = JVM_HEAP_MIN_MB  # the smallest heap worth trying: what the repository needs
@@ -95,7 +95,7 @@ def estimate(session: Session, repository_id: int, m: Machine | None = None) -> 
     last successful run, with headroom. When its last run ran out of JVM memory, the next gets
     twice the heap (within the machine's budget) and resolves in batches, so a repository too
     large for the defaults recovers instead of failing every night. Then cut to what is free
-    on this machine now, if that's less (D134)."""
+    on this machine now, if that's less."""
     return fit_plan(_history_plan(session, repository_id, m), m)
 
 
@@ -159,7 +159,7 @@ def reserved_mb(session: Session, on_host: str) -> tuple[int, int]:
 def fits(need_mb: int, m: Machine, reserved: int, running: int) -> bool:
     """Whether a job needing `need_mb` may start now: it must fit the memory free right now
     (less the headroom), even alone on the machine, so a worker never starts what would push
-    the machine into swap or out of memory (D134). With other jobs running here it must also fit
+    the machine into swap or out of memory. With other jobs running here it must also fit
     the budget left after their reservations, and there is one job per CPU."""
     if need_mb > free_mb(m):
         return False
@@ -172,7 +172,7 @@ def fits(need_mb: int, m: Machine, reserved: int, running: int) -> bool:
 
 def can_never_fit(need_mb: int, m: Machine) -> bool:
     """A job that doesn't fit this machine's whole budget even when nothing else runs: waiting
-    won't help, so it fails with a message instead of staying queued forever (D134)."""
+    won't help, so it fails with a message instead of staying queued forever."""
     return need_mb > budget_mb(m)
 
 

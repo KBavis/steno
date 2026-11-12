@@ -128,7 +128,7 @@ export type CoverageSignal =
   | 'version_untested'
   | 'version_unknown'
   | 'unread_file'
-/** The report's sections (D146): the catalog's groups, connections between applications first */
+/** The report's sections: the catalog's groups, connections between applications first */
 export type CoverageGroup = 'connections' | 'repositories' | 'libraries' | 'ways_in' | 'ways_out' | 'rule_health' | 'hidden'
 
 export interface CoverageSample {
@@ -284,7 +284,7 @@ export interface NodeDetail {
   labels: string[]
   label: string
   properties: Record<string, unknown>
-  /** What an application, space, or organization is for, generated (D143) */
+  /** What an application, space, or organization is for, generated */
   summary?: string | null
   provenance: Record<string, string | number>
   neighbors: { type: string; dir: 'in' | 'out'; node: { id: string; kind: string; label: string }; props: Record<string, unknown> }[]
@@ -301,7 +301,7 @@ export interface SearchHit {
 const q = (params: Record<string, string | boolean>) =>
   new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString()
 
-// ---------------------------------------------------------------- patterns (the rule author's worklist, D147)
+// ---------------------------------------------------------------- patterns (the rule author's worklist)
 
 export type PatternState = 'open' | 'proposed' | 'covered' | 'ignored' | 'expected'
 

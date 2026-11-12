@@ -1,4 +1,4 @@
-"""Jev (TypeSafe's System One model) behind the `Decision` interface (D142).
+"""Jev (TypeSafe's System One model) behind the `Decision` interface.
 
 Reached either directly or through an organization's gateway. Which one is only configuration:
 

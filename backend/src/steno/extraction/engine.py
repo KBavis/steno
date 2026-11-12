@@ -52,9 +52,9 @@ CLUE_FIELDS: dict[str, dict[str, str]] = {
     "prefix": {"owner": "symbol", "value": "value"},
     "mount": {"parent": "symbol", "child": "symbol", "prefix": "value"},
     "property": {"key": "text", "value": "value"},
-    # Who may call an entry point (D103): request matchers and their rule, or a method's own
+    # Who may call an entry point: request matchers and their rule, or a method's own
     "access": {"matchers": "text", "rule": "text", "value": "text", "function": "symbol"},
-    # Dependency injection: a @Bean method provides its return type (D103)
+    # Dependency injection: a @Bean method provides its return type
     "provides": {"function": "symbol"},
     "client": {
         "type": "class",
@@ -112,11 +112,11 @@ class Engine:
         self.packs = packs
         self._pack = {p.name: p for p in packs}
         self.out = Extraction()
-        # One symbol resolver per language the enabled packs read (D70)
+        # One symbol resolver per language the enabled packs read
         self.resolver: Resolvers | None = None
         self.files: list[Path] = []
         # Files some rule looked at (relative paths): the rest are the coverage report's unread
-        # files (D122)
+        # files
         self.read: set[str] = set()
         # Config keys a config rule turned into a fact or claim (not just a property clue)
         self.config_used: set[str] = set()
@@ -162,8 +162,8 @@ class Engine:
 
     def _run_code(self, rules: list[Rule]) -> None:
         """Every code rule on every file, a file at a time: its syntax tree is built once, used
-        by every rule, and dropped, so a large repository never holds all its trees at once
-        (D127). Each rule's matches go to a buffer of its own, joined in rule order, so the
+        by every rule, and dropped, so a large repository never holds all its trees at once.
+        Each rule's matches go to a buffer of its own, joined in rule order, so the
         facts come out in the same order as running each rule over every file in turn."""
         out = self.out
         buffers = [Extraction() for _ in rules]
@@ -707,7 +707,7 @@ class Engine:
     def _url_parts(self, ctx: Ctx, parts: list[Any]) -> str | None:
         """A URL from parts (`[$BASE_URL, $PREFIX, $PATH]`), joined with one `/` between them.
         A part that isn't bound is left out; one that can't be known becomes a placeholder
-        named after it, so the constant parts survive (D64)."""
+        named after it, so the constant parts survive."""
         out = ""
         for spec in parts:
             value = self._value(ctx, spec)

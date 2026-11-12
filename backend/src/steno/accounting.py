@@ -1,4 +1,4 @@
-"""The map-layer ledger (D101, option D): everything that can create an entry point, an
+"""The map-layer ledger (option D): everything that can create an entry point, an
 integration point, or a join is either explained, known to be harmless, or a visible gap.
 
 Steno doesn't model what code does inside a function; it models the map: what starts work,
@@ -40,8 +40,8 @@ NETWORK_IO = {
     "org.springframework.web.reactive.function.client", "redis.clients", "software.amazon",
     "java.net.http", "java.net.HttpURLConnection", "java.sql",
 }  # fmt: skip
-# Files: model artifacts, uploads, exports are stores too (D101). A call into one that no rule
-# explains is still a gap, ranked below the network, messaging, and databases (D146)
+# Files: model artifacts, uploads, exports are stores too. A call into one that no rule
+# explains is still a gap, ranked below the network, messaging, and databases
 FILE_IO = {
     "builtins.open", "pathlib.Path.open", "pathlib.Path.read_text", "pathlib.Path.write_text",
     "pathlib.Path.read_bytes", "pathlib.Path.write_bytes", "shutil", "pickle.load",
@@ -94,14 +94,14 @@ class Ledger:
         ]:
             self.origins[o.file].add(o.line)
             self.pack_lines[o.file].append((o.line, o.pack))
-        # Interceptors (D103): the framework hooks a rule placed in front of entry points
+        # Interceptors: the framework hooks a rule placed in front of entry points
         self.interceptors = {i.function for i in x.interceptors}
         # Dependency injection: a @Bean's return type → the method providing it, when one does
         self.providers = self._providers(x, rs)
         self.provided: dict[str, list[tuple[LibraryCall, str]]] = defaultdict(list)
         self.calls: list[tuple[LibraryCall, bool]] = []  # I/O-capable calls, explained?
         # Calls into every other library that isn't harmless, explained? What the coverage
-        # report's library gaps are counted from (D146): an internal client wrapper, or a
+        # report's library gaps are counted from: an internal client wrapper, or a
         # vendor SDK no list knows, can do I/O nobody declared
         self.others: list[tuple[LibraryCall, bool]] = []
         self.hooks: list[tuple[Hook, bool]] = []  # framework hooks, explained?

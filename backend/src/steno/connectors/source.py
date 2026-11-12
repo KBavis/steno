@@ -1,4 +1,4 @@
-"""Read a file at a commit from the git host (D17: no file contents are stored).
+"""Read a file at a commit from the git host (no file contents are stored).
 
 Code tools (`view_flow_code`) read the exact lines a flow's trace points to, at the commit
 the flow was ingested from, straight from the host's API. A small in-process cache saves

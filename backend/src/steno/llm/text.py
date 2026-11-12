@@ -1,5 +1,5 @@
 """Generate text once per input: cached in `llm_output` by a hash of the inputs, every call
-logged in `llm_call` (D36). A dry run generates nothing and estimates the tokens instead."""
+logged in `llm_call`. A dry run generates nothing and estimates the tokens instead."""
 
 import hashlib
 from dataclasses import dataclass

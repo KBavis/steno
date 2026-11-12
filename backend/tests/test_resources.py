@@ -1,4 +1,4 @@
-"""Fitting work to the machine (D128): the machine is read at run time, a container's limits
+"""Fitting work to the machine: the machine is read at run time, a container's limits
 win over the host's, and a job starts only when its memory fits what the machine has left."""
 
 from pathlib import Path
@@ -56,7 +56,7 @@ LAPTOP = Machine(memory_mb=7000, available_mb=4000, cpus=16)
 
 
 def test_a_job_alone_starts_only_if_it_fits_the_memory_free_now() -> None:
-    # 4,000 MB free less the 768 kept back (D134): a job alone is no exception
+    # 4,000 MB free less the 768 kept back: a job alone is no exception
     assert free_mb(LAPTOP) == 3232
     assert fits(3000, LAPTOP, reserved=0, running=0)
     assert not fits(3300, LAPTOP, reserved=0, running=0)

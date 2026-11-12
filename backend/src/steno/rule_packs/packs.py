@@ -1,7 +1,7 @@
 """Load rule packs from `rule-packs/` and decide which ones apply to a repository.
 
 The format is defined in docs/how-it-works/ingestion/rules-and-packs.md §6; a pack is enabled
-when any of its `enabled_when` conditions holds (D49).
+when any of its `enabled_when` conditions holds.
 """
 
 import fnmatch
@@ -55,7 +55,7 @@ class Pack:
     path: Path
     rules: list[Rule]
     http_systems: list[HttpSystem] = field(default_factory=list)
-    # The map-layer ledger (D101): library types, packages, or `Type#method`s that can do I/O
+    # The map-layer ledger: library types, packages, or `Type#method`s that can do I/O
     # (an unexplained call into one is a gap), and ones that never create an entry point or an
     # integration point (never a gap)
     io: list[str] = field(default_factory=list)
@@ -64,14 +64,14 @@ class Pack:
     # (`{"org.springframework.boot": ">=2.7, <4"}`). A repository on another version, or one
     # whose version isn't known, is a coverage item; the rules still run
     versions: dict[str, str] = field(default_factory=dict)
-    # What kind of witness the pack reads (D76, D112): CODE (default), PLATFORM, or DECLARED.
+    # What kind of witness the pack reads: CODE (default), PLATFORM, or DECLARED.
     # One pack, one witness type; its claims carry it
     witness_type: str = "CODE"
     facets: list[str] = field(default_factory=list)
     # A source generated from the code (an OpenAPI spec built from controllers): its claims
     # never count as an independent witness
     generated: bool = False
-    # What's never worth a rule (D122): file globs and config key prefixes the coverage
+    # What's never worth a rule: file globs and config key prefixes the coverage
     # report doesn't list. Checked against the facets: nothing a facet reads belongs here
     noise_files: list[str] = field(default_factory=list)
     noise_config: list[str] = field(default_factory=list)

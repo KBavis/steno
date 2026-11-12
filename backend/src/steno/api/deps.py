@@ -20,7 +20,7 @@ def get_or_404[T](session: Session, model: type[T], id: int) -> T:
 
 
 def sync_graph(session: Session) -> None:
-    """Project the declared org and spaces into Neo4j (D33).
+    """Project the declared org and spaces into Neo4j.
 
     Flushes first so Postgres rejects bad data before Neo4j changes. If Neo4j fails, the
     request fails and Postgres rolls back with it, so the two stay in step.

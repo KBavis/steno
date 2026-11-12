@@ -7,7 +7,7 @@ run that just happened: the engine's facts and dropped matches, the symbol resol
 the code, and the graph plan's notes (effects no flow reaches, calls whose host is unknown).
 
 Items are keyed by (kind, target), so the same gap in another run, or another repository,
-is the same item: that's how triage carries over and how the org-wide report adds up (D62).
+is the same item: that's how triage carries over and how the org-wide report adds up.
 """
 
 import re
@@ -54,7 +54,7 @@ IO_PACKAGES = {
 # about a table (`table_of`), or a query built outside any function
 EXPECTED_DROPS = ("table_of: not a mapped entity", "@function outside a function")
 
-# Signals kept as patterns but left out of the report (D146): unread files and settings are
+# Signals kept as patterns but left out of the report: unread files and settings are
 # input for a rule author who asks for them; untested or unknown library versions belong to
 # rule health. Everything else in the report points at the surface.
 QUIET = {"unread_file", "version_untested", "version_unknown"}
@@ -63,14 +63,14 @@ CONFIG_SHAPED = {
     ".yaml", ".yml", ".xml", ".conf", ".toml", ".properties", ".tf", ".hcl", ".tpl", ".ini",
     ".cfg", ".env",
 }  # fmt: skip
-# A config key that names a connection: unread under any prefix, it's still an item (D146)
+# A config key that names a connection: unread under any prefix, it's still an item
 COMMUNICATION_KEY = re.compile(
     r"(^|[.\-_])(urls?|uris?|hosts?|endpoints?|base-?url|topics?|queues?|exchanges?|channels?"
     r"|destinations?|bootstrap-servers|brokers?|bindings?|datasource)($|[.\-_])"
     r"|^spring\.cloud\.stream\.",
     re.IGNORECASE,
 )
-# A framework hook whose name says the framework starts work through it: ranked first (D146)
+# A framework hook whose name says the framework starts work through it: ranked first
 STARTS_WORK = re.compile(
     r"(Listener|Handler|Consumer|Subscriber|Receiver|Scheduled|Schedule|Job|Task|Filter|"
     r"Interceptor|Controller|Endpoint|Mapping|Route|Command|Tool|Worker|Processor|Poller)$"
@@ -87,18 +87,18 @@ class Item:
     samples: list[dict[str, Any]] = field(default_factory=list)
     applications: dict[str, int] = field(default_factory=dict)  # application → occurrences
     # Every place it occurs: (file, enclosing symbol, application). The symbol, not the line,
-    # so an edit that moves lines isn't new code (D121)
+    # so an edit that moves lines isn't new code
     keys: set[tuple[str, str, str]] = field(default_factory=set)
-    # Why it may matter beyond its reach (D122), e.g. "referenced_by_code"
+    # Why it may matter beyond its reach, e.g. "referenced_by_code"
     evidence: set[str] = field(default_factory=set)
     # Config values seen (unread config), for evidence that they name things in the graph
     values: set[str] = field(default_factory=set)
-    # Kept as a pattern but left out of the report (D146): see QUIET
+    # Kept as a pattern but left out of the report: see QUIET
     quiet: bool = False
 
     @property
     def fingerprint(self) -> str:
-        """What it is, across the organization: the pattern it belongs to (D121)."""
+        """What it is, across the organization: the pattern it belongs to."""
         return f"{self.signal}:{self.target}"
 
     def add(self, sample: dict[str, Any]) -> None:
@@ -115,7 +115,7 @@ class Item:
 @dataclass
 class Report:
     items: list[Item]
-    # Completeness numbers for the repository (D62)
+    # Completeness numbers for the repository
     metrics: dict[str, Any]
 
 
@@ -158,7 +158,7 @@ def collect(
     """`app_of`: the application a file belongs to (its service module's), so items and
     numbers can be shown per application, not just per repository. `enabled`: the packs that
     ran, checked against `deps`, the versions the build files declare. `internal_prefixes`:
-    the organization's own code (D146). `repository` and `library_modules`: for telling
+    the organization's own code. `repository` and `library_modules`: for telling
     whether the whole repository produced nothing (a silent repository)."""
     items: dict[tuple[str, str, str], Item] = {}
     where = app_of or (lambda _file: "")
@@ -247,11 +247,11 @@ def collect(
             "io_explained_pct": round(100 * io["explained"] / io["total"], 1)
             if io["total"]
             else None,
-            # Calls that ran through a library type no JAR was available for (D69)
+            # Calls that ran through a library type no JAR was available for
             "unresolved_library_calls": gaps,
             "unknown_hooks": len(plan.stats.get("unknown_hooks", [])),
             "config_unset": len({key for _, key in x.unset_config}),
-            # Numbers, not items (D146): files Steno couldn't read, and rule matches it couldn't
+            # Numbers, not items: files Steno couldn't read, and rule matches it couldn't
             # complete that wouldn't have stated a surface fact
             "unparsed_files": unparsed,
             "dropped_matches": dropped,
@@ -263,7 +263,7 @@ def collect(
     )
 
 
-# The report's order (D146): connections between applications first, then ways in, then
+# The report's order: connections between applications first, then ways in, then
 # libraries (internal before external), then the rest of the surface
 ORDER = [
     "silent_repository",
@@ -317,7 +317,7 @@ def _per_application(
 
 
 def _unknown_hosts(plan: GraphPlan, r: Resolvers | None, item: Any) -> None:
-    """HTTP calls whose host is runtime data (D64): one item per calling class, like the
+    """HTTP calls whose host is runtime data: one item per calling class, like the
     graph's `Unknown host · …` node."""
     for u in plan.stats.get("unmet_joins", []):
         if u.get("kind") != "http_host":
@@ -337,7 +337,7 @@ def _unknown_hosts(plan: GraphPlan, r: Resolvers | None, item: Any) -> None:
 
 
 def _kindless(plan: GraphPlan, item: Any) -> None:
-    """Applications none of whose flows has a known trigger (D85): no kind is guessed. A rule
+    """Applications none of whose flows has a known trigger: no kind is guessed. A rule
     for whatever starts it (a framework's annotation, a listener) gives it one."""
     for a in plan.stats.get("applications_without_kind", []):
         item("unreachable", "no_trigger_application", a["id"],
@@ -348,11 +348,11 @@ def _kindless(plan: GraphPlan, item: Any) -> None:
 
 
 def _inferred(plan: GraphPlan, r: Resolvers | None, item: Any) -> None:
-    """Flows Steno started itself because nothing in the code starts them (D74): a worker loop,
+    """Flows Steno started itself because nothing in the code starts them: a worker loop,
     a CLI command, a function called through a table of functions. Each is a flow already;
     naming its trigger takes a rule (an entry point), which also makes the flow certain.
 
-    One item per class or module, not per function (D146): eleven methods of one registry are
+    One item per class or module, not per function: eleven methods of one registry are
     one thing to look at. A function a framework calls through an unknown hook (a CLI command,
     an MCP tool) is left out: the hook's own item already counts it."""
     hooked = set(plan.ledger.callback_entries()) if plan.ledger else set()
@@ -401,7 +401,7 @@ def _unreachable(plan: GraphPlan, r: Resolvers | None, item: Any) -> None:
 def _dropped(x: Extraction, item: Any, rules: dict[tuple[str, str], Rule]) -> int:
     """Matches a rule found but couldn't complete because Steno couldn't tell: a condition it
     couldn't check, a name it couldn't resolve. An item only when the rule states a surface
-    fact (D146); the rest are counted. Drops that are the rule working as designed
+    fact; the rest are counted. Drops that are the rule working as designed
     (EXPECTED_DROPS) aren't gaps. Returns how many were counted, not listed."""
     counted = 0
     for origin, reason in x.dropped:
@@ -421,7 +421,7 @@ def _dropped(x: Extraction, item: Any, rules: dict[tuple[str, str], Rule]) -> in
 
 def _unparsed(x: Extraction) -> int:
     """Files Steno couldn't read at all, and build modules the Java resolver couldn't resolve
-    when it read a repository module by module (D127): a number on the application (D146)."""
+    when it read a repository module by module: a number on the application."""
     return sum(
         1
         for error in x.errors
@@ -437,8 +437,8 @@ def _external_calls(
     where: Callable[[str | None], str],
     ledger: Any = None,
 ) -> dict[str, Any]:
-    """Library calls that can do I/O (declared by core lists and packs, D101) that no rule
-    explains, one item per library (D146): its methods are listed inside, so six `neo4j`
+    """Library calls that can do I/O (declared by core lists and packs) that no rule
+    explains, one item per library: its methods are listed inside, so six `neo4j`
     methods are one thing to look at, and one pack fixes them. Explained: a rule matched on the
     call's lines, or the library's pack recorded something in the same function
     (`stmt = select(Job)` is the read; `session.execute(stmt)` runs it)."""
@@ -471,7 +471,7 @@ def _external_calls(
 
 
 def _hooks(plan: GraphPlan, item: Any) -> None:
-    """Framework hooks no rule explains (D101): code a framework runs (a request filter, a
+    """Framework hooks no rule explains: code a framework runs (a request filter, a
     validator, a CLI command) that may start work or touch something the graph doesn't show.
     One item per framework type, annotation, or decorator, so one rule fixes them all."""
     for h in plan.stats.get("unknown_hooks", []):
@@ -488,9 +488,9 @@ def _hooks(plan: GraphPlan, item: Any) -> None:
 
 
 def _config(x: Extraction, item: Any, items: dict[Any, Item]) -> None:
-    """Config keys a fact needs that no config file in the repository sets (D101): set where
+    """Config keys a fact needs that no config file in the repository sets: set where
     the app runs. The fact keeps the key; its value isn't known. A key an unknown host's URL
-    is built from is already on that item (D100), so it isn't listed again (D146)."""
+    is built from is already on that item, so it isn't listed again."""
     on_hosts = {
         key
         for i in items.values()
@@ -508,7 +508,7 @@ def _config(x: Extraction, item: Any, items: dict[Any, Item]) -> None:
 
 def _libraries(r: Resolvers, packs: list[Pack], items: dict[Any, Item], item: Any) -> None:
     """I/O libraries the code imports that no rule pack covers and whose calls aren't listed
-    already: the calls' own items say it when there are any (D146), so this is the library
+    already: the calls' own items say it when there are any, so this is the library
     whose use Steno can't see at all (only chains through its types, or no calls found)."""
     covered = set().union(*(_libs(p) for p in packs)) if packs else set()
     with_calls = {
@@ -536,7 +536,7 @@ def _library_gaps(
     ledger: Ledger, r: Resolvers, packs: list[Pack], item: Any, prefixes: list[str]
 ) -> None:
     """Calls into a library no rule explains, that isn't declared I/O or harmless, and that no
-    pack covers (D146): one item per library. *Internal* (the organization's code, by
+    pack covers: one item per library. *Internal* (the organization's code, by
     `prefixes` or the repository's own package roots): Steno hasn't read it, and it may wrap a
     call to another application. *External*: a public or vendor library no list knows."""
     covered = set().union(*(_libs(p) for p in packs)) if packs else set()
@@ -600,7 +600,7 @@ def _own_roots(r: Resolvers) -> set[str]:
 
 def _silent_witnesses(x: Extraction, enabled: list[Pack], item: Any) -> None:
     """A PLATFORM or DECLARED pack that ran (its files are here) but stated nothing: the
-    witness is broken, not missing (D146)."""
+    witness is broken, not missing."""
     stated = {
         o.pack
         for o in [
@@ -633,7 +633,7 @@ def _silent_repository(
     read: set[str],
     item: Any,
 ) -> None:
-    """A repository that produced nothing (D146): no applications, no claims, no library
+    """A repository that produced nothing: no applications, no claims, no library
     modules. Usually a witness no pack reads (a config, deploy, or ACL repository), a library
     that isn't linked yet, or a repository with nothing to say. The item lists what it holds."""
     apps = [n for n in plan.nodes.values() if "Application" in n.labels and not n.props.get("stub")]
@@ -652,7 +652,7 @@ def _silent_repository(
 
 
 def _may_be_missed(it: Item) -> bool:
-    """An unread file worth showing (D148). Code in a language no pack reads is a service Steno
+    """An unread file worth showing. Code in a language no pack reads is a service Steno
     can't see. A config-shaped file the code refers to, or that names things in the graph,
     may be a witness no pack reads: a compose file, an nginx config, an internal framework's
     wiring. Other unread files stay quiet, whatever they mention."""
@@ -662,7 +662,7 @@ def _may_be_missed(it: Item) -> bool:
 
 
 def _quiet(items: dict[Any, Item]) -> None:
-    """Mark what's kept as a pattern but left out of the report (D146). Local file I/O is
+    """Mark what's kept as a pattern but left out of the report. Local file I/O is
     quiet unless the same file library is used by more than one application in the
     repository (code outside every application counts as one): a model a training script
     saves and a service loads is a hand-off; a service's own temporary files aren't."""
@@ -687,7 +687,7 @@ def _unread_files(
     noise: list[str] | None = None,
     ignored: set[tuple[str, str]] | None = None,
 ) -> None:
-    """Files no rule looked at (D122), grouped by extension and where they sit, so 40
+    """Files no rule looked at, grouped by extension and where they sit, so 40
     repositories' `*.xyz under resources/flows/` is one pattern. Noise and build files aren't
     listed, nor file names someone ignored within their pattern (`ignored`: fingerprint and
     name); everything else is, ranked low until something says it matters."""
@@ -720,7 +720,7 @@ FILE_TOKEN = re.compile(r"[\w][\w.-]*")  # a file name, as code writes it in a p
 
 def _referenced(items: dict[Any, Item], root: Path | None, read: set[str]) -> None:
     """An unread file whose name the code mentions (`getResource("flows/order.xyz")`) is
-    probably wiring, not noise: evidence that ranks its pattern higher (D122)."""
+    probably wiring, not noise: evidence that ranks its pattern higher."""
     unread = [i for i in items.values() if i.signal == "unread_file"]
     if root is None or not unread:
         return
@@ -754,7 +754,7 @@ def _unread_config(
     item: Any,
     where: Callable[[str | None], str],
 ) -> None:
-    """Config keys set in the repository that nothing read (D122): no rule stated a fact from
+    """Config keys set in the repository that nothing read: no rule stated a fact from
     them and no `${placeholder}` or settings lookup used them. Grouped by prefix
     (`acme.messaging.*`), so one framework's settings are one pattern. Noise prefixes from the
     packs (`logging`, `management`, …) aren't listed."""
@@ -763,7 +763,7 @@ def _unread_config(
         if not isinstance(key, str) or key in used or _under(key, noise):
             continue
         # A settings class's field (pydantic's `DATABASE_URL: str = ...`) is code the app
-        # reads as `settings.X`, not a config file nothing reads (D146)
+        # reads as `settings.X`, not a config file nothing reads
         if PurePosixPath(clue.origin.file).suffix in CODE_SUFFIXES:
             continue
         prefix = config_prefix(key)
@@ -804,7 +804,7 @@ def known_names(plan: GraphPlan) -> set[str]:
 
 def _names_known(items: dict[Any, Item], plan: GraphPlan, root: Path | None) -> None:
     """An unread file or config value that names a topic, endpoint, table, or application
-    already in the graph is probably wiring (D122): evidence that ranks it higher."""
+    already in the graph is probably wiring: evidence that ranks it higher."""
     unread = [i for i in items.values() if i.signal in ("unread_file", "unread_config")]
     names = known_names(plan)
     if not unread or not names:
@@ -829,7 +829,7 @@ def _names_known(items: dict[Any, Item], plan: GraphPlan, root: Path | None) -> 
 
 def _in_library(items: dict[Any, Item], in_library: Callable[[str], bool]) -> None:
     """A pattern that occurs inside one of the organization's own library modules is likely
-    part of an internal framework (D122): evidence that ranks it higher."""
+    part of an internal framework: evidence that ranks it higher."""
     for it in items.values():
         if any(file and in_library(file) for file, _, _ in it.keys):
             it.evidence.add("in_internal_library")
@@ -960,9 +960,9 @@ def _matched_lines(x: Extraction) -> set[tuple[str, int]]:
 
 
 def _unresolved_types(r: Resolvers) -> int:
-    """How many calls ran through a library type Steno can't see (no dependency JARs, D69):
+    """How many calls ran through a library type Steno can't see (no dependency JARs):
     a number for deciding about JARs, not items. A chain through a library type is accounted
-    for at the library call it starts from (D101)."""
+    for at the library call it starts from."""
     return sum(
         1
         for resolver in r
