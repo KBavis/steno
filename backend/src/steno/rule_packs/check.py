@@ -1,10 +1,10 @@
-"""`steno rules check`: what a rule must pass before its pull request opens (rule-curation §6,
-D147). Its own tests (`steno rules test`) prove it on the samples its author chose; these run it
+"""`steno rules check`: what a rule must pass before its pull request opens (rule-curation §6).
+Its own tests (`steno rules test`) prove it on the samples its author chose; these run it
 where its pattern really occurs:
 
 - **Recall:** every file the pattern occurs in (up to `MAX_FILES`), read from the git host at the
   ingested commit: which the rule explains, and which it misses ("explains 3 of 5").
-- **Surface:** the rule must state a surface fact (D136): an entry point, a table, topic, or
+- **Surface:** the rule must state a surface fact: an entry point, a table, topic, or
   endpoint effect, an external call, a claim. A rule that doesn't is refused: the pattern
   should be marked harmless (`ignored`) instead.
 - **Identity:** the application names its claims would create. A generic name (`backend`,
@@ -63,7 +63,7 @@ class RuleCheck:
     errors: list[str] = field(default_factory=list)
     # Matched, but the fact needs files the check doesn't load (models, settings)
     incomplete: list[str] = field(default_factory=list)
-    surface: bool = True  # the rule states a surface fact (D136)
+    surface: bool = True  # the rule states a surface fact
 
     def problems(self) -> list[str]:
         """What a reviewer must know, each in one line; empty when the rule is clean."""

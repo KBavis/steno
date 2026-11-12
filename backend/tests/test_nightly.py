@@ -1,4 +1,4 @@
-"""When the nightly run is due (D59)."""
+"""When the nightly run is due."""
 
 from datetime import UTC, datetime
 

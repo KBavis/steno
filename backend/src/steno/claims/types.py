@@ -41,7 +41,7 @@ CLAIM_TYPES: dict[str, ClaimType] = {
         ClaimType(
             "schedule", "Schedules", "evidence", ("application",), ("cron", "every", "command")
         ),
-        # A gateway's route rule (D132): requests matching `path` (and `methods`) go to
+        # A gateway's route rule: requests matching `path` (and `methods`) go to
         # `target` (`lb://vets-service`, `http://orders:8080`) after the rewrite. `gateway` is
         # the application (or, for infrastructure, the router's name) that holds it; without
         # it, the application whose module holds the claim's file
@@ -88,8 +88,8 @@ def validate(claim_type: str, fields: dict[str, Any]) -> dict[str, Any]:
 
 
 def channel_key(channel: Any) -> str:
-    """`{KafkaTopic: payment.settled}` → `kafkatopic:payment.settled`, the graph's channel ID
-    (D61), so a claim and a code fact about one topic share a key."""
+    """`{KafkaTopic: payment.settled}` → `kafkatopic:payment.settled`, the graph's channel ID,
+    so a claim and a code fact about one topic share a key."""
     if not isinstance(channel, dict) or len(channel) != 1:
         raise InvalidClaim(f"a channel is written {{Label: name}}, not {channel!r}")
     ((label, name),) = channel.items()
@@ -118,7 +118,7 @@ def subjects(claim_type: str, fields: dict[str, Any]) -> list[str]:
 
 
 def route_target(target: str) -> str | None:
-    """The application a route's target names (D132): `lb://vets-service` (a service
+    """The application a route's target names: `lb://vets-service` (a service
     registry name), or a bare cluster host (`http://orders:8080`, `orders.shop.svc`); None for
     an outside host (`https://api.example.com`), which is no application."""
     m = re.match(r"^(?:(lb|https?|wss?)://)?([^/:?#]+)", target.strip())

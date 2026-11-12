@@ -1,4 +1,4 @@
-"""The JVM helper's two largest outputs, indexed on disk instead of loaded whole (D127).
+"""The JVM helper's two largest outputs, indexed on disk instead of loaded whole.
 
 Every expression a rule may capture and every function's calls grow with the repository: on
 Elasticsearch they're about 2 GB of JSON, several times that once loaded into Python. The helper

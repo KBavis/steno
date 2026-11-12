@@ -1,4 +1,4 @@
-"""Peak memory per stage, so a repository outgrowing its budget shows up before it fails (D127).
+"""Peak memory per stage, so a repository outgrowing its budget shows up before it fails.
 
 Linux keeps a process's peak resident memory (`VmHWM`); writing `5` to `/proc/self/clear_refs`
 resets it, so each stage measures its own peak. Elsewhere, or when the reset isn't allowed,

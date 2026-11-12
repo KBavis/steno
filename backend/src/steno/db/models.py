@@ -1,7 +1,7 @@
 """Postgres schema: what Steno is told and what it did (docs/how-it-works/storage.md).
 
-One Steno deployment per organization (D34), so no table carries an organization id.
-Neo4j must stay rebuildable from these tables plus git (D36).
+One Steno deployment per organization, so no table carries an organization id.
+Neo4j must stay rebuildable from these tables plus git.
 """
 
 from datetime import datetime
@@ -94,12 +94,12 @@ class RulePackReason(StrEnum):
 
 class JobTrigger(StrEnum):
     INITIAL = "initial"
-    NIGHTLY = "nightly"  # D59: the nightly run, for a repository whose default branch moved
+    NIGHTLY = "nightly"  # the nightly run, for a repository whose default branch moved
     MANUAL = "manual"
 
 
 class JobMode(StrEnum):
-    # Every run analyzes the whole repository and writes only what changed (D59)
+    # Every run analyzes the whole repository and writes only what changed
     FULL = "full"
     DRY_RUN = "dry_run"
 
@@ -146,23 +146,23 @@ class CoverageKind(StrEnum):
 
 
 class PatternState(StrEnum):
-    """Where a pattern stands (D121, D147): kept across runs, so a decision once made stays
+    """Where a pattern stands: kept across runs, so a decision once made stays
     made. The rule author sets ignored, expected, and proposed; Steno sets covered."""
 
     OPEN = "open"  # not dealt with yet
     PROPOSED = "proposed"  # a rule's pull request is open; the note links it
     COVERED = "covered"  # no occurrences left: a rule explains it, or the code is gone
     IGNORED = "ignored"  # harmless: never reaches the surface, decided once
-    EXPECTED = "expected"  # a real gap, legitimately outside the organization (D146)
+    EXPECTED = "expected"  # a real gap, legitimately outside the organization
 
 
 class CoverageStatus(StrEnum):
-    """Triage state, kept across runs (D62)."""
+    """Triage state, kept across runs."""
 
     UNEXPLAINED = "unexplained"
     IGNORED = "ignored"  # looked at: not I/O
     EXPLAINED = "explained"  # a rule now covers it
-    EXPECTED = "expected"  # a real gap, legitimately outside the organization (D146)
+    EXPECTED = "expected"  # a real gap, legitimately outside the organization
 
 
 class ChangeKind(StrEnum):
@@ -177,7 +177,7 @@ class ChangeKind(StrEnum):
 
 
 class Organization(Base):
-    """The organization this deployment serves: exactly one row (D34). Root of the space tree."""
+    """The organization this deployment serves: exactly one row. Root of the space tree."""
 
     __tablename__ = "organization"
     __table_args__ = (CheckConstraint("id = 1", name="singleton"),)
@@ -188,12 +188,12 @@ class Organization(Base):
     # Set when the admin finishes the onboarding flow; until then the UI shows it
     onboarded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # What the organization chooses for its deployment, set on the Settings page (onboarding
-    # later): {"llm": {"provider", "model"}} for generated summaries (D143)
+    # later): {"llm": {"provider", "model"}} for generated summaries
     settings: Mapped[dict[str, Any]] = mapped_column(default=dict, server_default="{}")
 
 
 class Connector(Base):
-    """A source system plus a scope, e.g. a Bitbucket workspace (D30)."""
+    """A source system plus a scope, e.g. a Bitbucket workspace."""
 
     __tablename__ = "connector"
 
@@ -207,7 +207,7 @@ class Connector(Base):
 
 
 class Space(Base):
-    """An admin-declared space (D27). Can nest. Projected into Neo4j (D33)."""
+    """An admin-declared space. Can nest. Projected into Neo4j."""
 
     __tablename__ = "space"
     __table_args__ = (UniqueConstraint("parent_id", "name"),)
@@ -236,7 +236,7 @@ class Repository(Base):
 
 
 class GlossaryTerm(Base):
-    """Human-declared vocabulary (D28)."""
+    """Human-declared vocabulary."""
 
     __tablename__ = "glossary_term"
     __table_args__ = (UniqueConstraint("space_id", "term"),)
@@ -277,7 +277,7 @@ class RepositoryRulePack(Base):
 
 
 class IngestionJob(Base):
-    """Every ingestion job. Also the work queue: workers claim with SKIP LOCKED (D35)."""
+    """Every ingestion job. Also the work queue: workers claim with SKIP LOCKED."""
 
     __tablename__ = "ingestion_job"
     __table_args__ = (
@@ -307,7 +307,7 @@ class IngestionJob(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error: Mapped[str | None] = mapped_column(Text)
     stats: Mapped[dict[str, Any]] = mapped_column(default=dict)
-    # The machine running it and the memory it reserved there (D128): a worker claims a job
+    # The machine running it and the memory it reserved there: a worker claims a job
     # only when its reservation fits what that machine has left
     host: Mapped[str | None] = mapped_column(String(200))
     memory_reserved_mb: Mapped[int | None] = mapped_column(Integer)
@@ -332,7 +332,7 @@ class IngestionStage(Base):
 
 
 class ScheduledRun(Base):
-    """When each scheduled task last ran, so only one worker runs it per slot (D59)."""
+    """When each scheduled task last ran, so only one worker runs it per slot."""
 
     __tablename__ = "scheduled_run"
 
@@ -355,7 +355,7 @@ class CoverageItem(Base):
     # Finer than kind (unknown_host, dropped_match, external_call, …), and how it reads
     signal: Mapped[str] = mapped_column(String(32), default="")
     label: Mapped[str] = mapped_column(Text, default="")
-    # The key, with kind: the same gap in another run or repository is the same item (D62)
+    # The key, with kind: the same gap in another run or repository is the same item
     target_symbol: Mapped[str] = mapped_column(Text)
     occurrences: Mapped[int] = mapped_column(Integer, default=0)
     samples: Mapped[list[Any]] = mapped_column(default=list)
@@ -364,12 +364,12 @@ class CoverageItem(Base):
     status: Mapped[CoverageStatus] = mapped_column(
         _enum(CoverageStatus, "coverage_status"), default=CoverageStatus.UNEXPLAINED
     )
-    # Kept, but left out of the report (D146): input for rule authors, or rule health
+    # Kept, but left out of the report: input for rule authors, or rule health
     quiet: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
 
 class CoveragePattern(Base):
-    """One kind of thing no rule explains, across the organization (D121): named by what it
+    """One kind of thing no rule explains, across the organization: named by what it
     is (`unknown_hook:com.acme.messaging.AcmeHandler`), never by where. Its reach is counted
     from the occurrences in each repository's latest run."""
 
@@ -380,7 +380,7 @@ class CoveragePattern(Base):
     kind: Mapped[CoverageKind] = mapped_column(_enum(CoverageKind, "coverage_kind"))
     signal: Mapped[str] = mapped_column(String(32))
     label: Mapped[str] = mapped_column(Text, default="")
-    # What it belongs to, for clustering into frameworks (D123): a library, a package root,
+    # What it belongs to, for clustering into frameworks: a library, a package root,
     # a config prefix; None for an application's own code
     owner: Mapped[str | None] = mapped_column(Text)
     state: Mapped[PatternState] = mapped_column(
@@ -390,20 +390,20 @@ class CoveragePattern(Base):
     applications: Mapped[int] = mapped_column(Integer, default=0)
     occurrences: Mapped[int] = mapped_column(Integer, default=0)
     score: Mapped[float] = mapped_column(Float, default=0.0)
-    # Why it may matter beyond its reach (D122): "referenced_by_code", …
+    # Why it may matter beyond its reach: "referenced_by_code", …
     evidence: Mapped[list[Any]] = mapped_column(default=list)
     first_seen_job: Mapped[int | None] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=_now, onupdate=_now
     )
     note: Mapped[str | None] = mapped_column(Text)  # why it's in its state (who, what)
-    # Left out of the report (D146): unread files and settings, library versions
+    # Left out of the report: unread files and settings, library versions
     quiet: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
 
 class CoverageOccurrence(Base):
     """One place a pattern occurs, keyed by its file and enclosing symbol, not its line, so an
-    edit that moves lines isn't new code (D121). A repository's rows are replaced with each
+    edit that moves lines isn't new code. A repository's rows are replaced with each
     run's: what's gone is deleted; what's new keeps the job that first saw it."""
 
     __tablename__ = "coverage_occurrence"
@@ -440,7 +440,7 @@ class IgnoredFile(Base):
 
 
 # ---------------------------------------------------------------------------
-# Identity and claims: what can't be rebuilt from git (D36, D81, D109)
+# Identity and claims: what can't be rebuilt from git
 # ---------------------------------------------------------------------------
 
 
@@ -451,7 +451,7 @@ class IdentityState(StrEnum):
 
 
 class ApplicationIdentity(Base):
-    """An application's permanent Steno ID, its anchors, and its lifecycle (D81–D84;
+    """An application's permanent Steno ID, its anchors, and its lifecycle (
     docs/how-it-works/ingestion/identify-and-reconcile.md §2)."""
 
     __tablename__ = "application_identity"
@@ -549,7 +549,7 @@ class UnmatchedName(Base):
 
 
 class Claim(Base):
-    """One witness's statement about the system (D109;
+    """One witness's statement about the system (
     docs/how-it-works/ingestion/claims-and-reconcile.md §5). Each run replaces its own claims:
     one no longer found gets `removed_job`, kept for history, never compared."""
 
@@ -587,7 +587,7 @@ class Claim(Base):
 
 
 class FactChange(Base):
-    """One row per fact a job added, removed, or modified (D18)."""
+    """One row per fact a job added, removed, or modified."""
 
     __tablename__ = "fact_change"
 
@@ -641,7 +641,7 @@ class LlmCall(Base):
 
 
 class LlmOutput(Base):
-    """Generated text, cached by input hash so unchanged inputs are never paid for twice (D36)."""
+    """Generated text, cached by input hash so unchanged inputs are never paid for twice."""
 
     __tablename__ = "llm_output"
     __table_args__ = (Index("ix_llm_output_lookup", "node_id", "kind", "input_hash"),)

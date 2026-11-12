@@ -1,4 +1,4 @@
-"""remove Steno's rule drafting job (D147): curation runs, rule proposals, their states
+"""remove Steno's rule drafting job: curation runs, rule proposals, their states
 
 Rules are drafted locally by the rule-pack-author skill; Steno keeps patterns and their
 triage states only. A pattern in a drafting state becomes open; an approved one, proposed.

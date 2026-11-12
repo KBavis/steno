@@ -1,4 +1,4 @@
-"""Interceptors (D103) end to end on a small Spring service: a request filter runs before
+"""Interceptors end to end on a small Spring service: a request filter runs before
 every HTTP flow and reaches the user table through a lambda @Bean; a validator runs only
 where Bean Validation runs it (its validation group); request matchers decide who may call
 each endpoint. Needs the JVM helper (`make resolver`)."""

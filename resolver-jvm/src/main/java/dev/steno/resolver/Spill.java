@@ -12,7 +12,7 @@ import java.util.Map;
 /**
  * The helper's largest outputs, every expression a rule may capture, every function's calls,
  * and every function's description, written to disk as each batch finishes instead of held
- * until the end (D127): on a large repository they're a large share of the heap. The output
+ * until the end: on a large repository they're a large share of the heap. The output
  * file reads the same as before, unless the parts are kept: then expressions and calls are JSON
  * Lines in their own files (an expression per line; a function's symbol and its calls per line),
  * for the reader to index on disk. Functions always go into the output file.

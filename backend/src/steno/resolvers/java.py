@@ -1,4 +1,4 @@
-"""Steno's Java symbol resolver (D69, docs/how-it-works/ingestion/resolvers.md §5.2).
+"""Steno's Java symbol resolver (docs/how-it-works/ingestion/resolvers.md §5.2).
 
 Java's symbol table lives in the JVM helper (`resolver-jvm/`, JavaParser's symbol solver plus
 Steno's own lookups). Asking it one question at a time would cost a round trip each, so the
@@ -9,7 +9,7 @@ resolver looks the answers up and offers the same interface as the Python one.
 
 It reads the repository's source and the JDK; dependency JARs come later. A library type is still
 named from its import, but what a library method returns isn't known, so a chain through one stops
-there, and the call says so (D71). Lombok-generated members are added by the helper (D72).
+there, and the call says so. Lombok-generated members are added by the helper.
 """
 
 import json
@@ -128,7 +128,7 @@ class JavaResolver:
         self.failed: str | None = None
         self.properties: dict[str, Any] = {}
         self.return_hints: dict[tuple[str, str], str] = {}  # not used yet: no library types
-        # Expressions and calls, indexed on disk for as long as this resolver lives (D127)
+        # Expressions and calls, indexed on disk for as long as this resolver lives
         # Under the workspaces folder, so a worker that's killed leaves nothing elsewhere: the
         # next `steno job recover` removes it
         indexes = get_settings().index_dir
@@ -236,7 +236,7 @@ class JavaResolver:
         self, sources: list[Path], jars: list[Path], batch: int, parts: Path
     ) -> dict[str, Any]:
         """The whole repository failed even with more heap: resolve each build module on its
-        own, so one module that can't be resolved is a gap and the rest still are (D127). A
+        own, so one module that can't be resolved is a gap and the rest still are. A
         call from one module into another can't be resolved this way, and says so."""
         merged: dict[str, Any] = {"types": [], "functions": [], "imports": {}, "errors": []}
         done: list[str] = []
@@ -370,7 +370,7 @@ class JavaResolver:
         return out if isinstance(out, str) and re.sub(r"\{[^{}]*\}", "", out) else None
 
     def _fill(self, text: str, placeholders: bool = False) -> Any:
-        """Spring's `${key}` and `${key:default}` from config (the property map, D70), followed
+        """Spring's `${key}` and `${key:default}` from config (the property map), followed
         through values that name other keys (`${orders.endpoint}` → `${orders.url}/items`). A
         key config doesn't set and no default for, or keys that only name each other: the value
         is unknown, or a `{key}` placeholder."""
@@ -538,7 +538,7 @@ class JavaResolver:
 
     def hook_candidates(self) -> Iterator[Hook]:
         """Framework types this code extends or implements, and framework annotations on its
-        classes and methods (D101). The framework calls a hook class's overriding methods."""
+        classes and methods. The framework calls a hook class's overriding methods."""
         for t in self.types.values():
             if t.kind == "annotation":
                 continue
@@ -595,7 +595,7 @@ class JavaResolver:
 
     def invocations(self, fn: JavaFunction, self_type: str | None = None) -> list[Invocation]:
         """Calls from `fn` to first-party functions, in source order. A call on `this` from an
-        inherited method, read as `self_type`, runs `self_type`'s version (D58)."""
+        inherited method, read as `self_type`, runs `self_type`'s version."""
         out = []
         for c in self._calls.get(fn.symbol, []):
             callee = c.get("callee")
@@ -608,7 +608,7 @@ class JavaResolver:
                     callee, candidates = own, ()
             receiver = c.get("receiver_type")
             container = self._functions[callee].container
-            # Called on a subclass that inherits the method: which subclass matters (D58)
+            # Called on a subclass that inherits the method: which subclass matters
             inherited = (
                 receiver
                 if receiver in self.types
@@ -824,13 +824,13 @@ def _split_top(text: str) -> list[str]:
     return [p for p in (p.strip() for p in parts) if p]
 
 
-# The JVM heap for the job running now (MB), sized from its repository's last run (D128);
+# The JVM heap for the job running now (MB), sized from its repository's last run;
 # unset: the configured default
 JVM_HEAP_MB: ContextVar[int | None] = ContextVar("jvm_heap_mb", default=None)
-# Resolve the job running now in batches (D127): its last run ran out of memory
+# Resolve the job running now in batches: its last run ran out of memory
 JVM_BATCHED: ContextVar[bool] = ContextVar("jvm_batched", default=False)
 DEFAULT_BATCH_FILES = 200
-# Resolve the job running now one build module at a time (D127): the whole repository failed
+# Resolve the job running now one build module at a time: the whole repository failed
 # even in batches with more heap
 JVM_BY_MODULE: ContextVar[bool] = ContextVar("jvm_by_module", default=False)
 BUILD_FILES = ("pom.xml", "build.gradle", "build.gradle.kts")
@@ -875,7 +875,7 @@ def run_helper(
     parts: Path | None = None,
 ) -> tuple[dict[str, Any], str | None]:
     """Run the JVM helper over `sources`; its output, or why it failed. `batch_files` > 0
-    resolves method bodies that many files at a time (D127). With `parts`, expressions and
+    resolves method bodies that many files at a time. With `parts`, expressions and
     calls are left there as JSON Lines for `HelperIndex` instead of in the output."""
     settings = get_settings()
     lib = settings.resolver_jvm_dir / "lib"
@@ -922,7 +922,7 @@ def run_helper(
 
 
 def compare_batched(root: Path, batch_files: int) -> dict[str, Any]:
-    """Resolve a repository in one pass and in batches, and list every difference (D127): the
+    """Resolve a repository in one pass and in batches, and list every difference: the
     batched path replaces the single pass only when this is empty on real repositories."""
     sources = [p for p in source_files(root, (".java",)) if not is_test_file(p.relative_to(root))]
     level = java_version(root)

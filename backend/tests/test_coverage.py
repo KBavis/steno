@@ -84,9 +84,9 @@ def test_each_gap_is_an_item(tmp_path):
     items, _ = _report(tmp_path)
     assert set(items) == {
         ("unknown_host", "app.Tenants"),
-        # One item per library; the library item isn't repeated beside its calls (D146)
+        # One item per library; the library item isn't repeated beside its calls
         ("external_call", "redis"),
-        # Nothing in the code starts it, but it does real work: a flow, flagged (D74), one
+        # Nothing in the code starts it, but it does real work: a flow, flagged, one
         # item per module
         ("inferred_entry", "app"),
     }
@@ -94,7 +94,7 @@ def test_each_gap_is_an_item(tmp_path):
 
 def test_unparsed_files_are_a_number_not_an_item(tmp_path):
     _, metrics = _report(tmp_path)
-    assert metrics["unparsed_files"] == 1  # broken.py (D146)
+    assert metrics["unparsed_files"] == 1  # broken.py
 
 
 def test_unknown_hosts_keep_their_url_template(tmp_path):
@@ -111,7 +111,7 @@ def test_completeness_counts_explained_io(tmp_path):
 
 
 def test_unread_files_are_grouped_by_convention_and_noise_is_skipped():
-    """D122: files no rule read are one pattern per extension and place; noise isn't listed."""
+    """files no rule read are one pattern per extension and place; noise isn't listed."""
     from steno.coverage.collect import _unread_files, convention
 
     assert convention("svc-a/src/main/resources/flows/order.xyz") == "resources/flows/"
@@ -157,7 +157,7 @@ def test_code_in_a_language_no_pack_reads_is_one_pattern():
 
 
 def test_an_unread_file_the_code_names_has_evidence(tmp_path):
-    """D122: `getResource("flows/order.xyz")` makes order.xyz's pattern rank higher."""
+    """`getResource("flows/order.xyz")` makes order.xyz's pattern rank higher."""
     from steno.coverage.collect import Item, _referenced
 
     (tmp_path / "A.java").write_text('class A { void f() { load("flows/order.xyz"); } }')
@@ -179,7 +179,7 @@ def _noise() -> list[str]:
 
 
 def test_the_noise_pack_lists_nothing_a_facet_reads():
-    """D122: noise is checked against the facets. Migrations (Data), API contracts and schemas
+    """noise is checked against the facets. Migrations (Data), API contracts and schemas
     (Interfaces), deploy, topic, and catalog files (PLATFORM, DECLARED) are never noise."""
     from steno.coverage.collect import is_noise
 
@@ -203,7 +203,7 @@ def test_the_noise_pack_lists_nothing_a_facet_reads():
 
 
 def test_config_no_rule_read_is_grouped_by_prefix():
-    """D122: keys set in config that nothing read; framework noise prefixes aren't listed."""
+    """keys set in config that nothing read; framework noise prefixes aren't listed."""
     from steno.coverage.collect import Item, _unread_config
     from steno.extraction.facts import ClueFact, Extraction, Origin
 
@@ -237,7 +237,7 @@ def test_the_property_map_remembers_what_was_read():
 
 
 def test_an_unread_value_naming_a_known_topic_is_evidence(tmp_path):
-    """D122: config that names a topic already in the graph is probably wiring."""
+    """config that names a topic already in the graph is probably wiring."""
     from steno.coverage.collect import Item, _names_known
     from steno.graph.build import GraphPlan
 

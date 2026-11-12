@@ -40,7 +40,7 @@ def test_a_long_answer_is_cut_and_says_so():
 
 
 def test_stops_fold_into_the_shown_step_above():
-    """A call Steno couldn't follow stays visible however deep it is (D71)."""
+    """A call Steno couldn't follow stays visible however deep it is."""
     stop = "web.retrieve() at line 61: library type (org.springframework.web)"
     steps = [*STEPS[:3], {**STEPS[3], "stops": [stop]}, *STEPS[4:]]
     shown = {s["path"]: s for s in _fold(steps, 2, None)}
@@ -77,7 +77,7 @@ def test_a_base_url_from_config_keeps_its_key_and_the_path():
 
 
 def test_completeness_never_claims_to_be_complete():
-    """An answer says what it checked and what it couldn't, not that it's complete (D118)."""
+    """An answer says what it checked and what it couldn't, not that it's complete."""
     out = _completeness(["the code of 3 applications"], {}, {})
     assert out == {"checked": ["the code of 3 applications"], "not_checked": {}}
     assert "complete" not in out
@@ -90,7 +90,7 @@ def test_completeness_carries_unexplained_counts():
 
 
 def test_sources_group_citations_by_repository():
-    """What a consumer would fetch: each repository's folders and why it matters (D119)."""
+    """What a consumer would fetch: each repository's folders and why it matters."""
     cites = [
         {"claim": "POST /orders is handled by A", "repo": "orders", "commit": "a1b2c3d4e5f6",
          "file": "src/main/java/com/x/orders/A.java"},
@@ -201,7 +201,7 @@ def test_a_failing_marker_lookup_never_fails_an_answer():
 
 
 def test_reach_lists_each_function_once_by_file_without_order():
-    """D140: the reach view keeps which functions a flow reaches and where, not their order,
+    """the reach view keeps which functions a flow reaches and where, not their order,
     nesting, or how often they're called."""
 
     def entry(path, symbol, file, start, end):

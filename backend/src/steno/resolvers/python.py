@@ -1,4 +1,4 @@
-"""Steno's own Python symbol resolver (D51, docs/how-it-works/ingestion/resolvers.md §4).
+"""Steno's own Python symbol resolver (docs/how-it-works/ingestion/resolvers.md §4).
 
 It answers three questions about names in a repository's Python code:
 - What does this name refer to?   `symbol_of`  (job_router → app.api.routers.job.router)
@@ -1125,7 +1125,7 @@ class PythonResolver:
         return sorted(found, key=lambda i: (i.line, i.column))
 
     def unresolved_calls(self, fn: FunctionInfo) -> list[UnresolvedCall]:
-        """Calls in `fn` this resolver couldn't follow (D71): a method on a value whose type
+        """Calls in `fn` this resolver couldn't follow: a method on a value whose type
         isn't known, or a function held in a parameter."""
         if fn.qualname not in self._unresolved:
             self.invocations(fn)
@@ -1264,7 +1264,7 @@ class PythonResolver:
                     )
 
     def hook_candidates(self) -> Iterator[Hook]:
-        """Library base classes and library decorators on this code (D101): a framework runs
+        """Library base classes and library decorators on this code: a framework runs
         it. `@router.post(...)` is a hook a rule explains; `@mcp.tool()` may be one no rule
         does."""
         for mod in self.modules.values():
@@ -1299,7 +1299,7 @@ class PythonResolver:
         """The library a symbol belongs to; None for first-party code, builtins, and standard
         library modules that don't do I/O."""
         top = symbol.split(".")[0]
-        if symbol == "builtins.open":  # reading or writing a file (D101)
+        if symbol == "builtins.open":  # reading or writing a file
             return "builtins"
         if top in self._first_party or top == "builtins":
             return None

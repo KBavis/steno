@@ -1,4 +1,4 @@
-"""Search top-down (D2): where the matches are comes first, and each application's best hit
+"""Search top-down: where the matches are comes first, and each application's best hit
 takes its turn, so one application with many matches can't crowd the others off the page."""
 
 from steno.mcp.tools import _digest_matched, _interleave, _matched, _where_summary

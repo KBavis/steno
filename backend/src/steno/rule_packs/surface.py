@@ -1,8 +1,8 @@
-"""What's on an application's surface (D136): the facts a rule may state.
+"""What's on an application's surface: the facts a rule may state.
 
 Used by the coverage report (a dropped match is an item only when its rule states a surface
-fact, D146) and by `steno rules check` (a rule that states no surface fact is refused: the
-pattern should be marked harmless instead, D147).
+fact) and by `steno rules check` (a rule that states no surface fact is refused: the
+pattern should be marked harmless instead).
 """
 
 from typing import Any

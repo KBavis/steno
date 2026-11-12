@@ -4,7 +4,7 @@ See docs/how-it-works/ingestion/coverage-report.md.
 
 Read at any scope of the containment tree, like the graph: the organization, a space (its
 sub-spaces and applications), or one application. Each scope rolls up its applications'
-numbers, lists its children worst first, and groups its items by what was missed (D146: the
+numbers, lists its children worst first, and groups its items by what was missed (the
 catalog's sections, connections between applications first), ranked within each group by
 reach (how many applications and spaces one fix would help). Quiet items (unread files, rule
 health) are left out unless asked for. One-sided joins are read from the graph. Triage applies
@@ -56,7 +56,7 @@ class Triage(BaseModel):
 @router.get("")
 def report(session: SessionDep, scope: str = "org", quiet: bool = False) -> dict[str, Any]:
     """`scope`: `org`, `space:<id>` (or `space:none` for applications no space owns), or
-    `app:<name>`. `quiet`: include what's kept but left out of the report (D146)."""
+    `app:<name>`. `quiet`: include what's kept but left out of the report."""
     latest = latest_runs(session)
     repos = {r.id: r for r in session.scalars(select(Repository))}
     spaces = {s.id: s for s in session.scalars(select(Space))}
@@ -280,7 +280,7 @@ def _one_sided(
     in_scope: set[str],
     everything: bool,
 ) -> list[dict[str, Any]]:
-    """One-sided joins (D146), read from the graph now: the other end may be in a repository
+    """One-sided joins, read from the graph now: the other end may be in a repository
     ingested since. Shown in a scope when an application in it holds the end that exists. A
     pattern triaged expected or ignored carries its status."""
     try:
@@ -431,7 +431,7 @@ def triage(body: Triage, session: SessionDep) -> dict[str, int]:
         raise HTTPException(404, f"no coverage item {body.kind.value} {body.target!r}")
     for row in rows:
         row.status = body.status
-    # The pattern follows (D121): ignored here is ignored everywhere; reopened is open again
+    # The pattern follows: ignored here is ignored everywhere; reopened is open again
     fingerprints = {f"{row.signal}:{row.target_symbol}" for row in rows}
     for pattern in session.scalars(
         select(CoveragePattern).where(CoveragePattern.fingerprint.in_(fingerprints))

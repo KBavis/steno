@@ -1,4 +1,4 @@
-"""The routing block (D142) with the stand-in: which spaces, applications, and flows, from
+"""The routing block with the stand-in: which spaces, applications, and flows, from
 search's signals; uncalibrated, so no bands; a shortlist when the flows can't be told apart."""
 
 from steno.decisions.base import (

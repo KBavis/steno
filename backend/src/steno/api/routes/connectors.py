@@ -1,4 +1,4 @@
-"""Connectors: a source system plus a scope (D30)."""
+"""Connectors: a source system plus a scope."""
 
 from fastapi import APIRouter
 from sqlalchemy import select

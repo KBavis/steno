@@ -1,4 +1,4 @@
-"""Traces stored compactly (D63, refined): decoding gives back exactly the entries a flow was
+"""Traces stored compactly (refined): decoding gives back exactly the entries a flow was
 built with, and the old JSON form still reads."""
 
 import json

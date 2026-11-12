@@ -1,4 +1,4 @@
-"""The identity registry in Postgres (D81; docs/how-it-works/storage.md): the Registry that
+"""The identity registry in Postgres (docs/how-it-works/storage.md): the Registry that
 `identify` reads and writes during a job. Other witnesses' names come from the claim store."""
 
 from typing import Any

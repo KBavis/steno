@@ -1,4 +1,4 @@
-"""Each flow's digest (D143): a short, deterministic text of what starts the flow and what it
+"""Each flow's digest: a short, deterministic text of what starts the flow and what it
 does across its application's edge, for keyword search and routing (Jev's Q4) to read.
 
 No LLM. Built from the plan once every flow, step, and rollup edge is in it:
@@ -45,7 +45,7 @@ DOCS = 3
 DOC_DEPTH = 2
 DOC_CHARS = 160
 # The effect lines, in the order they're written: what the flow changes before what it reads,
-# then what crosses to other applications (D136's surface)
+# then what crosses to other applications (the surface)
 LINES = (
     ("WRITES_TO", "WRITES"),
     ("READS_FROM", "READS"),
@@ -131,9 +131,9 @@ class _Index:
 
     def trace(self, flow: str) -> list[dict[str, Any]]:
         """The flow's own trace: without the interceptors that run before its handler (security
-        filters and the like, D103) and what they call. They run in front of many flows, so
+        filters and the like) and what they call. They run in front of many flows, so
         their docs and functions would crowd out what this flow does; the flow keeps them in
-        `interceptors` and its full trace, and what they require is the agent's to read (D138)."""
+        `interceptors` and its full trace, and what they require is the agent's to read."""
         if flow not in self._traces:
             raw = self.plan.nodes[flow].props.get("trace")
             entries = trace_codec.decode(raw) if raw else []
@@ -211,7 +211,7 @@ def _owner(plan: "GraphPlan", index: _Index, interface: str) -> str | None:
 def _entities(
     plan: "GraphPlan", index: _Index, flow: str, out: dict[str, list["GraphEdge"]]
 ) -> list[str]:
-    """The classes the flow takes in and hands on (its trigger's and its calls' payloads, D115),
+    """The classes the flow takes in and hands on (its trigger's and its calls' payloads),
     then those mapped to the tables it touches."""
     found: list[str] = []
     triggers = [e.src for e in index.into.get(flow, []) if e.type == "STARTS"]

@@ -2,7 +2,7 @@ name: steno-pack-spring-cloud-gateway
 version: 0.1.0
 language: java
 source: core
-description: Spring Cloud Gateway - each route in the gateway's YAML config is a route claim (D132), path pattern and rewrite to the service it forwards to
+description: Spring Cloud Gateway - each route in the gateway's YAML config is a route claim, path pattern and rewrite to the service it forwards to
 # The gateway's own config, in its repository: what the application says it routes
 witness_type: CODE
 facets: [Routing]

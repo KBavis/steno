@@ -1,4 +1,4 @@
-"""Peak memory per stage (D127): measured where the platform allows, flagged near a limit."""
+"""Peak memory per stage: measured where the platform allows, flagged near a limit."""
 
 from steno.ingestion import memory
 

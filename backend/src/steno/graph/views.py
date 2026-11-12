@@ -1,4 +1,4 @@
-"""Layer views of the graph: what the UI's Visualize tab draws (D53), and what MCP's
+"""Layer views of the graph: what the UI's Visualize tab draws, and what MCP's
 `get_node` will return. Each view is one layer of the containment tree, with counts and
 aggregated edges instead of everything below it (progressive disclosure).
 
@@ -454,7 +454,7 @@ class GraphViews:
         """A flow as a sequence: a header (its trigger and what it does overall), its steps in
         the order they run, and the data each step reads and writes.
 
-        Read from the flow's trace (D60): every function it calls, depth-first in source
+        Read from the flow's trace: every function it calls, depth-first in source
         order. With `significant_only`, only its Steps are shown (functions with an effect at
         or below them), without repeated calls (their effects are shown where the function
         first runs); the others pass their calls through. Significant entries are drawn as
@@ -491,7 +491,7 @@ class GraphViews:
                     break
                 p = p.rsplit(".", 1)[0] if "." in p else None
             if significant_only and ("step" not in t or t.get("repeat")):
-                # Calls Steno couldn't follow stay visible on the nearest step drawn (D71)
+                # Calls Steno couldn't follow stay visible on the nearest step drawn
                 if t.get("unresolved") and parent_step in by_id:
                     by_id[parent_step]["stops"] += t["unresolved"]
                 continue
@@ -640,9 +640,9 @@ class GraphViews:
                 if k not in PROVENANCE
                 and k not in HIDDEN
                 and not k.startswith(("card", "summary"))
-                and k != "digest"  # what routing reads (D143), not for people
+                and k != "digest"  # what routing reads, not for people
             },
-            # What an application, space, or organization is for (D143), shown as a paragraph
+            # What an application, space, or organization is for, shown as a paragraph
             "summary": props.get("summary"),
             "provenance": {
                 k: props.get(k)
@@ -662,7 +662,7 @@ class GraphViews:
         }
 
     def _trace_entry(self, entry_id: str) -> dict[str, Any]:
-        """One function in a flow's trace. Not a node: read from the flow (D60)."""
+        """One function in a flow's trace. Not a node: read from the flow."""
         flow_id, _, path = entry_id.removeprefix("trace:").rpartition("#")
         rows = self._read("MATCH (fl:Flow {id: $id}) RETURN fl", id=flow_id)
         entry = (
@@ -743,7 +743,7 @@ class GraphViews:
 
     def search_hits(self, text: str, names_limit: int = 50, kind: str | None = None) -> "Hits":
         """Every match, for searching top-down: nodes whose names, flow digests, or summaries
-        (D143) match (full-text, best first), and every flow whose trace runs a function whose
+        match (full-text, best first), and every flow whose trace runs a function whose
         name contains the words, with the flow's application and space, so matches can be
         grouped by where they are.
 

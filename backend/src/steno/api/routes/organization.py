@@ -1,5 +1,5 @@
-"""The organization this deployment serves (one row, D34), its onboarding state, and its
-settings (the LLM that writes summaries, D143)."""
+"""The organization this deployment serves (one row), its onboarding state, and its
+settings (the LLM that writes summaries)."""
 
 from datetime import UTC, datetime
 
@@ -70,7 +70,7 @@ def get_settings_(session: SessionDep) -> OrganizationSettingsOut:
 
 @router.put("/settings", response_model=OrganizationSettingsOut)
 def put_settings(body: OrganizationSettingsIn, session: SessionDep) -> OrganizationSettingsOut:
-    """Choose the LLM the organization uses (D149). Summaries already written stay until their
+    """Choose the LLM the organization uses. Summaries already written stay until their
     inputs change."""
     org = get_organization(session)
     try:

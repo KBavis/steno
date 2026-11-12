@@ -1,4 +1,4 @@
-"""The Java resolver end to end (D69–D72): the JVM helper resolves a small Spring service from
+"""The Java resolver end to end: the JVM helper resolves a small Spring service from
 source and the JDK, Lombok-generated members included, and flows follow it; calls through
 library types Steno can't see stop visibly instead of silently.
 
@@ -262,7 +262,7 @@ def test_library_chain_stops_visibly(engine, repo: Path) -> None:  # type: ignor
     flow = _flow(engine, repo)
     place = decode_trace(flow["trace"])[1]
     stops = place.get("unresolved", [])
-    # web.post() is a WebClient call (I/O-capable, D101) and no rule in this pack explains
+    # web.post() is a WebClient call (I/O-capable) and no rule in this pack explains
     # it, so it's the stop; the builder calls after it are code detail, not listed
     assert [(s["reason"], s.get("library")) for s in stops] == [
         ("I/O call no rule explains", "org.springframework.web")
@@ -272,12 +272,12 @@ def test_library_chain_stops_visibly(engine, repo: Path) -> None:  # type: ignor
 
 
 def test_coverage_accounts_for_io_calls_and_hooks(engine, repo: Path) -> None:  # type: ignore[no-untyped-def]
-    """D101: the unexplained WebClient call is an item; chains through library types are a
+    """the unexplained WebClient call is an item; chains through library types are a
     number for the JAR decision, not items."""
     plan = _flow(engine, repo)["plan"]
     report = collect(engine.out, engine.resolver, plan, [PACK])
     calls = [i for i in report.items if i.signal == "external_call"]
-    # One item per library (D146), with the method inside
+    # One item per library, with the method inside
     assert [i.target for i in calls] == ["org.springframework.web"]
     assert calls[0].values == {"org.springframework.web.reactive.function.client.WebClient#post"}
     assert not [i for i in report.items if i.signal == "unresolved_type"]
@@ -322,7 +322,7 @@ def test_missing_helper_is_an_error_not_a_crash(
 
 def test_batched_resolution_matches_one_pass(repo: Path) -> None:
     """Resolving method bodies a file at a time against a declaration index gives the same
-    answers as one pass over everything (D127)."""
+    answers as one pass over everything."""
     out = compare_batched(repo, batch_files=1)
     assert out["differences"] == []
     assert out["batched"]["batches"] == out["files"]

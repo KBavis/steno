@@ -4,7 +4,7 @@ Each repository is built alone, so a call to another repository's service ends a
 `ExternalSystem`. Identity knows every application's names across repositories, so reconcile
 joins them: a host names an application (`route_target`), and the application's endpoint with
 that method and path is the call's target. Never from a config key's name or a path alone: a
-path doesn't say which service a call reaches (D64).
+path doesn't say which service a call reaches.
 
 Each link says how sure it is. An exact name is `confirmed`; a name with a part set at runtime
 (`shop-${ROLE}-orders`) that fits one application is `inferred`. The call's own edge stays, so

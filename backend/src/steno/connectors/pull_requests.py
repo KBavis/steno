@@ -1,4 +1,4 @@
-"""Whether a pull request is still open, from the git host that holds it (D147).
+"""Whether a pull request is still open, from the git host that holds it.
 
 The rule author marks a pattern `proposed` with its pull request's URL. Each coverage run asks
 the host what became of it: GitHub, Bitbucket Cloud, or Bitbucket Server / Data Center. Anything

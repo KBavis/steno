@@ -1,4 +1,4 @@
-"""The work queue is the `ingestion_job` table (D35): no broker.
+"""The work queue is the `ingestion_job` table: no broker.
 
 Workers claim the oldest queued job with `FOR UPDATE SKIP LOCKED`, so several workers can
 poll at once without claiming the same job.
@@ -6,7 +6,7 @@ poll at once without claiming the same job.
 - **One job per repository at a time.** A unique index allows one queued-or-running job per
   repository, so a second run can't be queued while one is waiting or running: two runs would
   race on the repository's graph and change history.
-- **Only what fits the machine** (D128). A job reserves the memory its repository needed last
+- **Only what fits the machine**. A job reserves the memory its repository needed last
   time; a worker claims it only when that fits what its machine has left (`resources.py`).
   `max_parallel_jobs` is a ceiling across every machine.
 """
@@ -146,7 +146,7 @@ def claim_next(
 
 
 def _record_wait(job: IngestionJob, plan: Plan, machine: Machine, running_here: int) -> None:
-    """Say on the queued job why it isn't starting (D134), so a job that waits isn't a mystery:
+    """Say on the queued job why it isn't starting, so a job that waits isn't a mystery:
     what it needs and what is free. Written only when that changes, not on every poll. A job
     bigger than this machine's whole memory budget fails now: waiting can't help."""
     if running_here == 0 and can_never_fit(plan.reserve_mb, machine):

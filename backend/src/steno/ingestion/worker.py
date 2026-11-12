@@ -106,7 +106,7 @@ def run_once() -> bool:
 
 
 def check_schedule() -> None:
-    """Queue the nightly runs if they're due (D59)."""
+    """Queue the nightly runs if they're due."""
     try:
         with session_scope() as session:
             nightly.maybe_run(session)
@@ -140,13 +140,13 @@ def run_forever(schedule: bool = True) -> None:
 
 def processes_for(m: Machine) -> int:
     """Worker processes when none are configured: one per CPU, up to 8. Idle ones only poll;
-    what runs at once is decided by memory when each claims (D128)."""
+    what runs at once is decided by memory when each claims."""
     return get_settings().worker_processes or min(m.cpus, 8)
 
 
 def run_pool(processes: int) -> None:
     """Run `processes` workers side by side, each claiming one job at a time, and only when
-    the job fits this machine's memory (D128). `max_parallel_jobs` caps jobs across every
+    the job fits this machine's memory. `max_parallel_jobs` caps jobs across every
     machine. Ctrl+C (or SIGTERM) stops each worker after its current job."""
     ctx = multiprocessing.get_context("spawn")
     pool = [

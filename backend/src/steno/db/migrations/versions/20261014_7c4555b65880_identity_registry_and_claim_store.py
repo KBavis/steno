@@ -1,7 +1,7 @@
 """identity registry and claim store
 
-The identity registry (D81–D84): every application's permanent Steno ID, its names, its
-lifecycle, admin links, and names no application matched. The claim store (D109): what
+The identity registry: every application's permanent Steno ID, its names, its
+lifecycle, admin links, and names no application matched. The claim store: what
 PLATFORM, DECLARED, and ADMIN witnesses say. And the identify and reconcile stages.
 
 Revision ID: 7c4555b65880

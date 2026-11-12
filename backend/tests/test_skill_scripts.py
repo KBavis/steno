@@ -1,5 +1,5 @@
 """The rule-pack-author skill's helper scripts: where a pull request goes, on any host, and
-scratch clones that get deleted (D147, D148)."""
+scratch clones that get deleted."""
 
 import importlib.util
 import os

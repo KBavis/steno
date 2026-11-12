@@ -1,5 +1,5 @@
 """A repository the Java resolver can't read whole is read module by module, and a module that
-still fails is a gap while the rest are resolved (D127)."""
+still fails is a gap while the rest are resolved."""
 
 import contextvars
 import json

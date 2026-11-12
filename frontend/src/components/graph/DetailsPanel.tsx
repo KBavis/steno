@@ -73,7 +73,7 @@ export function DetailsPanel({
         <div className="gpanel-title">
           <div className="gpanel-kind">
             {style.label}
-            {/* An application's kinds (D85), from what starts its flows */}
+            {/* An application's kinds, from what starts its flows */}
             {['Service', 'Consumer', 'Gateway', 'Job'].filter((k) => detail.labels.includes(k)).map((k) => ` · ${k}`)}
           </div>
           <h3>{detail.label}</h3>

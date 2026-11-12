@@ -4,7 +4,7 @@ docs/how-it-works/graph-reference.md §3, Module roles. A Module is the ecosyste
 (a Python
 project, an npm package, a Maven/Gradle module); a `:Deployable` module produces a deployable
 and gets an Application (the role was `:Service` until 2026-10-27, renamed so it doesn't collide
-with the Application kind, D85). Phase 1 detection (Proposed; docs/plan/decisions.md lists the
+with the Application kind). Phase 1 detection (Proposed; docs/plan/decisions.md lists the
 signals as Open): a module is Deployable when rules found entry points in it.
 """
 

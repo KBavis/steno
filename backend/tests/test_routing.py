@@ -1,4 +1,4 @@
-"""Routing a request through a gateway's routes (D132), at query time."""
+"""Routing a request through a gateway's routes, at query time."""
 
 from steno.graph.routing import inside_path, matches, outside_path, serves, takes
 

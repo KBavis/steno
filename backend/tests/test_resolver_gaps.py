@@ -118,7 +118,7 @@ def test_a_function_passed_through_a_helper_is_reached(tmp_path):
 
 
 def test_calls_the_resolver_cannot_follow_are_reported(tmp_path: Path) -> None:
-    """D71: an untyped receiver is a gap the flow should show; reading parsed JSON isn't."""
+    """an untyped receiver is a gap the flow should show; reading parsed JSON isn't."""
     from steno.resolvers.python import PythonResolver
 
     (tmp_path / "svc.py").write_text(

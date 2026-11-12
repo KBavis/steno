@@ -1,7 +1,7 @@
 """nightly ingestion and coverage triage
 
-D59: jobs are `initial`, `nightly`, or `manual`, and every run is `full` (or a dry run); a
-`scheduled_run` row records when the nightly run last happened. D62: coverage items carry
+Jobs are `initial`, `nightly`, or `manual`, and every run is `full` (or a dry run); a
+`scheduled_run` row records when the nightly run last happened. Coverage items carry
 the report's signal kinds and a triage state (unexplained / ignored / explained).
 
 Revision ID: a4d8c2e6f1b3

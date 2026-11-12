@@ -3,7 +3,7 @@ version: 0.1.0
 language: any
 source: core
 description: >-
-  What's never worth a rule in any organization (D122): images, docs, lock files, editor and
+  What's never worth a rule in any organization: images, docs, lock files, editor and
   CI settings, styling, and framework settings that never wire anything. Checked against the
   facets: SQL migrations, API contracts, schemas, deploy and catalog files are never listed here.
 enabled_when:
@@ -83,8 +83,8 @@ noise:
     - spring.lifecycle
     - spring.web
     - springdoc
-# Libraries whose calls never reach an application's surface, so they're never a library gap
-# (D146). Their file I/O stays a gap: a more specific I/O entry (`torch.save`,
+# Libraries whose calls never reach an application's surface, so they're never a library gap.
+# Their file I/O stays a gap: a more specific I/O entry (`torch.save`,
 # `pathlib.Path.write_text`, `numpy.load`) wins over these. Frameworks with hooks (servlet
 # filters, Spring's context) are never listed here.
 library:

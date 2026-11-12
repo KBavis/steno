@@ -3,7 +3,7 @@ version: 0.2.0
 language: java
 source: core
 description: Spring MVC and WebFlux controllers (endpoints, class-level prefixes), and Spring's HTTP clients (RestTemplate, RestClient, WebClient, @HttpExchange interfaces)
-# Auto-enabled when the build file depends on any of these (D25)
+# Auto-enabled when the build file depends on any of these
 # The library versions these rules are written and tested for (coverage reports others)
 versions:
   org.springframework.boot: ">=2.0, <4"

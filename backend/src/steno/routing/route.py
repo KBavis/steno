@@ -1,4 +1,4 @@
-"""Build the `routing` block of a `search` answer (D142). See `steno.routing`."""
+"""Build the `routing` block of a `search` answer. See `steno.routing`."""
 
 import logging
 import re
@@ -101,7 +101,7 @@ def backend() -> DecisionBackend:
 
 
 def band(confidence: float, calibrated: bool) -> str | None:
-    """high above 0.9, medium 0.5–0.9, low below 0.5 (D142); none when uncalibrated."""
+    """high above 0.9, medium 0.5–0.9, low below 0.5; none when uncalibrated."""
     if not calibrated:
         return None
     return "high" if confidence > 0.9 else "medium" if confidence >= 0.5 else "low"

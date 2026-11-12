@@ -1,4 +1,4 @@
-"""coverage on the surface (D146): quiet items and patterns, the expected state
+"""coverage on the surface: quiet items and patterns, the expected state
 
 Revision ID: 4c2d9e7a1b6f
 Revises: 8b3e5d1f0a7c

@@ -1,4 +1,4 @@
-"""D61: an org's own messaging framework is two rules, a sender and a receiver, and
+"""an org's own messaging framework is two rules, a sender and a receiver, and
 applications connect wherever the channel names match."""
 
 from pathlib import Path

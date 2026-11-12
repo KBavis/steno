@@ -98,7 +98,7 @@ class NodeFact:
         return next((lbl for lbl in reversed(self.labels) if lbl in IDENTITY), self.labels[-1])
 
     def ref(self) -> NodeRef:
-        # An org-defined Interface label (a channel, D61) is identified by its name, like a topic
+        # An org-defined Interface label (a channel) is identified by its name, like a topic
         keys = IDENTITY.get(self.label) or (("name",) if "Interface" in self.labels else ())
         return NodeRef.of(self.label, {k: self.props[k] for k in keys if k in self.props})
 
@@ -141,7 +141,7 @@ class EntryPointFact:
 
 @dataclass
 class InterceptorFact:
-    """Code a framework runs around entry points (D103): a request filter, a validator,
+    """Code a framework runs around entry points: a request filter, a validator,
     middleware. `scope` says which: `{"http": True}` (every HTTP entry point of its
     application), `{"paths": [...]}`, or `{"validates": "<validator class>"}` (where the
     language's resolver decides validation applies)."""
@@ -154,7 +154,7 @@ class InterceptorFact:
 
 @dataclass
 class AccessRule:
-    """A request matcher's access (D103): `requestMatchers(POST, "/auth/**").permitAll()`.
+    """A request matcher's access: `requestMatchers(POST, "/auth/**").permitAll()`.
     It applies to the endpoints of the application that declares it."""
 
     method: str | None
@@ -180,7 +180,7 @@ class Extraction:
     access_rules: list[AccessRule] = field(default_factory=list)
     # Facts a rule matched but couldn't complete: (origin, reason)
     dropped: list[tuple[Origin, str]] = field(default_factory=list)
-    # Config keys a fact needed that no config file in the repository sets (D101): set where
+    # Config keys a fact needed that no config file in the repository sets: set where
     # the app runs (environment, deploy files, a config server)
     unset_config: list[tuple[Origin, str]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)

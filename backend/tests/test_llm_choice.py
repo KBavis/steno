@@ -1,4 +1,4 @@
-"""The organization's LLM is what's used (D149), through LiteLLM, here against a stand-in gateway
+"""The organization's LLM is what's used, through LiteLLM, here against a stand-in gateway
 that speaks the OpenAI API. A provider that can't be reached never fails an ingestion."""
 
 import json

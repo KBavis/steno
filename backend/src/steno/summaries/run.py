@@ -129,7 +129,7 @@ def _one(
 
 
 def host_reader(session: Session) -> ReadFile:
-    """Read a README from the git host at the ingested commit (D17: never stored), for runs
+    """Read a README from the git host at the ingested commit (never stored), for runs
     outside a job, where there's no clone."""
     from sqlalchemy import select
 

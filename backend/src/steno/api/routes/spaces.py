@@ -1,4 +1,4 @@
-"""Admin-declared spaces (D27). Postgres is the source of truth; Neo4j gets a copy (D33)."""
+"""Admin-declared spaces. Postgres is the source of truth; Neo4j gets a copy."""
 
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select

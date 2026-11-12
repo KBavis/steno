@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The JVM helper for Java symbol resolution (D69, docs/how-it-works/ingestion/resolvers.md §5.2).
+ * The JVM helper for Java symbol resolution (docs/how-it-works/ingestion/resolvers.md §5.2).
  *
  * <pre>
  * steno-resolver --root REPO --files FILES.txt --out OUT.json [--jars JARS.txt]
@@ -22,7 +22,7 @@ import java.util.Map;
  * repository is resolved and written to OUT.json, which the Java resolver on the Python side
  * reads instead of asking one question at a time. With --batch-files, method bodies are resolved
  * that many files at a time against a declaration index of the whole repository, so memory stays
- * bounded on very large repositories (D127). With --parts, expressions and calls are left in
+ * bounded on very large repositories. With --parts, expressions and calls are left in
  * DIR as JSON Lines (exprs.jsonl, calls.jsonl) instead of in OUT.json, so the reader can index
  * them on disk rather than load them whole.
  */

@@ -22,7 +22,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Adds the members Lombok generates to the syntax tree (D72). JavaParser doesn't run annotation
+ * Adds the members Lombok generates to the syntax tree. JavaParser doesn't run annotation
  * processors, so without this `user.getEmail()` on an `@Data` class can't be resolved and the
  * chain it starts stops there.
  *

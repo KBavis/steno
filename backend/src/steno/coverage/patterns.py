@@ -1,4 +1,4 @@
-"""Coverage items become patterns across the organization (D121, D122, D123).
+"""Coverage items become patterns across the organization.
 
 Each run's coverage items are folded into `coverage_pattern` (one row per fingerprint: what's
 unexplained, named by what it is) and `coverage_occurrence` (one row per place it occurs, in
@@ -32,7 +32,7 @@ from steno.db.models import (
     PatternState,
 )
 
-# How much a pattern of each signal can change the map (D101, D122, D146): what can hide a
+# How much a pattern of each signal can change the map: what can hide a
 # connection between applications first, then the rest of the surface
 WEIGHT = {
     "silent_repository": 4.0,
@@ -55,7 +55,7 @@ WEIGHT = {
     "unparsed": 0.5,
     "version_untested": 0.5,
     "version_unknown": 0.2,
-    "unread_file": 0.5,  # low until something says it matters (D122)
+    "unread_file": 0.5,  # low until something says it matters
     "unread_config": 0.5,
 }
 # Signals about the application's own code, which no library owns
@@ -209,14 +209,14 @@ def score(
     evidence: list[str] | None = None,
 ) -> float:
     """Rank by how much one rule would explain: repositories first, then applications, then
-    occurrences, weighted by how much the signal can change the map (D122), and raised by
+    occurrences, weighted by how much the signal can change the map, and raised by
     each piece of evidence that it matters (the code refers to it)."""
     reach = 100 * repositories + 10 * applications + math.log1p(occurrences)
     return round(WEIGHT.get(signal, 1.0) * reach * (1 + 4 * len(evidence or [])), 2)
 
 
 def owner_of(it: Item) -> str | None:
-    """What a pattern belongs to, for clustering it into a framework (D123): the library a
+    """What a pattern belongs to, for clustering it into a framework: the library a
     call goes into, the package root of an annotation or type, or a config key's prefix.
     None for the application's own code."""
     if it.signal in OWN_CODE:
@@ -244,7 +244,7 @@ def package_root(symbol: str) -> str | None:
 
 def frameworks(patterns: list[CoveragePattern]) -> list[dict[str, Any]]:
     """Open patterns grouped by owner, ranked by their summed score: the units rule curation
-    investigates once each (D123). Patterns no library owns are listed alone."""
+    investigates once each. Patterns no library owns are listed alone."""
     groups: dict[str | None, list[CoveragePattern]] = defaultdict(list)
     for p in patterns:
         groups[p.owner].append(p)
@@ -260,7 +260,7 @@ def frameworks(patterns: list[CoveragePattern]) -> list[dict[str, Any]]:
     return out
 
 
-# What the rule author or a person may set (D147): ignored (harmless), expected (outside the
+# What the rule author or a person may set: ignored (harmless), expected (outside the
 # organization), proposed (a rule's pull request is open), or open again. Covered is Steno's
 TRIAGE = {PatternState.IGNORED, PatternState.EXPECTED, PatternState.PROPOSED, PatternState.OPEN}
 STATUS_OF = {
@@ -272,7 +272,7 @@ STATUS_OF = {
 def triage(
     session: Session, fingerprints: list[str], state: PatternState, note: str | None = None
 ) -> int:
-    """Set whole patterns' state (D122, D147), in bulk, with why: ignored, expected, proposed,
+    """Set whole patterns' state, in bulk, with why: ignored, expected, proposed,
     or open. The same items in every repository's latest coverage run follow, so the report
     and the patterns agree; later runs carry the decision over. A one-sided join has no items
     (it's read from the graph), so its pattern is created here. Returns how many changed."""
@@ -312,7 +312,7 @@ def refresh_proposed(
     session: Session, repository_id: int, state_of: Callable[[str], str] | None = None
 ) -> dict[str, int]:
     """Ask the git host what became of the pull requests behind this repository's `proposed`
-    patterns (D148). Declined: a person decided against the rule, so the pattern is ignored,
+    patterns. Declined: a person decided against the rule, so the pattern is ignored,
     with why, and stays out of the report. Merged: it's `covered`, and this run decides: if it
     still occurs here it reopens (`_recount`), so a partial rule leaves what it missed visible.
     Open or unknown: nothing changes. Run before this run's items are written, so the decision
@@ -359,7 +359,7 @@ def _pull_request_state(session: Session) -> Callable[[str], str]:
 
 
 def occurrences(session: Session, fingerprint: str, limit: int = 50) -> dict[str, Any]:
-    """Where a pattern occurs now, for the rule author (D147): each place with its repository,
+    """Where a pattern occurs now, for the rule author: each place with its repository,
     file, enclosing symbol, application, and the commit Steno ingested, spread across
     repositories; plus the samples (with lines) from each repository's latest coverage item."""
     from steno.api.links import source_url

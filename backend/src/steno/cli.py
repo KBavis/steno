@@ -15,7 +15,7 @@ job_app = typer.Typer(no_args_is_help=True, help="Ingestion jobs.")
 rules_app = typer.Typer(no_args_is_help=True, help="Rule packs.")
 coverage_app = typer.Typer(
     no_args_is_help=True,
-    help="The coverage report's patterns: the rule author's worklist (D146, D147).",
+    help="The coverage report's patterns: the rule author's worklist.",
 )
 app.add_typer(db_app, name="db")
 app.add_typer(rules_app, name="rules")
@@ -55,7 +55,7 @@ def worker(
     ),
 ) -> None:
     """Claim and run ingestion jobs from the Postgres queue. A job starts only when its memory
-    fits what this machine has left (D128); STENO_MAX_PARALLEL_JOBS caps jobs across machines."""
+    fits what this machine has left; STENO_MAX_PARALLEL_JOBS caps jobs across machines."""
     from steno.ingestion.resources import machine
     from steno.ingestion.worker import processes_for, run_forever, run_once, run_pool
 
@@ -255,7 +255,7 @@ def graph_summaries(
     ),
     model: str = typer.Option(None, help="The model (default: the organization's Settings)"),
 ) -> None:
-    """Write the generated summaries (D143) for applications, then their spaces, then the
+    """Write the generated summaries for applications, then their spaces, then the
     organization, from the graph as it is. Only those whose inputs changed are written."""
     import json
 
@@ -328,7 +328,7 @@ def job_recover() -> None:
 @job_app.command("nightly")
 def job_nightly() -> None:
     """Run the nightly check now: queue a full run for every repository whose default branch
-    moved since it was last ingested (D59). Workers also do this on schedule."""
+    moved since it was last ingested. Workers also do this on schedule."""
     from steno.db.session import session_scope
     from steno.ingestion import nightly
 
@@ -395,7 +395,7 @@ def rules_test(
 
 @rules_app.command("destinations")
 def rules_destinations() -> None:
-    """Where the rule author's rules go: the repository for each kind of rule (D129, D148)."""
+    """Where the rule author's rules go: the repository for each kind of rule."""
     import subprocess
     from pathlib import Path
 
@@ -492,7 +492,7 @@ def coverage_patterns(
     quiet: bool = typer.Option(False, "--quiet", help="Include unread files and rule health"),
     as_json: bool = typer.Option(False, "--json", help="Print the result as JSON"),
 ) -> None:
-    """Patterns in a state, as frameworks ranked by score: the report's order (D146)."""
+    """Patterns in a state, as frameworks ranked by score: the report's order."""
     import json
 
     from steno.api.routes.patterns import patterns
@@ -585,7 +585,7 @@ def coverage_mark(
     state: str = typer.Option(..., help="ignored, expected, proposed, or open"),
     note: str = typer.Option(..., help="Why: harmless because…, outside the organization…, a PR"),
 ) -> None:
-    """Set patterns' state, everywhere they occur and in later runs (D147)."""
+    """Set patterns' state, everywhere they occur and in later runs."""
     from steno.coverage.patterns import TRIAGE, triage
     from steno.db.models import PatternState
     from steno.db.session import session_scope
@@ -637,7 +637,7 @@ def resolver_check(
     path: str = typer.Argument(..., help="A local Java repository"),
     batch_files: int = typer.Option(200, help="Files per batch for the batched pass"),
 ) -> None:
-    """Resolve a Java repository in one pass and in batches and compare them (D127): the
+    """Resolve a Java repository in one pass and in batches and compare them: the
     batched path must give the same answers. Prints each pass's time and memory."""
     import json
     from pathlib import Path

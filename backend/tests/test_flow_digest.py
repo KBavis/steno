@@ -1,4 +1,4 @@
-"""Each flow's digest (D143): deterministic, bounded however large the flow is, and written on
+"""Each flow's digest: deterministic, bounded however large the flow is, and written on
 every flow by the build."""
 
 from test_graph_build import FLOW, _app, _plan
