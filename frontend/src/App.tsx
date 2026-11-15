@@ -1,4 +1,4 @@
-import { Building2, FolderGit2, Layers, Network, Plug, ScanSearch, Settings, type LucideIcon } from 'lucide-react'
+import { Building2, FolderGit2, Home, Layers, Network, Plug, ScanSearch, Settings, type LucideIcon } from 'lucide-react'
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { api, type Organization } from './api/client'
 import { HealthStatus } from './components/HealthStatus'
@@ -7,6 +7,7 @@ import { ErrorAlert, Logo } from './components/ui'
 import { ConnectorsPage } from './pages/ConnectorsPage'
 import { CoveragePage } from './pages/CoveragePage'
 import { IngestionPage } from './pages/IngestionPage'
+import { LandingPage } from './pages/LandingPage'
 import { OnboardingPage } from './pages/OnboardingPage'
 import { OrganizationPage } from './pages/OrganizationPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -16,6 +17,7 @@ import { SpacesPage } from './pages/SpacesPage'
 const VisualizePage = lazy(() => import('./pages/VisualizePage').then((m) => ({ default: m.VisualizePage })))
 
 const TABS: Record<string, { label: string; icon: LucideIcon }> = {
+  home: { label: 'Home', icon: Home },
   ingestion: { label: 'Ingestion', icon: FolderGit2 },
   visualize: { label: 'Visualize', icon: Network },
   coverage: { label: 'Coverage', icon: ScanSearch },
@@ -26,8 +28,10 @@ const TABS: Record<string, { label: string; icon: LucideIcon }> = {
 
 // The tab lives in the URL hash (#spaces), so reloads and links keep it.
 // Visualize keeps its own location after a slash (#visualize/flow/<id>).
+// No hash: the landing page, so the UI opens on what Steno is.
 function tabFromHash(): string {
   const hash = window.location.hash.slice(1).split('/')[0]
+  if (!hash) return 'home'
   return hash in TABS || hash === 'settings' ? hash : 'ingestion'
 }
 
@@ -54,6 +58,17 @@ export default function App() {
     window.location.hash = next
   }
 
+  // The landing page takes the whole window, like the graph, and opens before onboarding too.
+  // It needs nothing from the API, so it shows even when the backend isn't running
+  if (tab === 'home') {
+    const ready = Boolean(org?.onboarded_at)
+    return (
+      <LandingPage
+        enterLabel={ready ? 'Open workspace' : 'Get started'}
+        onEnter={() => navigate('ingestion')}
+      />
+    )
+  }
   if (error) {
     return (
       <div className="onboarding">
